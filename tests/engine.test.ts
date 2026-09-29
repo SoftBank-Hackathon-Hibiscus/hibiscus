@@ -180,11 +180,13 @@ describe("targets 좁히기 / failover 는 false 가 이긴다", () => {
     expect(plan.rules.find((r) => r.id === "B")?.reason).toContain("허용된 배포 대상이 없음");
   });
 
-  it("교집합은 앞 목록의 순서를 유지한다", () => {
+  it("교집합은 default 목록의 순서를 유지한다", () => {
     const custom = PolicySchema.parse({
       ...policy,
+      known_targets: ["local", "cloud_run", "edge"],
+      default: { ...policy.default, targets: ["cloud_run", "local", "edge"] },
       rules: [
-        { id: "A", if: { path: "test.passed", eq: true }, then: { targets: ["cloud_run", "local", "edge"] }, reason: "A" },
+        { id: "A", if: { path: "test.passed", eq: true }, then: { targets: ["local", "edge", "cloud_run"] }, reason: "A" },
         { id: "B", if: { path: "test.passed", eq: true }, then: { targets: ["local", "cloud_run"] }, reason: "B" },
       ],
     });
@@ -192,6 +194,60 @@ describe("targets 좁히기 / failover 는 false 가 이긴다", () => {
     const plan = decide(test, pii, custom);
     expect(plan.targets).toEqual(["cloud_run", "local"]);
     expect(plan.failover_allowed).toBe(true);
+  });
+});
+
+describe("배포 대상 검증 (known_targets) / 좁히기 시작점은 default", () => {
+  it("known_targets 에 없는 대상(오타 cloudrun)을 규칙에 적으면 정책 로드 단계에서 에러", () => {
+    const result = PolicySchema.safeParse({
+      ...policy,
+      rules: [
+        ...policy.rules,
+        { id: "R9", if: { path: "test.passed", eq: true }, then: { targets: ["local", "cloudrun"] }, reason: "오타" },
+      ],
+    });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    const issue = result.error.issues.find((i) => i.message.includes("cloudrun"));
+    expect(issue?.message).toBe("알 수 없는 배포 대상: cloudrun (규칙 R9)");
+    expect(issue?.path).toEqual(["rules", policy.rules.length, "then", "targets", 1]);
+  });
+
+  it("default.targets 에 known_targets 에 없는 대상이 있어도 에러", () => {
+    const result = PolicySchema.safeParse({ ...policy, default: { ...policy.default, targets: ["local", "onprem"] } });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((i) => i.message)).toContain("알 수 없는 배포 대상: onprem (default)");
+  });
+
+  it("규칙이 [local, aws] 를 적어도 default 에 aws 가 없으면 결과는 [local]", () => {
+    const custom = PolicySchema.parse({
+      ...policy,
+      known_targets: ["local", "cloud_run", "aws"],
+      rules: [{ id: "A1", if: { path: "test.passed", eq: true }, then: { targets: ["local", "aws"] }, reason: "aws 도" }],
+    });
+    const { test, pii } = loadFixture("01-allow");
+    const plan = decide(test, pii, custom);
+
+    expect(plan.decision).toBe("allow");
+    expect(plan.targets).toEqual(["local"]);
+    expect(plan.failover_allowed).toBe(false);
+    expect(matchedIds(plan)).toEqual(["A1"]);
+  });
+
+  it("default 가 [local, cloud_run] 이고 규칙이 [cloud_run] 만 적으면 [cloud_run], failover=false", () => {
+    const custom = PolicySchema.parse({
+      ...policy,
+      rules: [{ id: "C1", if: { path: "test.passed", eq: true }, then: { targets: ["cloud_run"] }, reason: "클라우드만" }],
+    });
+    const { test, pii } = loadFixture("01-allow");
+    const plan = decide(test, pii, custom);
+
+    expect(plan.decision).toBe("allow");
+    expect(plan.targets).toEqual(["cloud_run"]);
+    expect(plan.failover_allowed).toBe(false);
+    // 규칙이 targets 를 정했으므로 default 는 기록되지 않는다
+    expect(matchedIds(plan)).toEqual(["C1"]);
   });
 });
 

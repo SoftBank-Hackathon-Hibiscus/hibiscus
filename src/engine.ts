@@ -196,8 +196,9 @@ export function intersect(current: readonly string[], next: readonly string[]): 
 /**
  * 규칙을 위에서부터 차례로 검사한다.
  * - decision 은 강한 쪽으로만 올라간다 (allow < needs_approval < block).
- * - targets 는 좁히기만 된다: 규칙이 targets 를 정하면 지금까지의 targets 와 교집합만 남긴다.
- *   한 번 제외된 대상은 뒤 규칙이 다시 넣을 수 없다. 교집합이 비면 block.
+ * - targets 는 policy.default.targets 에서 시작해 좁히기만 된다: 규칙이 targets 를 정하면
+ *   지금까지의 targets 와 교집합만 남긴다. 그래서 default 에 없는 대상은 어떤 규칙으로도
+ *   추가할 수 없고, 한 번 제외된 대상은 뒤 규칙이 다시 넣을 수 없다. 교집합이 비면 block.
  * - failover_allowed 는 false 가 이긴다: 한 번 false 면 뒤에서 true 로 못 돌린다.
  *   최종 targets 에 local 과 cloud_run 이 모두 없으면 항상 false.
  * - block 이 나오면 그 즉시 멈춘다. 이후 규칙은 plan.rules 에 실리지 않는다.
@@ -207,7 +208,8 @@ export function decide(test: TestResult, pii: PiiReport, policy: Policy): Plan {
   const root: Context = { test, pii };
 
   let decision: Decision = "allow";
-  let targets: string[] | undefined;
+  let targets: string[] = [...policy.default.targets];
+  let narrowedByRule = false;
   let failoverAllowed: boolean | undefined;
   const rules: RuleResult[] = [];
 
@@ -223,12 +225,13 @@ export function decide(test: TestResult, pii: PiiReport, policy: Policy): Plan {
     if (rule.then.decision !== undefined) decision = escalate(decision, rule.then.decision);
 
     if (rule.then.targets !== undefined) {
-      const narrowed = targets === undefined ? [...rule.then.targets] : intersect(targets, rule.then.targets);
+      const narrowed = intersect(targets, rule.then.targets);
       if (narrowed.length === 0) {
         decision = "block";
-        reason += ` → 허용된 배포 대상이 없음 (지금까지 [${(targets ?? []).join(", ")}] ∩ 규칙 [${rule.then.targets.join(", ")}] = [])`;
+        reason += ` → 허용된 배포 대상이 없음 (지금까지 [${targets.join(", ")}] ∩ 규칙 [${rule.then.targets.join(", ")}] = [])`;
       }
       targets = narrowed;
+      narrowedByRule = true;
     }
 
     if (rule.then.failover_allowed === false) failoverAllowed = false;
@@ -242,8 +245,8 @@ export function decide(test: TestResult, pii: PiiReport, policy: Policy): Plan {
   if (decision === "block") {
     // 차단이면 배포 위치는 없다.
     targets = [];
-  } else if (targets === undefined) {
-    targets = [...policy.default.targets];
+  } else if (!narrowedByRule) {
+    // 어떤 규칙도 targets 를 정하지 않았다: default 가 그대로 쓰였음을 기록한다.
     rules.push({ id: "default", result: "matched", reason: renderTemplate(policy.default.reason, root, root) });
   }
 

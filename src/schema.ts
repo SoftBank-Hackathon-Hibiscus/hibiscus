@@ -24,12 +24,17 @@ export type TestResult = z.infer<typeof TestResultSchema>;
 // ---------------------------------------------------------------------------
 // 입력 2: pii.json (개인정보 후보. 지금은 가짜 파일, 나중에 AI 판정 결과)
 // ---------------------------------------------------------------------------
+/** 후보를 누가 판정했는지. 정책 엔진은 이 값을 쓰지 않는다 (감사·디버깅용). */
+export const PiiSourceSchema = z.enum(["heuristic", "llm", "replay"]);
+export type PiiSource = z.infer<typeof PiiSourceSchema>;
+
 export const PiiCandidateSchema = z.object({
   table: z.string().min(1),
   column: z.string().min(1),
   kind: z.string().min(1),
   evidence: z.string().min(1),
   confident: z.boolean(),
+  source: PiiSourceSchema.optional(),
 });
 export type PiiCandidate = z.infer<typeof PiiCandidateSchema>;
 
@@ -108,6 +113,8 @@ export type Rule = z.infer<typeof RuleSchema>;
 export const PolicySchema = z
   .strictObject({
     version: z.literal(1),
+    /** 이 정책이 아는 배포 대상 전체. 규칙과 default 의 targets 는 모두 여기 있어야 한다. */
+    known_targets: z.array(z.string().min(1)).min(1),
     rules: z.array(RuleSchema),
     default: z.strictObject({
       targets: z.array(z.string().min(1)).min(1),
@@ -116,6 +123,15 @@ export const PolicySchema = z
     }),
   })
   .superRefine((policy, ctx) => {
+    const known = new Set(policy.known_targets);
+    const checkTargets = (targets: readonly string[] | undefined, path: (string | number)[], where: string) => {
+      targets?.forEach((t, j) => {
+        if (!known.has(t)) {
+          ctx.addIssue({ code: "custom", path: [...path, j], message: `알 수 없는 배포 대상: ${t} (${where})` });
+        }
+      });
+    };
+
     const seen = new Set<string>();
     policy.rules.forEach((rule, i) => {
       if (rule.id === "default") {
@@ -125,7 +141,9 @@ export const PolicySchema = z
         ctx.addIssue({ code: "custom", path: ["rules", i, "id"], message: `규칙 id 중복: ${rule.id}` });
       }
       seen.add(rule.id);
+      checkTargets(rule.then.targets, ["rules", i, "then", "targets"], `규칙 ${rule.id}`);
     });
+    checkTargets(policy.default.targets, ["default", "targets"], "default");
   });
 export type Policy = z.infer<typeof PolicySchema>;
 

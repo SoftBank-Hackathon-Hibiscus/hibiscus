@@ -1,0 +1,13 @@
+{
+  "run_id": "r-001",
+  "pii": [
+    {
+      "table": "users",
+      "column": "contact",
+      "kind": "phone",
+      "evidence": "public/signup.html:6, src/routes/signup.js:6",
+      "confident": true,
+      "source": "heuristic"
+    }
+  ]
+}
