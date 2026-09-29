@@ -3,8 +3,11 @@
  *
  * SQL 마이그레이션 파일에서 이전 버전과 호환되지 않는 변경을 찾는다.
  *   DROP TABLE, DROP COLUMN, RENAME TABLE/COLUMN, ALTER COLUMN ... TYPE,
- *   기존 테이블에 DEFAULT 없는 NOT NULL 칼럼 추가, TRUNCATE
- * 주석(--, /* *​/)과 문자열('...') 안의 키워드는 무시한다.
+ *   기존 테이블에 DEFAULT 없는 NOT NULL 칼럼 추가, 기존 칼럼에 NOT NULL 걸기(SET NOT NULL), TRUNCATE
+ * 주석(--, /* *​/)과 문자열('...') 안의 키워드는 무시한다. 그래서 문자열 안의 동적 SQL(EXECUTE '...') 은 보지 못한다.
+ *
+ * SET NOT NULL 은 데이터를 지우지 않지만, 이전 버전 앱이 NULL 을 쓰면 실패하므로 롤백이 깨진다 → 파괴적.
+ * DROP NOT NULL 은 제약을 풀 뿐이라 안전하다.
  *
  * 이 파일은 파일을 읽지 않는다 (loader.ts 가 읽는다).
  */
@@ -92,12 +95,25 @@ export function detectKinds(statementText: string): MigrationKind[] {
 
   if (isAlterTable) {
     if (new RegExp(`\\bRENAME (?:COLUMN )?(?!TO\\b)${IDENT} TO\\b`, "i").test(t)) kinds.push("rename_column");
-    if (
-      new RegExp(`\\bALTER (?:COLUMN )?${IDENT} (?:SET DATA )?TYPE\\b`, "i").test(t) ||
-      new RegExp(`\\b(?:MODIFY|CHANGE) (?:COLUMN )?${IDENT}`, "i").test(t)
-    ) {
-      kinds.push("alter_column_type");
+
+    // PostgreSQL: ALTER [COLUMN] x [SET DATA] TYPE ...
+    if (new RegExp(`\\bALTER (?:COLUMN )?${IDENT} (?:SET DATA )?TYPE\\b`, "i").test(t)) kinds.push("alter_column_type");
+    // PostgreSQL: ALTER [COLUMN] x SET NOT NULL  (DROP NOT NULL 은 안전하므로 잡지 않는다)
+    if (new RegExp(`\\bALTER (?:COLUMN )?${IDENT} SET NOT NULL\\b`, "i").test(t)) kinds.push("set_not_null");
+
+    // MySQL: MODIFY / CHANGE 는 칼럼 정의를 통째로 다시 쓴다.
+    // 절에 NOT NULL 이 있으면 "NOT NULL 걸기" 로, 없으면 "타입 변경" 으로 한 번만 잡는다 (겹치지 않게).
+    const modifyRe = new RegExp(`\\b(?:MODIFY|CHANGE) (?:COLUMN )?${IDENT}`, "gi");
+    let modify: RegExpExecArray | null;
+    let modifySetsNotNull = false;
+    let modifyChangesType = false;
+    while ((modify = modifyRe.exec(t)) !== null) {
+      const clause = takeClause(t, modify.index + modify[0].length);
+      if (/\bNOT NULL\b/i.test(clause)) modifySetsNotNull = true;
+      else modifyChangesType = true;
     }
+    if (modifyChangesType && !kinds.includes("alter_column_type")) kinds.push("alter_column_type");
+    if (modifySetsNotNull && !kinds.includes("set_not_null")) kinds.push("set_not_null");
     if (new RegExp(`\\bDROP (?:COLUMN )?(?:IF EXISTS )?(?!CONSTRAINT\\b|INDEX\\b|DEFAULT\\b|NOT\\b|PRIMARY\\b|FOREIGN\\b|KEY\\b|CHECK\\b|PARTITION\\b)${IDENT}`, "i").test(t)) {
       kinds.push("drop_column");
     }

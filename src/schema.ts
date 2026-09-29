@@ -24,6 +24,7 @@ export const MIGRATION_KINDS = [
   "rename_column",
   "alter_column_type",
   "add_not_null_without_default",
+  "set_not_null",
   "truncate",
 ] as const;
 export const MigrationKindSchema = z.enum(MIGRATION_KINDS);

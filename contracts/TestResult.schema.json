@@ -97,6 +97,7 @@
                       "rename_column",
                       "alter_column_type",
                       "add_not_null_without_default",
+                      "set_not_null",
                       "truncate"
                     ],
                     "description": "파괴적 변경의 종류"

@@ -110,7 +110,7 @@ default:
 | R4 | 개인정보 후보 있음 | targets [local], failover 금지 | |
 | R5 | `test.facts.db = sqlite` | targets [local] | managed_db: SQLite를 PostgreSQL로 전환 (allowed_targets 안의 환경에서) |
 | R6 | `test.facts.writes_local_file`에 `/tmp/`, `*.log`, DB 파일(`*.db`, `*.sqlite`, `*.sqlite3`, 대소문자 무시) 제외 원소 있음 | targets [local] | object_storage: 로컬 폴더에 쓰는 파일을 오브젝트 스토리지로 이전 (allowed_targets 안의 환경에서) |
-| R7 | `test.facts.migration.destructive = true` | block | two_phase_migration: 파괴적 변경을 확장→전환→정리 2단계 배포로 나누기 (먼저 새 구조를 추가하고, 옛 구조는 다음 배포에서 제거) |
+| R7 | `test.facts.migration.destructive = true` (DROP/RENAME/타입 변경/DEFAULT 없는 NOT NULL 추가/SET NOT NULL/TRUNCATE) | block | two_phase_migration: 파괴적 변경을 확장→전환→정리 2단계 배포로 나누기 (먼저 새 구조를 추가하고, 옛 구조는 다음 배포에서 제거) |
 | default | | targets [local, cloud_run], failover 허용 | |
 
 R5의 이유: 클라우드에서는 인스턴스가 교체되면 SQLite 파일이 사라진다. R6도 같은 이유로, 로컬 폴더에 쓰는 파일은 인스턴스 교체나 스케일아웃 때 사라지거나 갈라진다. 무시할 경로는 규칙의 `where`에 `@`(원소 자체)와 `starts_with` / `matches`로 적는다. DB 파일은 R5가 담당하므로 R6는 `.db`, `.sqlite`, `.sqlite3`을 무시해 해결 조건이 겹치지 않는다 (SQLite 앱이 `/app/data.db`만 쓰면 managed_db 하나만 나온다). cloud_run이 빠지므로 failover도 자동으로 false가 된다.
@@ -181,7 +181,9 @@ npx tsx src/migration/cli.ts --src samples/migration-prisma --since 202401010000
 | `--since` | 이 마이그레이션 이름보다 뒤의 파일만 검사 (이미 적용된 것은 건너뜀). 없으면 전부 |
 | `--out` | 출력할 `migration.json` (필수) |
 
-**탐지하는 파괴적 변경**: `DROP TABLE`, `DROP COLUMN`, `RENAME TABLE`/`RENAME COLUMN`, `ALTER COLUMN ... TYPE`(MySQL `MODIFY`/`CHANGE` 포함), 기존 테이블에 DEFAULT 없는 `NOT NULL` 칼럼 추가, `TRUNCATE`. `--` 주석, `/* */` 주석, `'...'` 문자열 안의 키워드는 무시한다. `ADD CONSTRAINT`, `DROP DEFAULT`, `NOT NULL DEFAULT ...`, `CREATE TABLE` 안의 `NOT NULL`은 안전으로 본다.
+**탐지하는 파괴적 변경**: `DROP TABLE`, `DROP COLUMN`, `RENAME TABLE`/`RENAME COLUMN`, `ALTER COLUMN ... TYPE`(MySQL `MODIFY`/`CHANGE` 포함), 기존 테이블에 DEFAULT 없는 `NOT NULL` 칼럼 추가, 기존 칼럼에 `NOT NULL` 걸기(`ALTER COLUMN ... SET NOT NULL`, MySQL `MODIFY`/`CHANGE ... NOT NULL`), `TRUNCATE`. `--` 주석, `/* */` 주석, `'...'` 문자열 안의 키워드는 무시한다. `ADD CONSTRAINT`, `DROP DEFAULT`, `DROP NOT NULL`, `NOT NULL DEFAULT ...`, `CREATE TABLE` 안의 `NOT NULL`은 안전으로 본다.
+
+`SET NOT NULL`을 파괴적으로 보는 이유: 데이터는 지우지 않지만 이전 버전 앱이 그 칼럼에 NULL을 쓰면 실패하므로 롤백이 깨진다. MySQL의 `MODIFY`/`CHANGE`는 칼럼 정의를 통째로 다시 쓰므로, 절에 `NOT NULL`이 있으면 `set_not_null`로만, 없으면 `alter_column_type`으로만 잡아 한 절이 두 번 나오지 않게 한다.
 
 **출력** (= `test_result.facts.migration` 형식)
 
@@ -195,7 +197,13 @@ npx tsx src/migration/cli.ts --src samples/migration-prisma --since 202401010000
 }
 ```
 
-`kind`는 `drop_table` | `drop_column` | `rename_table` | `rename_column` | `alter_column_type` | `add_not_null_without_default` | `truncate`. `backward_compatible`는 파괴적 변경이 없을 때 `true`다.
+`kind`는 `drop_table` | `drop_column` | `rename_table` | `rename_column` | `alter_column_type` | `add_not_null_without_default` | `set_not_null` | `truncate`. `backward_compatible`는 파괴적 변경이 없을 때 `true`다.
+
+**알려진 한계**
+- 문자열 안의 동적 SQL은 탐지하지 않는다. 예: `EXECUTE 'ALTER TABLE users DROP COLUMN phone'`, `DO $$ ... $$` 블록 안의 문장. 문자열 안은 주석과 같이 통째로 무시하므로, 마이그레이션 도구가 문자열로 SQL을 조립하면 이 판정을 지나친다.
+- `.sql` 파일만 본다. ORM 코드로 쓴 마이그레이션(예: Knex/TypeORM의 JS 파일, Django의 Python 파일)은 보지 않는다.
+- 정규식 기반이라 DB별 방언을 완전히 해석하지 않는다. 표준적인 `ALTER TABLE` 형태에서 벗어난 문장(예: 프로시저 안의 DDL)은 놓칠 수 있다.
+- MySQL `MODIFY`/`CHANGE`는 타입이 실제로 바뀌었는지 알 수 없어, `NOT NULL`이 없는 절은 모두 `alter_column_type`으로 본다 (거짓 양성 가능).
 
 **facts 연결**: 보안 단계 실행기는 `test_result.facts.migration`이 없을 때만 이 판정을 돌려 채우고, 있으면 테스트 파트 값을 존중한다. `destructive: true`면 R7이 차단하고 해결 조건 `two_phase_migration`을 낸다. 이유는 옛 버전과 새 버전이 같은 DB를 동시에 쓰는 무중단 배포와 롤백이 깨지기 때문이다.
 

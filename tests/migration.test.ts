@@ -65,9 +65,41 @@ describe("analyzer: 파괴적 변경 탐지", () => {
     expect(detectKinds("ALTER TABLE users ALTER COLUMN age TYPE bigint")).toEqual(["alter_column_type"]);
     expect(detectKinds("ALTER TABLE users ALTER age SET DATA TYPE bigint")).toEqual(["alter_column_type"]);
     expect(detectKinds("ALTER TABLE users MODIFY COLUMN age BIGINT")).toEqual(["alter_column_type"]);
+    expect(detectKinds("ALTER TABLE users CHANGE COLUMN age age_years BIGINT")).toEqual(["alter_column_type"]);
     expect(detectKinds("ALTER TABLE users ADD COLUMN email TEXT NOT NULL")).toEqual(["add_not_null_without_default"]);
     expect(detectKinds("ALTER TABLE users ADD email TEXT NOT NULL")).toEqual(["add_not_null_without_default"]);
     expect(detectKinds('ALTER TABLE "users" ADD COLUMN "email" TEXT NOT NULL')).toEqual(["add_not_null_without_default"]);
+  });
+
+  it("기존 칼럼에 NOT NULL 걸기 (set_not_null): PostgreSQL SET NOT NULL, MySQL MODIFY/CHANGE ... NOT NULL", () => {
+    expect(detectKinds("ALTER TABLE users ALTER COLUMN phone SET NOT NULL")).toEqual(["set_not_null"]);
+    expect(detectKinds("ALTER TABLE users ALTER phone SET NOT NULL")).toEqual(["set_not_null"]);
+    expect(detectKinds('ALTER TABLE "users" ALTER COLUMN "phone" SET NOT NULL')).toEqual(["set_not_null"]);
+    // MySQL 은 정의를 통째로 다시 쓰므로 NOT NULL 이 있으면 set_not_null 로만 잡는다 (alter_column_type 과 겹치지 않음)
+    expect(detectKinds("ALTER TABLE users MODIFY COLUMN phone VARCHAR(20) NOT NULL")).toEqual(["set_not_null"]);
+    expect(detectKinds("ALTER TABLE users CHANGE COLUMN phone phone VARCHAR(20) NOT NULL")).toEqual(["set_not_null"]);
+    // 절이 여럿이면 각각 한 번씩
+    expect(detectKinds("ALTER TABLE users MODIFY COLUMN phone VARCHAR(20) NOT NULL, MODIFY COLUMN age BIGINT")).toEqual(["alter_column_type", "set_not_null"]);
+    // 타입 변경과 SET NOT NULL 을 같이 하면 둘 다
+    expect(detectKinds("ALTER TABLE users ALTER COLUMN age TYPE bigint, ALTER COLUMN age SET NOT NULL")).toEqual(["alter_column_type", "set_not_null"]);
+  });
+
+  it("DROP NOT NULL 은 안전하다", () => {
+    expect(detectKinds("ALTER TABLE users ALTER COLUMN phone DROP NOT NULL")).toEqual([]);
+    expect(detectKinds("ALTER TABLE users ALTER phone DROP NOT NULL")).toEqual([]);
+    expect(detectKinds("ALTER TABLE users MODIFY COLUMN phone VARCHAR(20) NULL")).toEqual(["alter_column_type"]);
+    const report = analyzeMigrations([file("ALTER TABLE users ALTER COLUMN phone DROP NOT NULL;")]);
+    expect(report).toEqual({ destructive: false, backward_compatible: true, findings: [] });
+  });
+
+  it("SET NOT NULL 은 파괴적으로 취급한다 (이전 버전이 NULL 을 쓰면 실패 → 롤백이 깨짐)", () => {
+    const report = analyzeMigrations([file("ALTER TABLE users ALTER COLUMN phone SET NOT NULL;", "migrations/0004_phone_required.sql")]);
+    expect(report).toEqual({
+      destructive: true,
+      backward_compatible: false,
+      findings: [{ kind: "set_not_null", statement: "ALTER TABLE users ALTER COLUMN phone SET NOT NULL", evidence: "migrations/0004_phone_required.sql:1" }],
+    });
+    expect(() => MigrationReportSchema.parse(report)).not.toThrow();
   });
 
   it("한 문장에 여러 변경이 있으면 모두 잡는다", () => {
@@ -85,7 +117,7 @@ describe("analyzer: 파괴적 변경 탐지", () => {
     expect(detectKinds("ALTER TABLE users DROP INDEX idx_name")).toEqual([]);
     expect(detectKinds("ALTER TABLE users ALTER COLUMN name DROP DEFAULT")).toEqual([]);
     expect(detectKinds("ALTER TABLE users ALTER COLUMN name DROP NOT NULL")).toEqual([]);
-    expect(detectKinds("ALTER TABLE users ALTER COLUMN name SET NOT NULL")).toEqual([]);
+    expect(detectKinds("ALTER TABLE users ALTER COLUMN name SET DEFAULT 'x'")).toEqual([]);
     expect(detectKinds("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL)")).toEqual([]);
     expect(detectKinds("CREATE INDEX idx ON users (name)")).toEqual([]);
     expect(detectKinds("DROP INDEX idx_name")).toEqual([]);
@@ -208,6 +240,16 @@ describe("R7: 파괴적 마이그레이션 → block", () => {
         "파괴적 마이그레이션 add_not_null_without_default: ALTER TABLE users ADD COLUMN email TEXT NOT NULL (migrations/0003_add_email_not_null.sql:2)",
       ].join("; "),
     );
+  });
+
+  it("R7 reason 에 set_not_null 이 표시된다", () => {
+    const report = analyzeMigrations([file("ALTER TABLE users ALTER COLUMN phone SET NOT NULL;", "migrations/0004_phone_required.sql")]);
+    const plan = decide({ ...baseTest, facts: { db: "postgres", migration: report } }, pii, policy);
+    expect(plan.decision).toBe("block");
+    expect(plan.rules.find((r) => r.id === "R7")?.reason).toBe(
+      "파괴적 마이그레이션 set_not_null: ALTER TABLE users ALTER COLUMN phone SET NOT NULL (migrations/0004_phone_required.sql:1)",
+    );
+    expect(plan.requires?.map((r) => r.id)).toEqual(["two_phase_migration"]);
   });
 
   it("destructive = false 이거나 migration 이 없으면 R7 은 걸리지 않는다", () => {

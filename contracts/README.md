@@ -127,7 +127,7 @@ flowchart LR
 | `facts.migration.destructive` | boolean | 필수 | 파괴적 변경이 하나라도 있는지. R7 이 읽는다 |
 | `facts.migration.backward_compatible` | boolean | 필수 | 이전 버전과 호환되는지 = 파괴적 변경이 없을 때 true |
 | `facts.migration.findings` | object[] | 필수 | 파괴적 변경 목록. 없으면 빈 배열 |
-| `facts.migration.findings[].kind` | "drop_table" \| "drop_column" \| "rename_table" \| "rename_column" \| "alter_column_type" \| "add_not_null_without_default" \| "truncate" | 필수 | 파괴적 변경의 종류 |
+| `facts.migration.findings[].kind` | "drop_table" \| "drop_column" \| "rename_table" \| "rename_column" \| "alter_column_type" \| "add_not_null_without_default" \| "set_not_null" \| "truncate" | 필수 | 파괴적 변경의 종류 |
 | `facts.migration.findings[].statement` | string | 필수 | 해당 SQL 문장 (한 줄로 줄임) |
 | `facts.migration.findings[].evidence` | string | 필수 | 위치 '파일:줄' |
 | `facts.*` | any | 선택 | 그 밖의 키는 자유. 그대로 보존되지만 정책은 읽지 않는다 |
@@ -261,7 +261,7 @@ flowchart LR
       "result": "not_matched"
     }
   ],
-  "plan_hash": "89eec3b89006ff6e1797a29f2f08708fb80a0c0ff8b29884b19b69269d7e3e2d"
+  "plan_hash": "98b0e264583b3562fd8a1d67256cccf70a55674faa19a1c16965265e87409d51"
 }
 ```
 
@@ -441,6 +441,6 @@ flowchart LR
   "rule_ids": [
     "R4"
   ],
-  "plan_hash": "89eec3b89006ff6e1797a29f2f08708fb80a0c0ff8b29884b19b69269d7e3e2d"
+  "plan_hash": "98b0e264583b3562fd8a1d67256cccf70a55674faa19a1c16965265e87409d51"
 }
 ```

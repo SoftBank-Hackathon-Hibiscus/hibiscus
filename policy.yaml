@@ -115,7 +115,7 @@ rules:
 
   - id: R7
     description: >-
-      파괴적 DB 마이그레이션(DROP/RENAME/타입 변경/DEFAULT 없는 NOT NULL 추가/TRUNCATE)은
+      파괴적 DB 마이그레이션(DROP/RENAME/타입 변경/DEFAULT 없는 NOT NULL 추가/기존 칼럼에 NOT NULL 걸기/TRUNCATE)은
       옛 버전과 새 버전이 같은 DB 를 동시에 쓰는 무중단 배포와 롤백을 깨뜨린다.
       facts.migration 은 테스트 파트가 주거나, 없으면 실행기(src/stage.ts)가 마이그레이션 파일에서 판정한다
     if:
