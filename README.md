@@ -166,6 +166,78 @@ R5의 이유: 클라우드에서는 인스턴스가 교체되면 SQLite 파일�
 
 `kind`로 배포 결정과 롤백 결정을 구분한다. `rule_ids`는 걸린 규칙만. 시간 값은 CLI에서만 붙이고 엔진(`decide`, `decideRollback`)은 시간을 쓰지 않는다.
 
+## 결정 설명 (`src/explainer.ts`, `src/explain.ts`)
+
+결정서(plan.json, rollback_plan.json)를 사람이 읽는 Markdown 문장으로 바꾼다. 순수 함수 `explainPlan(plan, { lang })`과 `explainRollbackPlan(rollbackPlan, { lang })`이며 같은 입력이면 같은 출력이다. 엔진 결과는 바꾸지 않는다.
+
+```bash
+npx tsx src/explain.ts --plan plan.json
+npx tsx src/explain.ts --plan rollback_plan.json --rollback --lang ja --out explain.md
+npx tsx src/stage.ts --src samples/signup-contact --test fixtures/01-allow/test_result.json --policy policy.yaml --out-dir out/r-001 --explain
+```
+
+| 옵션 | 설명 |
+|---|---|
+| `--plan` | 설명할 결정서 (필수) |
+| `--rollback` | 입력이 rollback_plan.json임을 표시 |
+| `--lang` | `ko`(기본) / `ja` |
+| `--out` | 파일로 저장. 없으면 stdout |
+
+보안 단계 실행기에 `--explain`을 주면 out-dir에 `explain.ko.md`와 `explain.ja.md`를 함께 쓴다.
+
+구성은 결론 한 줄(허용·승인 필요·차단과 배포 위치), failover를 쉬운 말로, 이유(걸린 규칙의 reason, 차단 뒤에 걸린 규칙은 따로), 해결 조건(무엇을, 어디에서), 결정 지문(plan_hash 앞 12자)과 이미지 digest 앞 12자 순이다. 규칙 id는 괄호로만 보조 표시한다. 대상 이름은 `local` → 온프레(사내) / オンプレ(社内), `cloud_run` → Cloud Run이다. 규칙의 reason 문구 자체는 policy.yaml에 적힌 언어로 나온다.
+
+**예시 (ko)** — fixtures/02-block-test-failed
+
+```markdown
+# 배포 결정: todo (실행 r-002)
+
+**배포 차단.** 이 이미지는 배포하지 않습니다. 아래 해결 조건을 충족한 뒤 다시 테스트해야 합니다.
+
+배포하지 않으므로 장애 시 전환도 없습니다.
+
+## 이유
+
+- 테스트 실패 (17/20 일치) (규칙 R1)
+
+### 차단이 정해진 뒤에 걸린 규칙
+
+결정은 바꾸지 않았고, 배포 위치와 해결 조건에만 반영됐습니다.
+
+- SQLite 사용 (sqlite): 관리형 DB로 전환하기 전까지 클라우드 배포 제외 (규칙 R5)
+
+## 해결 조건
+
+- **재생 불일치 요청을 고친 뒤 다시 테스트** — 충족 위치: 온프레(사내) 안에서만 (규칙 R1, `fix_tests`)
+- **SQLite를 PostgreSQL로 전환 (allowed_targets 안의 환경에서)** — 충족 위치: 온프레(사내) 안에서만 (규칙 R5, `managed_db`)
+
+---
+
+결정 지문 `22f8da84d1c3` · 이미지 `sha256:b2c3d4e5f607`
+```
+
+**예시 (ja)** — fixtures/03-pii-confident
+
+```markdown
+# デプロイ判定: todo (実行 r-003)
+
+**デプロイ許可。** このイメージを オンプレ(社内) にデプロイします。
+
+オンプレが停止しても Cloud Run には切り替えません。Cloud Run にはデプロイしないためです。
+
+## 理由
+
+- 개인정보(contact, phone) 발견: src/routes/signup.js:24 (ルール R4)
+
+## 解決条件
+
+- 解決すべきことはありません。
+
+---
+
+判定フィンガープリント `98b0e264583b` · イメージ `sha256:c3d4e5f60718`
+```
+
 ## 파괴적 DB 마이그레이션 판정 (`src/migration/`)
 
 개인정보 판정처럼 코드에서 사실을 뽑는 모듈이다. 앱 폴더의 `migrations/**/*.sql`과 `prisma/migrations/*/migration.sql`에서 이전 버전과 호환되지 않는 변경을 찾는다. 결정적이고 AI를 쓰지 않는다.
@@ -227,6 +299,7 @@ npx tsx src/stage.ts --src samples/signup-contact --test fixtures/01-allow/test_
 | `--recording` | replay용 녹화 파일 |
 | `--since` | 마이그레이션 판정에서 이 이름보다 뒤의 파일만 검사 |
 | `--log` | 결정 기록 파일. 기본 `./decisions.jsonl` |
+| `--explain` | out-dir에 사람이 읽는 설명 `explain.ko.md`, `explain.ja.md`를 함께 쓴다 |
 | `--json` | 사람이 읽는 출력 대신 한 줄 JSON 요약을 stdout에 출력 |
 
 순서는 test_result 검증 → policy 로드 → 마이그레이션 판정(`facts.migration`이 없을 때만) → 개인정보 판정 → 정책 결정 → 파일 저장 → 결정 기록이다. 중간에 실패하면 `오류 [단계: test_result] ...`처럼 어느 단계에서 왜 실패했는지 출력한다. out-dir에는 `pii.json`, `plan.json`과 함께 정책에 실제로 들어간 `test_result.json`이 남고, 마이그레이션을 실행기가 판정했으면 `migration.json`도 남는다. 남은 `test_result.json`으로 `src/cli.ts`를 돌리면 같은 plan_hash가 나온다.
@@ -397,6 +470,8 @@ src/cli.ts           파일 읽기/검증/쓰기, decisions.jsonl 추가
 src/io.ts            CLI 공용 입출력 도우미 (인자, JSON/YAML, 검증, 기록)
 src/stage.ts         보안 단계 실행기 CLI (개인정보 판정 + 정책 결정, 종료 코드로 결정 알림)
 src/stage-runner.ts  runStage(): 실행기의 본체 (단계별 오류 표시)
+src/explainer.ts     explainPlan / explainRollbackPlan: 결정서 -> 사람이 읽는 Markdown (ko, ja)
+src/explain.ts       결정 설명 CLI
 src/pii/select.ts    --classifier 에 따른 판정기 선택 (pii CLI 와 실행기가 공유)
 src/migration/analyzer.ts 파괴적 마이그레이션 탐지 (순수 함수: 주석·문자열 제거, 문장 분리, 패턴)
 src/migration/loader.ts   migrations/ 와 prisma/migrations/ 파일 찾기, --since
@@ -426,6 +501,7 @@ tests/contracts.test.ts fixtures 를 JSON Schema 로 검증 + contracts/ 최신 
 tests/facts.test.ts  facts 키 타입, 정책 경로 수집, 모르는 키 경고
 tests/stage.test.ts  보안 단계 실행기 (종료 코드, 파일 생성, 세 CLI 와 동일성)
 tests/migration.test.ts 파괴적 마이그레이션 판정 (탐지, 샘플, --since, CLI, R7, 실행기 연결)
+tests/explain.test.ts 결정 설명 (모든 결정서, 결론 문장, 차단 후 구분, 일본어, 결정성, CLI)
 tests/pii.test.ts    판정기 테스트 + 끝에서 끝
 scripts/demo.mjs     fixtures 일괄 실행
 ```

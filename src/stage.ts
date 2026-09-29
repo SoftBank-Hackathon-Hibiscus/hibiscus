@@ -16,6 +16,7 @@ const USAGE = `사용법:
   --recording   replay 용 녹화 파일 (기본 recordings/<run_id>.json)
   --since       마이그레이션 판정: 이 이름보다 뒤의 마이그레이션만 검사
   --log         결정 기록 파일 (기본 ./decisions.jsonl)
+  --explain     out-dir 에 사람이 읽는 설명 explain.ko.md, explain.ja.md 를 함께 쓴다
   --json        사람이 읽는 출력 대신 한 줄 JSON 요약을 stdout 에 출력
   --help        이 도움말
 
@@ -24,7 +25,7 @@ out-dir 에 pii.json, plan.json, 정책에 실제로 들어간 test_result.json 
 test_result 의 facts.migration 이 없으면 마이그레이션 판정을 돌려 채우고 migration.json 도 쓴다.
 run_id 는 test_result.json 의 값을 쓴다.`;
 
-const FLAGS = new Set(["json"]);
+const FLAGS = new Set(["json", "explain"]);
 
 async function main(argv: string[]): Promise<number> {
   const args = parseArgs(argv, FLAGS);
@@ -44,6 +45,7 @@ async function main(argv: string[]): Promise<number> {
     recording: args.recording,
     logPath: args.log,
     since: args.since,
+    explain: args.explain === "true",
   });
 
   if (json) {
@@ -69,6 +71,7 @@ async function main(argv: string[]): Promise<number> {
   }
   console.log(`  plan_hash: ${plan.plan_hash}`);
   console.log(`  -> ${summary.plan_path}`);
+  for (const path of Object.values(result.explainPaths)) console.log(`  -> ${path}`);
   return result.exitCode;
 }
 

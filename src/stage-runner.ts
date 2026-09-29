@@ -6,8 +6,10 @@
  * run_id 는 test_result.json 에서 가져와 개인정보 판정에도 같은 값을 쓴다 (R2 입력 불일치가 생기지 않게).
  * 어느 단계에서 실패했는지 StageError.stage 로 알린다. 엔진과 기존 CLI 의 동작은 그대로 재사용한다.
  */
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { decide } from "./engine.js";
+import { LANGS, explainPlan } from "./explainer.js";
 import { appendDecisionLog, loadJson, loadPolicy, validate, writeJson } from "./io.js";
 import { analyzeMigrations } from "./migration/analyzer.js";
 import { filterSince, loadMigrationFiles } from "./migration/loader.js";
@@ -56,6 +58,8 @@ export interface StageOptions {
   logPath?: string;
   /** 마이그레이션 판정: 이 이름보다 뒤의 마이그레이션만 검사 */
   since?: string;
+  /** true 면 out-dir 에 explain.ko.md, explain.ja.md 를 함께 쓴다 */
+  explain?: boolean;
 }
 
 export interface StageSummary {
@@ -78,6 +82,8 @@ export interface StageResult {
   migrationComputed: boolean;
   /** 정책 엔진에 실제로 들어간 test_result (facts.migration 이 채워진 것) */
   test: TestResult;
+  /** --explain 으로 쓴 설명 파일 (언어별). 안 썼으면 빈 객체 */
+  explainPaths: Partial<Record<(typeof LANGS)[number], string>>;
   /** 판정기 선택 등 사람에게 알릴 것 */
   notes: string[];
   exitCode: number;
@@ -124,6 +130,18 @@ export async function runStage(opts: StageOptions): Promise<StageResult> {
     if (migrationComputed) writeJson(join(opts.outDir, "migration.json"), migration);
   });
 
+  const explainPaths: StageResult["explainPaths"] = {};
+  if (opts.explain) {
+    await step("write", () => {
+      mkdirSync(opts.outDir, { recursive: true });
+      for (const lang of LANGS) {
+        const path = join(opts.outDir, `explain.${lang}.md`);
+        writeFileSync(path, explainPlan(plan, { lang }), "utf8");
+        explainPaths[lang] = resolve(path);
+      }
+    });
+  }
+
   const logPath = opts.logPath ?? "decisions.jsonl";
   await step("log", () =>
     appendDecisionLog(logPath, {
@@ -152,6 +170,7 @@ export async function runStage(opts: StageOptions): Promise<StageResult> {
     migration,
     migrationComputed,
     test,
+    explainPaths,
     notes,
     exitCode: EXIT_CODES[plan.decision],
   };
