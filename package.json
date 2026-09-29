@@ -10,7 +10,9 @@
     "typecheck": "tsc --noEmit",
     "demo": "node scripts/demo.mjs",
     "pii": "tsx src/pii/cli.ts",
-    "rollback": "tsx src/rollback/cli.ts"
+    "rollback": "tsx src/rollback/cli.ts",
+    "contracts": "tsx scripts/contracts.ts",
+    "validate": "tsx src/validate.ts"
   },
   "license": "MIT",
   "dependencies": {
@@ -20,6 +22,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.3",
+    "ajv": "^8.20.0",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vitest": "^5.0.2"

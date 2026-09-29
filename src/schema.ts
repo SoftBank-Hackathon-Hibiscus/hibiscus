@@ -7,43 +7,71 @@ import { z } from "zod";
 // ---------------------------------------------------------------------------
 // 입력 1: test_result.json (테스트 파트가 만듦)
 // ---------------------------------------------------------------------------
-export const DigestSchema = z.string().regex(/^sha256:[A-Za-z0-9]+$/, "digest 는 'sha256:<hex>' 형식이어야 합니다");
+export const DigestSchema = z
+  .string()
+  .regex(/^sha256:[A-Za-z0-9]+$/, "digest 는 'sha256:<hex>' 형식이어야 합니다")
+  .describe("컨테이너 이미지 지문. 'sha256:<hex>'. 테스트한 이미지 = 결정한 이미지 = 서명·배포할 이미지");
 
-export const TestResultSchema = z.object({
-  run_id: z.string().min(1),
-  app: z.string().min(1),
-  digest: DigestSchema,
-  passed: z.boolean(),
-  match: z.object({
-    total: z.number().int().nonnegative(),
-    matched: z.number().int().nonnegative(),
-  }),
-  failures: z.array(z.unknown()).default([]),
-  facts: z.record(z.string(), z.unknown()).default({}),
-});
+const RunIdSchema = z.string().min(1).describe("파이프라인 실행 id. 모든 파일이 같은 값을 가져야 한다");
+
+/**
+ * 테스트 파트가 관찰한 사실 중 "정책이 읽는 키" 만 타입을 정한다.
+ * 여기 없는 키는 자유롭게 넣을 수 있고 그대로 보존된다 (정책 엔진은 읽지 않는다).
+ * 정의된 키에 허용되지 않은 값(예: "SQLite", 숫자)이 오면 형식 오류다.
+ */
+export const FactsSchema = z
+  .looseObject({
+    db: z.enum(["sqlite", "postgres", "mysql", "none"]).optional().describe("앱이 쓰는 DB. 소문자만. R5 가 읽는다"),
+    writes_local_file: z.array(z.string()).optional().describe("앱이 쓰는 로컬 파일 경로 목록"),
+  })
+  .describe("테스트 중 관찰한 사실. 정의된 키(db, writes_local_file)는 타입이 고정되고, 그 밖의 키는 자유");
+export type Facts = z.infer<typeof FactsSchema>;
+/** 정책 규칙이 참조해도 되는 facts 키 */
+export const KNOWN_FACTS_KEYS: readonly string[] = Object.keys(FactsSchema.shape);
+
+export const TestResultSchema = z
+  .object({
+    run_id: RunIdSchema,
+    app: z.string().min(1).describe("앱 이름"),
+    digest: DigestSchema,
+    passed: z.boolean().describe("재생 테스트 통과 여부. false 면 정책 엔진이 차단한다"),
+    match: z
+      .object({
+        total: z.number().int().nonnegative().describe("재생한 요청 수"),
+        matched: z.number().int().nonnegative().describe("응답이 일치한 요청 수"),
+      })
+      .describe("재생 결과 요약"),
+    failures: z.array(z.unknown()).default([]).describe("실패한 요청 목록. 형식은 테스트 파트가 정한다 (정책 엔진은 내용을 보지 않음)"),
+    facts: FactsSchema.default({}),
+  })
+  .describe("테스트 파트가 만드는 테스트 판정 결과");
 export type TestResult = z.infer<typeof TestResultSchema>;
 
 // ---------------------------------------------------------------------------
 // 입력 2: pii.json (개인정보 후보. 지금은 가짜 파일, 나중에 AI 판정 결과)
 // ---------------------------------------------------------------------------
 /** 후보를 누가 판정했는지. 정책 엔진은 이 값을 쓰지 않는다 (감사·디버깅용). */
-export const PiiSourceSchema = z.enum(["heuristic", "llm", "replay"]);
+export const PiiSourceSchema = z.enum(["heuristic", "llm", "replay"]).describe("누가 판정했는지. heuristic=규칙, llm=AI, replay=저장된 AI 응답 재생");
 export type PiiSource = z.infer<typeof PiiSourceSchema>;
 
-export const PiiCandidateSchema = z.object({
-  table: z.string().min(1),
-  column: z.string().min(1),
-  kind: z.string().min(1),
-  evidence: z.string().min(1),
-  confident: z.boolean(),
-  source: PiiSourceSchema.optional(),
-});
+export const PiiCandidateSchema = z
+  .object({
+    table: z.string().min(1).describe("테이블 또는 모델 이름"),
+    column: z.string().min(1).describe("칼럼 이름"),
+    kind: z.string().min(1).describe("개인정보 종류 (phone, email, address, birthdate, national_id ...)"),
+    evidence: z.string().min(1).describe("근거 위치 '파일:줄'. 여러 개면 ', ' 로 잇는다. plan.json 의 reason 에 그대로 들어간다"),
+    confident: z.boolean().describe("확신 여부. false 면 정책 엔진이 사람 승인(needs_approval)으로 보낸다"),
+    source: PiiSourceSchema.optional(),
+  })
+  .describe("개인정보 후보 칼럼 하나");
 export type PiiCandidate = z.infer<typeof PiiCandidateSchema>;
 
-export const PiiReportSchema = z.object({
-  run_id: z.string().min(1),
-  pii: z.array(PiiCandidateSchema).default([]),
-});
+export const PiiReportSchema = z
+  .object({
+    run_id: RunIdSchema,
+    pii: z.array(PiiCandidateSchema).default([]).describe("개인정보 후보 목록. 없으면 빈 배열"),
+  })
+  .describe("개인정보 판정 모듈이 만드는 개인정보 후보 보고");
 export type PiiReport = z.infer<typeof PiiReportSchema>;
 
 // ---------------------------------------------------------------------------
@@ -92,7 +120,9 @@ export const ConditionSchema: z.ZodType<Condition> = z.lazy(() =>
   ]),
 );
 
-export const DecisionSchema = z.enum(["allow", "block", "needs_approval"]);
+export const DecisionSchema = z
+  .enum(["allow", "block", "needs_approval"])
+  .describe("allow=배포 진행, block=배포 안 함, needs_approval=사람 승인 후 진행");
 export type Decision = z.infer<typeof DecisionSchema>;
 
 /** 규칙이 걸렸을 때 적용되는 효과. 비어 있는 키는 "바꾸지 않음". */
@@ -123,7 +153,9 @@ export type Rule = z.infer<typeof RuleSchema>;
  * rollback         : 정상 버전(stable)으로 되돌린다
  * manual_recovery  : 자동으로 되돌릴 수 없다. 사람이 복구한다
  */
-export const RollbackDecisionSchema = z.enum(["keep_stable", "rollback", "manual_recovery"]);
+export const RollbackDecisionSchema = z
+  .enum(["keep_stable", "rollback", "manual_recovery"])
+  .describe("keep_stable=정상 버전이 계속 트래픽을 받음, rollback=정상 버전으로 되돌림, manual_recovery=자동으로 못 되돌림 (사람이 복구)");
 export type RollbackDecision = z.infer<typeof RollbackDecisionSchema>;
 
 export const RollbackEffectSchema = z.strictObject({
@@ -200,88 +232,109 @@ export type Policy = z.infer<typeof PolicySchema>;
 // ---------------------------------------------------------------------------
 // 출력: plan.json
 // ---------------------------------------------------------------------------
-export const RuleResultSchema = z.object({
-  id: z.string(),
-  result: z.enum(["matched", "not_matched"]),
-  reason: z.string().optional(),
-});
+export const RuleResultSchema = z
+  .object({
+    id: z.string().describe("policy.yaml 의 규칙 id. 'default' 는 기본 정책이 쓰였다는 뜻"),
+    result: z.enum(["matched", "not_matched"]).describe("규칙이 걸렸는지"),
+    reason: z.string().optional().describe("걸린 규칙의 사람이 읽는 근거. matched 일 때만 있다"),
+  })
+  .describe("평가된 규칙 하나의 결과");
 export type RuleResult = z.infer<typeof RuleResultSchema>;
 
-export const PlanSchema = z.object({
-  run_id: z.string(),
-  app: z.string(),
-  digest: z.string(),
-  decision: DecisionSchema,
-  targets: z.array(z.string()),
-  failover_allowed: z.boolean(),
-  /** 걸린 규칙들의 requires 를 모은 것 (중복 제거, 정렬). 하나도 없으면 필드 자체가 없다 */
-  requires: z.array(z.string()).optional(),
-  rules: z.array(RuleResultSchema),
-  plan_hash: z.string().regex(/^[0-9a-f]{64}$/),
-});
+const PlanHashSchema = z.string().regex(/^[0-9a-f]{64}$/).describe("입력과 정책과 결과를 정규화해 sha256 한 값. 같은 입력이면 항상 같다");
+
+export const PlanSchema = z
+  .object({
+    run_id: RunIdSchema,
+    app: z.string().describe("앱 이름 (test_result 에서 그대로)"),
+    digest: DigestSchema,
+    decision: DecisionSchema,
+    targets: z.array(z.string()).describe("배포할 대상 (known_targets 의 부분집합). block 이면 빈 배열"),
+    failover_allowed: z.boolean().describe("온프레 장애 시 Cloud Run 으로 전환해도 되는지. local 과 cloud_run 이 모두 있을 때만 true 가능"),
+    requires: z
+      .array(z.string())
+      .optional()
+      .describe("걸린 규칙들의 requires 를 모은 것 (중복 제거, 정렬). 무엇을 고쳐야 다른 대상에 갈 수 있는지. 하나도 없으면 필드가 없다"),
+    rules: z.array(RuleResultSchema).describe("평가된 모든 규칙과 결과 (block 이후 규칙은 없음)"),
+    plan_hash: PlanHashSchema,
+  })
+  .describe("정책 엔진이 만드는 배포 계획. 서명 파트와 배포 파트가 읽는다");
 export type Plan = z.infer<typeof PlanSchema>;
 
 // ---------------------------------------------------------------------------
 // 롤백 입력: rollback_request.json / 출력: rollback_plan.json
 // ---------------------------------------------------------------------------
-export const RollbackRequestSchema = z.object({
-  run_id: z.string().min(1),
-  app: z.string().min(1),
-  /** before_cutover: 후보로 트래픽을 넘기기 전 실패. after_cutover: 넘긴 뒤 실패 */
-  stage: z.enum(["before_cutover", "after_cutover"]),
-  /** 이번 배포 후보 (문제가 난 버전) */
-  candidate: z.object({ digest: DigestSchema, targets: z.array(z.string().min(1)) }),
-  /** 이번 배포 전 정상 버전 (되돌아갈 곳) */
-  stable: z.object({ digest: DigestSchema, targets: z.array(z.string().min(1)).min(1) }),
-  state: z.object({
-    writes_since_cutover: z.boolean(),
-    pii_written_onprem: z.boolean(),
-    db_migration_backward_compatible: z.boolean(),
-  }),
-});
+export const RollbackRequestSchema = z
+  .object({
+    run_id: RunIdSchema,
+    app: z.string().min(1).describe("앱 이름"),
+    stage: z.enum(["before_cutover", "after_cutover"]).describe("before_cutover=후보로 트래픽을 넘기기 전 실패, after_cutover=넘긴 뒤 실패"),
+    candidate: z
+      .object({ digest: DigestSchema, targets: z.array(z.string().min(1)).describe("후보가 배포된 대상") })
+      .describe("이번 배포 후보 (문제가 난 버전)"),
+    stable: z
+      .object({ digest: DigestSchema, targets: z.array(z.string().min(1)).min(1).describe("정상 버전이 배포돼 있는 대상 (되돌아갈 곳의 출발점)") })
+      .describe("이번 배포 전 정상 버전 (되돌아갈 곳)"),
+    state: z
+      .object({
+        writes_since_cutover: z.boolean().describe("컷오버 후 데이터 쓰기가 있었는지"),
+        pii_written_onprem: z.boolean().describe("컷오버 후 온프레에 개인정보가 쓰였는지"),
+        db_migration_backward_compatible: z.boolean().describe("DB 마이그레이션이 정상 버전과 호환되는지. false 면 자동 롤백 차단"),
+      })
+      .describe("배포 파트가 관찰한 상태"),
+  })
+  .describe("배포 파트가 만드는 롤백 판단 요청");
 export type RollbackRequest = z.infer<typeof RollbackRequestSchema>;
 
-export const RollbackPlanSchema = z.object({
-  run_id: z.string(),
-  app: z.string(),
-  decision: RollbackDecisionSchema,
-  /** 결정 후 트래픽을 받아야 할 버전. keep_stable / rollback → stable.digest, manual_recovery → null */
-  serve_digest: z.string().nullable(),
-  /** keep_stable / rollback → stable.targets 에서 좁힌 결과, manual_recovery → [] */
-  targets: z.array(z.string()),
-  failover_allowed: z.boolean(),
-  rules: z.array(RuleResultSchema),
-  plan_hash: z.string().regex(/^[0-9a-f]{64}$/),
-});
+export const RollbackPlanSchema = z
+  .object({
+    run_id: RunIdSchema,
+    app: z.string().describe("앱 이름 (요청에서 그대로)"),
+    decision: RollbackDecisionSchema,
+    serve_digest: z.string().nullable().describe("결정 후 트래픽을 받아야 할 버전. keep_stable / rollback → stable.digest, manual_recovery → null"),
+    targets: z.array(z.string()).describe("keep_stable / rollback → stable.targets 에서 좁힌 결과, manual_recovery → []"),
+    failover_allowed: z.boolean().describe("온프레 장애 시 Cloud Run 전환 허용 여부. false 가 이기고, local 과 cloud_run 이 모두 있을 때만 true 가능"),
+    rules: z.array(RuleResultSchema).describe("평가된 롤백 규칙과 결과"),
+    plan_hash: PlanHashSchema,
+  })
+  .describe("롤백 판단 모듈이 만드는 롤백 계획. 배포 파트가 실행한다");
 export type RollbackPlan = z.infer<typeof RollbackPlanSchema>;
 
 // ---------------------------------------------------------------------------
 // 결정 기록: decisions.jsonl 의 한 줄. kind 로 배포/롤백을 구분한다
 // ---------------------------------------------------------------------------
-export const DeployDecisionLogSchema = z.object({
-  kind: z.literal("deploy"),
-  time: z.string(),
-  run_id: z.string(),
-  digest: z.string(),
-  decision: DecisionSchema,
-  targets: z.array(z.string()),
-  rule_ids: z.array(z.string()),
-  plan_hash: z.string(),
-});
-export const RollbackDecisionLogSchema = z.object({
-  kind: z.literal("rollback"),
-  time: z.string(),
-  run_id: z.string(),
-  /** 문제가 난 배포 후보 */
-  digest: z.string(),
-  serve_digest: z.string().nullable(),
-  decision: RollbackDecisionSchema,
-  targets: z.array(z.string()),
-  failover_allowed: z.boolean(),
-  rule_ids: z.array(z.string()),
-  plan_hash: z.string(),
-});
-export const DecisionLogSchema = z.discriminatedUnion("kind", [DeployDecisionLogSchema, RollbackDecisionLogSchema]);
+const LogTimeSchema = z.string().describe("결정 시각 (ISO 8601). CLI 가 붙인다. 엔진은 시간을 쓰지 않는다");
+const RuleIdsSchema = z.array(z.string()).describe("걸린 규칙 id 만 (plan 의 rules 중 matched)");
+
+export const DeployDecisionLogSchema = z
+  .object({
+    kind: z.literal("deploy").describe("배포 결정"),
+    time: LogTimeSchema,
+    run_id: RunIdSchema,
+    digest: z.string().describe("결정한 이미지의 digest (plan.digest)"),
+    decision: DecisionSchema,
+    targets: z.array(z.string()).describe("plan.targets"),
+    rule_ids: RuleIdsSchema,
+    plan_hash: z.string().describe("plan.plan_hash"),
+  })
+  .describe("배포 결정 한 건");
+export const RollbackDecisionLogSchema = z
+  .object({
+    kind: z.literal("rollback").describe("롤백 결정"),
+    time: LogTimeSchema,
+    run_id: RunIdSchema,
+    digest: z.string().describe("문제가 난 배포 후보(candidate)의 digest"),
+    serve_digest: z.string().nullable().describe("결정 후 트래픽을 받을 버전. manual_recovery 면 null"),
+    decision: RollbackDecisionSchema,
+    targets: z.array(z.string()).describe("rollback_plan.targets"),
+    failover_allowed: z.boolean().describe("rollback_plan.failover_allowed"),
+    rule_ids: RuleIdsSchema,
+    plan_hash: z.string().describe("rollback_plan.plan_hash"),
+  })
+  .describe("롤백 결정 한 건");
+export const DecisionLogSchema = z
+  .discriminatedUnion("kind", [DeployDecisionLogSchema, RollbackDecisionLogSchema])
+  .describe("decisions.jsonl 의 한 줄. kind 로 배포/롤백을 구분한다. 추가만 하고 수정하지 않는다");
 export type DecisionLog = z.infer<typeof DecisionLogSchema>;
 export type DeployDecisionLog = z.infer<typeof DeployDecisionLogSchema>;
 export type RollbackDecisionLog = z.infer<typeof RollbackDecisionLogSchema>;

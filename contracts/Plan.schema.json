@@ -1,0 +1,97 @@
+{
+  "$id": "Plan.schema.json",
+  "title": "Plan",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "파이프라인 실행 id. 모든 파일이 같은 값을 가져야 한다"
+    },
+    "app": {
+      "type": "string",
+      "description": "앱 이름 (test_result 에서 그대로)"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[A-Za-z0-9]+$",
+      "description": "컨테이너 이미지 지문. 'sha256:<hex>'. 테스트한 이미지 = 결정한 이미지 = 서명·배포할 이미지"
+    },
+    "decision": {
+      "type": "string",
+      "enum": [
+        "allow",
+        "block",
+        "needs_approval"
+      ],
+      "description": "allow=배포 진행, block=배포 안 함, needs_approval=사람 승인 후 진행"
+    },
+    "targets": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "배포할 대상 (known_targets 의 부분집합). block 이면 빈 배열"
+    },
+    "failover_allowed": {
+      "type": "boolean",
+      "description": "온프레 장애 시 Cloud Run 으로 전환해도 되는지. local 과 cloud_run 이 모두 있을 때만 true 가능"
+    },
+    "requires": {
+      "description": "걸린 규칙들의 requires 를 모은 것 (중복 제거, 정렬). 무엇을 고쳐야 다른 대상에 갈 수 있는지. 하나도 없으면 필드가 없다",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "policy.yaml 의 규칙 id. 'default' 는 기본 정책이 쓰였다는 뜻"
+          },
+          "result": {
+            "type": "string",
+            "enum": [
+              "matched",
+              "not_matched"
+            ],
+            "description": "규칙이 걸렸는지"
+          },
+          "reason": {
+            "description": "걸린 규칙의 사람이 읽는 근거. matched 일 때만 있다",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "result"
+        ],
+        "additionalProperties": false,
+        "description": "평가된 규칙 하나의 결과"
+      },
+      "description": "평가된 모든 규칙과 결과 (block 이후 규칙은 없음)"
+    },
+    "plan_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "입력과 정책과 결과를 정규화해 sha256 한 값. 같은 입력이면 항상 같다"
+    }
+  },
+  "required": [
+    "run_id",
+    "app",
+    "digest",
+    "decision",
+    "targets",
+    "failover_allowed",
+    "rules",
+    "plan_hash"
+  ],
+  "additionalProperties": false,
+  "description": "정책 엔진이 만드는 배포 계획. 서명 파트와 배포 파트가 읽는다"
+}

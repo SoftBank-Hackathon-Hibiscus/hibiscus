@@ -5,8 +5,8 @@
  *   옵션: --log decisions.jsonl (기본값: ./decisions.jsonl)
  */
 import { decide } from "./engine.js";
-import { appendDecisionLog, loadJson, loadYaml, parseArgs, requireArgs, runCli, validate, writeJson } from "./io.js";
-import { PiiReportSchema, PolicySchema, TestResultSchema } from "./schema.js";
+import { appendDecisionLog, loadJson, loadPolicy, parseArgs, requireArgs, runCli, validate, writeJson } from "./io.js";
+import { PiiReportSchema, TestResultSchema } from "./schema.js";
 
 const USAGE = `사용법:
   npx tsx src/cli.ts --test <test_result.json> --pii <pii.json> --policy <policy.yaml> --out <plan.json> [--log <decisions.jsonl>]
@@ -34,7 +34,7 @@ runCli(() => {
 
   const test = validate(TestResultSchema, loadJson(testPath, "test_result"), "test_result", testPath);
   const pii = validate(PiiReportSchema, loadJson(piiPath, "pii"), "pii", piiPath);
-  const policy = validate(PolicySchema, loadYaml(policyPath, "policy"), "policy", policyPath);
+  const policy = loadPolicy(policyPath);
 
   const plan = decide(test, pii, policy);
   writeJson(outPath, plan);

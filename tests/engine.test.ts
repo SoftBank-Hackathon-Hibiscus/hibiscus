@@ -276,7 +276,7 @@ describe("policy 스키마", () => {
       ],
     });
     const { test, pii } = loadFixture("01-allow");
-    const sqliteTest = { ...test, facts: { db: "sqlite", writes_local_file: ["/app/data.db"] } };
+    const sqliteTest = { ...test, facts: { db: "sqlite" as const, writes_local_file: ["/app/data.db"] } };
     const plan = decide(sqliteTest, pii, custom);
     expect(plan.decision).toBe("allow");
     expect(plan.targets).toEqual(["local"]);

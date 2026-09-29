@@ -1,0 +1,68 @@
+{
+  "$id": "PiiReport.schema.json",
+  "title": "PiiReport",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "파이프라인 실행 id. 모든 파일이 같은 값을 가져야 한다"
+    },
+    "pii": {
+      "default": [],
+      "description": "개인정보 후보 목록. 없으면 빈 배열",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "table": {
+            "type": "string",
+            "minLength": 1,
+            "description": "테이블 또는 모델 이름"
+          },
+          "column": {
+            "type": "string",
+            "minLength": 1,
+            "description": "칼럼 이름"
+          },
+          "kind": {
+            "type": "string",
+            "minLength": 1,
+            "description": "개인정보 종류 (phone, email, address, birthdate, national_id ...)"
+          },
+          "evidence": {
+            "type": "string",
+            "minLength": 1,
+            "description": "근거 위치 '파일:줄'. 여러 개면 ', ' 로 잇는다. plan.json 의 reason 에 그대로 들어간다"
+          },
+          "confident": {
+            "type": "boolean",
+            "description": "확신 여부. false 면 정책 엔진이 사람 승인(needs_approval)으로 보낸다"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "heuristic",
+              "llm",
+              "replay"
+            ],
+            "description": "누가 판정했는지. heuristic=규칙, llm=AI, replay=저장된 AI 응답 재생"
+          }
+        },
+        "required": [
+          "table",
+          "column",
+          "kind",
+          "evidence",
+          "confident"
+        ],
+        "description": "개인정보 후보 칼럼 하나"
+      }
+    }
+  },
+  "required": [
+    "run_id"
+  ],
+  "description": "개인정보 판정 모듈이 만드는 개인정보 후보 보고"
+}

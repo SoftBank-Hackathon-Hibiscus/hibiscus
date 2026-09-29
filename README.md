@@ -48,6 +48,8 @@ npm run typecheck
 }
 ```
 
+`facts`는 정책이 읽는 키만 타입이 정해져 있다. `db`는 `sqlite` | `postgres` | `mysql` | `none`(소문자), `writes_local_file`은 문자열 배열이다. 그 밖의 키는 자유롭게 넣을 수 있고 그대로 보존된다. 규칙이 정의되지 않은 facts 키를 읽으면 정책을 불러올 때 경고가 난다. 규칙이 실제로 읽는 경로 목록은 [contracts/README.md](contracts/README.md)의 "정책이 읽는 필드"에 자동 생성된다.
+
 ### `pii.json` (개인정보 후보. 지금은 가짜 파일, 나중에 AI 판정 결과)
 
 ```json
@@ -157,6 +159,22 @@ R5의 이유: 클라우드에서는 인스턴스가 교체되면 SQLite 파일�
 ```
 
 `kind`로 배포 결정과 롤백 결정을 구분한다. `rule_ids`는 걸린 규칙만. 시간 값은 CLI에서만 붙이고 엔진(`decide`, `decideRollback`)은 시간을 쓰지 않는다.
+
+## 파일 계약 (`contracts/`)
+
+다른 파트와 주고받는 파일 6개(test_result, pii, plan, rollback_request, rollback_plan, decisions.jsonl)의 JSON Schema와 설명 문서가 [`contracts/`](contracts/README.md)에 있다. `src/schema.ts`의 zod 스키마에서 자동 생성하므로 스키마를 바꾸면 다시 만든다.
+
+```bash
+npm run contracts
+```
+
+다른 파트는 자기 파일을 이렇게 검증할 수 있다. 통과하면 OK, 틀리면 어느 필드가 왜 틀렸는지 출력한다.
+
+```bash
+npx tsx src/validate.ts --type test_result --file some.json
+```
+
+`contracts/` 가 최신인지는 테스트가 확인한다 (`tests/contracts.test.ts`). 모든 fixtures가 JSON Schema로도 통과하는지 같이 검사한다.
 
 ## 정책 인식 롤백 (`src/rollback/`)
 
@@ -292,6 +310,11 @@ src/schema.ts        zod 스키마 + 타입 (입력 2개, policy, plan, 기록)
 src/engine.ts        decide(test, pii, policy) -> plan   순수 함수, 파일 입출력 없음
 src/cli.ts           파일 읽기/검증/쓰기, decisions.jsonl 추가
 src/io.ts            CLI 공용 입출력 도우미 (인자, JSON/YAML, 검증, 기록)
+src/policy-refs.ts   규칙이 읽는 경로 수집, 모르는 facts 키 경고
+src/contracts.ts     계약 6개 목록, zod -> JSON Schema, contracts/README.md 렌더링
+src/validate.ts      다른 파트용 파일 검증 CLI
+scripts/contracts.ts contracts/ 생성 (npm run contracts)
+contracts/           생성된 JSON Schema + README (손으로 고치지 않음)
 src/rollback/engine.ts decideRollback(request, policy) -> rollback_plan   순수 함수
 src/rollback/cli.ts  rollback_request.json -> rollback_plan.json
 src/pii/extractor.ts 1층 추출기 (SQL / Prisma 칼럼 + 근거 조각)
@@ -308,6 +331,8 @@ samples/             판정기 샘플 앱 5개 (실행하지 않는 코드 조�
 recordings/          저장된 LLM 응답 (replay 용)
 tests/engine.test.ts 정책 엔진 테스트
 tests/rollback.test.ts 롤백 판단 테스트
+tests/contracts.test.ts fixtures 를 JSON Schema 로 검증 + contracts/ 최신 여부
+tests/facts.test.ts  facts 키 타입, 정책 경로 수집, 모르는 키 경고
 tests/pii.test.ts    판정기 테스트 + 끝에서 끝
 scripts/demo.mjs     fixtures 일괄 실행
 ```

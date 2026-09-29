@@ -1,0 +1,409 @@
+# 파일 계약 (contracts)
+
+다른 파트와 주고받는 JSON 파일의 형식. **`npm run contracts` 가 `src/schema.ts` 에서 자동 생성한다. 손으로 고치지 말 것.**
+
+각 파일의 JSON Schema(draft 2020-12)가 이 폴더에 함께 있다. 어떤 언어에서든 그 스키마로 검증할 수 있고, 이 저장소에서는 다음으로 검증한다.
+
+```bash
+npx tsx src/validate.ts --type test_result --file some.json
+```
+
+`--type` 은 `test_result` | `pii` | `plan` | `rollback_request` | `rollback_plan` | `decision_log`(jsonl, 줄마다 검증) | `policy`(yaml).
+
+## 흐름
+
+```mermaid
+flowchart LR
+  T[테스트 파트] -->|test_result.json| PE[정책 엔진<br/>src/cli.ts]
+  P[개인정보 판정<br/>src/pii/cli.ts] -->|pii.json| PE
+  PE -->|plan.json| S[서명 파트<br/>사람 승인 + 이미지 서명]
+  S -->|서명된 이미지 + plan.json| D[배포 파트<br/>Cloud Run / 온프레]
+  PE -->|plan.requires| F[AI 수정 파트]
+  D -->|rollback_request.json| RB[롤백 판단<br/>src/rollback/cli.ts]
+  RB -->|rollback_plan.json| D
+  PE -.->|decisions.jsonl kind=deploy| L[(결정 기록)]
+  RB -.->|decisions.jsonl kind=rollback| L
+```
+
+| 파일 | 만드는 쪽 | 쓰는 쪽 |
+|---|---|---|
+| [`test_result.json`](#test_resultjson--testresult) | 테스트 파트 | 정책 엔진 (`src/cli.ts`) |
+| [`pii.json`](#piijson--piireport) | 개인정보 판정 모듈 (`src/pii/cli.ts`, 이 저장소) | 정책 엔진 (`src/cli.ts`) |
+| [`plan.json`](#planjson--plan) | 정책 엔진 (`src/cli.ts`, 이 저장소) | 서명 파트 (승인·서명), 배포 파트 (targets, failover_allowed), AI 수정 파트 (requires) |
+| [`rollback_request.json`](#rollback_requestjson--rollbackrequest) | 배포 파트 | 롤백 판단 모듈 (`src/rollback/cli.ts`) |
+| [`rollback_plan.json`](#rollback_planjson--rollbackplan) | 롤백 판단 모듈 (`src/rollback/cli.ts`, 이 저장소) | 배포 파트 (실제 롤백 실행) |
+| [`decisions.jsonl`](#decisionsjsonl--decisionlog) | 정책 엔진과 롤백 판단 모듈 (이 저장소) | 발표·감사·디버깅 (사람), 필요하면 대시보드 |
+
+입력 파일(test_result, pii, rollback_request)은 모르는 필드가 있어도 받는다(무시). 출력 파일(plan, rollback_plan, decisions.jsonl)은 적힌 필드만 있다.
+
+## 정책이 읽는 필드
+
+`policy.yaml` 의 규칙이 실제로 참조하는 경로. 여기 나온 필드를 바꾸면 정책도 같이 봐야 한다. `npm run contracts` 가 규칙에서 자동으로 모은다.
+
+`some` 조건 안의 경로는 `배열[].필드` 로 적었다. 조건에서 읽는 필드는 값의 형식이 정확해야 하고(예: `test.facts.db` 는 소문자 enum), reason 에서만 읽는 필드는 표시용이다.
+
+**배포 규칙** (루트 `{ test: test_result.json, pii: pii.json }`)
+
+| 경로 | 읽는 규칙 | 용도 |
+|---|---|---|
+| `pii.pii` | R3, R4 | 조건 |
+| `pii.pii[].column` | R3, R4 | reason |
+| `pii.pii[].confident` | R3 | 조건 |
+| `pii.pii[].evidence` | R3, R4 | reason |
+| `pii.pii[].kind` | R3, R4 | reason |
+| `pii.pii[].table` | R3 | reason |
+| `pii.run_id` | R2 | 조건, reason |
+| `test.facts.db` | R5 | 조건, reason |
+| `test.match.matched` | R1 | reason |
+| `test.match.total` | R1 | reason |
+| `test.passed` | R1 | 조건 |
+| `test.run_id` | R2 | 조건, reason |
+
+**롤백 규칙** (루트 `{ request: rollback_request.json }`)
+
+| 경로 | 읽는 규칙 | 용도 |
+|---|---|---|
+| `request.stable.digest` | RB1, RB3, RB4, default | reason |
+| `request.stage` | RB1 | 조건 |
+| `request.state.db_migration_backward_compatible` | RB2 | 조건 |
+| `request.state.pii_written_onprem` | RB3 | 조건 |
+| `request.state.writes_since_cutover` | RB4 | 조건 |
+
+규칙이 `test.facts` 의 정의되지 않은 키를 읽으면 정책을 불러올 때 경고가 난다. 새 키가 필요하면 `src/schema.ts` 의 `FactsSchema` 에 먼저 추가한다.
+
+## 팀과 합의가 필요한 점
+
+1. **run_id 와 digest 는 끝까지 그대로 전달한다.** 테스트 파트가 정한 `run_id` 와 이미지 `digest` 가 test_result → pii → plan → 서명 → 배포 → rollback_request 까지 바뀌지 않아야 한다. 정책 엔진은 test_result 와 pii 의 `run_id` 가 다르면 차단한다(R2). digest 는 `sha256:<hex>` 형식만 받는다.
+2. **비밀값은 어떤 파일에도 넣지 않는다.** API 키, 토큰, 접속 문자열을 `facts`, `failures`, `evidence` 등에 넣지 말 것. 개인정보 판정 모듈은 근거 조각의 비밀처럼 보이는 값을 `[REDACTED]` 로 가리지만, 다른 파트의 파일은 각자 책임진다.
+3. **선택 필드는 "없을 수 있다" 는 뜻이지 "null 을 넣어도 된다" 는 뜻이 아니다.** 예: `plan.requires` 는 없거나 문자열 배열이다. `pii[].source` 도 마찬가지.
+4. **최근 추가된 필드**
+   - `plan.requires` (선택, string[]): 걸린 규칙들이 요구하는 것의 합집합 (예: `["managed_db"]`). AI 수정 파트가 "무엇을 고쳐야 클라우드에 갈 수 있는지" 읽는다. 없으면 필드 자체가 없다.
+   - `decisions.jsonl` 의 `kind` (`deploy` | `rollback`): 같은 파일에 두 종류의 결정이 섞이므로 반드시 `kind` 로 구분해서 읽을 것. 두 종류는 필드 구성이 다르다.
+   - `rollback_plan.serve_digest` (string | null): 결정 후 트래픽을 받아야 할 버전. `keep_stable`/`rollback` 이면 `stable.digest`, `manual_recovery` 면 null. 배포 파트는 `decision` 이 아니라 이 값으로 라우팅 대상을 정하면 된다.
+   - `rollback_request.candidate` / `stable`: 예전 이름 `current` / `previous` 는 받지 않는다. candidate = 이번 배포 후보(문제가 난 버전), stable = 이번 배포 전 정상 버전.
+   - `failover_allowed` (plan, rollback_plan): `local` 과 `cloud_run` 이 모두 targets 에 있을 때만 true 가 될 수 있다. 배포 파트는 이 값이 false 면 온프레 장애 시 Cloud Run 으로 넘기지 않는다.
+5. **targets 의 값은 policy.yaml 의 `known_targets`(현재 `local`, `cloud_run`) 안에서만 나온다.** 배포 파트가 새 대상을 지원하면 `known_targets` 에 먼저 추가해야 한다.
+   - **`test_result.facts` 는 정책이 읽는 키만 타입이 정해져 있다** (`db`: `sqlite` | `postgres` | `mysql` | `none` 소문자, `writes_local_file`: string[]). 대문자 `"SQLite"` 나 숫자는 형식 오류다. 그 밖의 키(예: `framework`)는 자유롭게 넣을 수 있고 그대로 보존된다. 정책이 새 키를 읽어야 하면 스키마에 먼저 추가한다 ("정책이 읽는 필드" 표 참고).
+6. **decisions.jsonl 은 추가만 한다.** 기존 줄을 고치거나 지우지 않는다. 시간(`time`)은 CLI 가 붙이므로 같은 입력으로 다시 돌리면 `plan_hash` 는 같고 `time` 만 다르다.
+7. **파일 형식을 바꾸고 싶으면 `src/schema.ts` 를 고치고 `npm run contracts` 로 이 문서를 다시 만든다.** 손으로 고친 문서는 다음 생성 때 사라진다.
+
+## test_result.json — TestResult
+
+- **JSON Schema**: [`TestResult.schema.json`](./TestResult.schema.json)
+- **만드는 쪽**: 테스트 파트
+- **쓰는 쪽**: 정책 엔진 (`src/cli.ts`)
+- **내용**: 로컬에서 기록한 요청/응답을 클라우드 조건에서 재생한 판정 결과와, 테스트 중 관찰한 사실(facts)
+- **검증**: `npx tsx src/validate.ts --type test_result --file <파일>`
+
+### 필드
+
+| 필드 | 타입 | 필수 | 설명 |
+|---|---|---|---|
+| `run_id` | string | 필수 | 파이프라인 실행 id. 모든 파일이 같은 값을 가져야 한다 |
+| `app` | string | 필수 | 앱 이름 |
+| `digest` | string | 필수 | 컨테이너 이미지 지문. 'sha256:<hex>'. 테스트한 이미지 = 결정한 이미지 = 서명·배포할 이미지 |
+| `passed` | boolean | 필수 | 재생 테스트 통과 여부. false 면 정책 엔진이 차단한다 |
+| `match` | object | 필수 | 재생 결과 요약 |
+| `match.total` | integer | 필수 | 재생한 요청 수 |
+| `match.matched` | integer | 필수 | 응답이 일치한 요청 수 |
+| `failures` | any[] | 선택 (기본값 `[]`) | 실패한 요청 목록. 형식은 테스트 파트가 정한다 (정책 엔진은 내용을 보지 않음) |
+| `facts` | object | 선택 (기본값 `{}`) | 테스트 중 관찰한 사실. 정의된 키(db, writes_local_file)는 타입이 고정되고, 그 밖의 키는 자유 |
+| `facts.db` | "sqlite" \| "postgres" \| "mysql" \| "none" | 선택 | 앱이 쓰는 DB. 소문자만. R5 가 읽는다 |
+| `facts.writes_local_file` | string[] | 선택 | 앱이 쓰는 로컬 파일 경로 목록 |
+| `facts.*` | any | 선택 | 그 밖의 키는 자유. 그대로 보존되지만 정책은 읽지 않는다 |
+
+### 예시 (fixtures/03-pii-confident/test_result.json)
+
+```json
+{
+  "run_id": "r-003",
+  "app": "todo",
+  "digest": "sha256:c3d4e5f60718293a4b5c6d7e8f9001122334455667788990aabbccddeeff0011",
+  "passed": true,
+  "match": {
+    "total": 24,
+    "matched": 24
+  },
+  "failures": [],
+  "facts": {
+    "db": "postgres"
+  }
+}
+```
+
+## pii.json — PiiReport
+
+- **JSON Schema**: [`PiiReport.schema.json`](./PiiReport.schema.json)
+- **만드는 쪽**: 개인정보 판정 모듈 (`src/pii/cli.ts`, 이 저장소)
+- **쓰는 쪽**: 정책 엔진 (`src/cli.ts`)
+- **내용**: 앱 소스에서 찾은 개인정보 후보 칼럼과 확신 여부
+- **검증**: `npx tsx src/validate.ts --type pii --file <파일>`
+
+### 필드
+
+| 필드 | 타입 | 필수 | 설명 |
+|---|---|---|---|
+| `run_id` | string | 필수 | 파이프라인 실행 id. 모든 파일이 같은 값을 가져야 한다 |
+| `pii` | object[] | 선택 (기본값 `[]`) | 개인정보 후보 목록. 없으면 빈 배열 |
+| `pii[].table` | string | 필수 | 테이블 또는 모델 이름 |
+| `pii[].column` | string | 필수 | 칼럼 이름 |
+| `pii[].kind` | string | 필수 | 개인정보 종류 (phone, email, address, birthdate, national_id ...) |
+| `pii[].evidence` | string | 필수 | 근거 위치 '파일:줄'. 여러 개면 ', ' 로 잇는다. plan.json 의 reason 에 그대로 들어간다 |
+| `pii[].confident` | boolean | 필수 | 확신 여부. false 면 정책 엔진이 사람 승인(needs_approval)으로 보낸다 |
+| `pii[].source` | "heuristic" \| "llm" \| "replay" | 선택 | 누가 판정했는지. heuristic=규칙, llm=AI, replay=저장된 AI 응답 재생 |
+
+### 예시 (fixtures/03-pii-confident/pii.json)
+
+```json
+{
+  "run_id": "r-003",
+  "pii": [
+    {
+      "table": "users",
+      "column": "contact",
+      "kind": "phone",
+      "evidence": "src/routes/signup.js:24",
+      "confident": true
+    }
+  ]
+}
+```
+
+## plan.json — Plan
+
+- **JSON Schema**: [`Plan.schema.json`](./Plan.schema.json)
+- **만드는 쪽**: 정책 엔진 (`src/cli.ts`, 이 저장소)
+- **쓰는 쪽**: 서명 파트 (승인·서명), 배포 파트 (targets, failover_allowed), AI 수정 파트 (requires)
+- **내용**: 배포 허용/차단/승인 필요 결정과 배포 위치, 그리고 그 근거
+- **검증**: `npx tsx src/validate.ts --type plan --file <파일>`
+
+### 필드
+
+| 필드 | 타입 | 필수 | 설명 |
+|---|---|---|---|
+| `run_id` | string | 필수 | 파이프라인 실행 id. 모든 파일이 같은 값을 가져야 한다 |
+| `app` | string | 필수 | 앱 이름 (test_result 에서 그대로) |
+| `digest` | string | 필수 | 컨테이너 이미지 지문. 'sha256:<hex>'. 테스트한 이미지 = 결정한 이미지 = 서명·배포할 이미지 |
+| `decision` | "allow" \| "block" \| "needs_approval" | 필수 | allow=배포 진행, block=배포 안 함, needs_approval=사람 승인 후 진행 |
+| `targets` | string[] | 필수 | 배포할 대상 (known_targets 의 부분집합). block 이면 빈 배열 |
+| `failover_allowed` | boolean | 필수 | 온프레 장애 시 Cloud Run 으로 전환해도 되는지. local 과 cloud_run 이 모두 있을 때만 true 가능 |
+| `requires` | string[] | 선택 | 걸린 규칙들의 requires 를 모은 것 (중복 제거, 정렬). 무엇을 고쳐야 다른 대상에 갈 수 있는지. 하나도 없으면 필드가 없다 |
+| `rules` | object[] | 필수 | 평가된 모든 규칙과 결과 (block 이후 규칙은 없음) |
+| `rules[].id` | string | 필수 | policy.yaml 의 규칙 id. 'default' 는 기본 정책이 쓰였다는 뜻 |
+| `rules[].result` | "matched" \| "not_matched" | 필수 | 규칙이 걸렸는지 |
+| `rules[].reason` | string | 선택 | 걸린 규칙의 사람이 읽는 근거. matched 일 때만 있다 |
+| `plan_hash` | string | 필수 | 입력과 정책과 결과를 정규화해 sha256 한 값. 같은 입력이면 항상 같다 |
+
+### 예시 (fixtures/03-pii-confident 를 정책 엔진에 넣은 결과)
+
+```json
+{
+  "run_id": "r-003",
+  "app": "todo",
+  "digest": "sha256:c3d4e5f60718293a4b5c6d7e8f9001122334455667788990aabbccddeeff0011",
+  "decision": "allow",
+  "targets": [
+    "local"
+  ],
+  "failover_allowed": false,
+  "rules": [
+    {
+      "id": "R1",
+      "result": "not_matched"
+    },
+    {
+      "id": "R2",
+      "result": "not_matched"
+    },
+    {
+      "id": "R3",
+      "result": "not_matched"
+    },
+    {
+      "id": "R4",
+      "result": "matched",
+      "reason": "개인정보(contact, phone) 발견: src/routes/signup.js:24"
+    },
+    {
+      "id": "R5",
+      "result": "not_matched"
+    }
+  ],
+  "plan_hash": "da19c0464646730057ec290e8cb204845af69a9fe4a59eeb0aca97dc51031b93"
+}
+```
+
+## rollback_request.json — RollbackRequest
+
+- **JSON Schema**: [`RollbackRequest.schema.json`](./RollbackRequest.schema.json)
+- **만드는 쪽**: 배포 파트
+- **쓰는 쪽**: 롤백 판단 모듈 (`src/rollback/cli.ts`)
+- **내용**: 배포 후 문제가 생겼을 때, 후보/정상 버전과 배포 파트가 관찰한 상태
+- **검증**: `npx tsx src/validate.ts --type rollback_request --file <파일>`
+
+### 필드
+
+| 필드 | 타입 | 필수 | 설명 |
+|---|---|---|---|
+| `run_id` | string | 필수 | 파이프라인 실행 id. 모든 파일이 같은 값을 가져야 한다 |
+| `app` | string | 필수 | 앱 이름 |
+| `stage` | "before_cutover" \| "after_cutover" | 필수 | before_cutover=후보로 트래픽을 넘기기 전 실패, after_cutover=넘긴 뒤 실패 |
+| `candidate` | object | 필수 | 이번 배포 후보 (문제가 난 버전) |
+| `candidate.digest` | string | 필수 | 컨테이너 이미지 지문. 'sha256:<hex>'. 테스트한 이미지 = 결정한 이미지 = 서명·배포할 이미지 |
+| `candidate.targets` | string[] | 필수 | 후보가 배포된 대상 |
+| `stable` | object | 필수 | 이번 배포 전 정상 버전 (되돌아갈 곳) |
+| `stable.digest` | string | 필수 | 컨테이너 이미지 지문. 'sha256:<hex>'. 테스트한 이미지 = 결정한 이미지 = 서명·배포할 이미지 |
+| `stable.targets` | string[] | 필수 | 정상 버전이 배포돼 있는 대상 (되돌아갈 곳의 출발점) |
+| `state` | object | 필수 | 배포 파트가 관찰한 상태 |
+| `state.writes_since_cutover` | boolean | 필수 | 컷오버 후 데이터 쓰기가 있었는지 |
+| `state.pii_written_onprem` | boolean | 필수 | 컷오버 후 온프레에 개인정보가 쓰였는지 |
+| `state.db_migration_backward_compatible` | boolean | 필수 | DB 마이그레이션이 정상 버전과 호환되는지. false 면 자동 롤백 차단 |
+
+### 예시 (fixtures/rollback/03-pii-onprem.json)
+
+```json
+{
+  "run_id": "r-012",
+  "app": "todo",
+  "stage": "after_cutover",
+  "candidate": {
+    "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+    "targets": [
+      "local"
+    ]
+  },
+  "stable": {
+    "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "targets": [
+      "local",
+      "cloud_run"
+    ]
+  },
+  "state": {
+    "writes_since_cutover": true,
+    "pii_written_onprem": true,
+    "db_migration_backward_compatible": true
+  }
+}
+```
+
+## rollback_plan.json — RollbackPlan
+
+- **JSON Schema**: [`RollbackPlan.schema.json`](./RollbackPlan.schema.json)
+- **만드는 쪽**: 롤백 판단 모듈 (`src/rollback/cli.ts`, 이 저장소)
+- **쓰는 쪽**: 배포 파트 (실제 롤백 실행)
+- **내용**: 되돌릴지, 어느 버전이 트래픽을 받을지, 어느 대상에서
+- **검증**: `npx tsx src/validate.ts --type rollback_plan --file <파일>`
+
+### 필드
+
+| 필드 | 타입 | 필수 | 설명 |
+|---|---|---|---|
+| `run_id` | string | 필수 | 파이프라인 실행 id. 모든 파일이 같은 값을 가져야 한다 |
+| `app` | string | 필수 | 앱 이름 (요청에서 그대로) |
+| `decision` | "keep_stable" \| "rollback" \| "manual_recovery" | 필수 | keep_stable=정상 버전이 계속 트래픽을 받음, rollback=정상 버전으로 되돌림, manual_recovery=자동으로 못 되돌림 (사람이 복구) |
+| `serve_digest` | string \| null | 필수 | 결정 후 트래픽을 받아야 할 버전. keep_stable / rollback → stable.digest, manual_recovery → null |
+| `targets` | string[] | 필수 | keep_stable / rollback → stable.targets 에서 좁힌 결과, manual_recovery → [] |
+| `failover_allowed` | boolean | 필수 | 온프레 장애 시 Cloud Run 전환 허용 여부. false 가 이기고, local 과 cloud_run 이 모두 있을 때만 true 가능 |
+| `rules` | object[] | 필수 | 평가된 롤백 규칙과 결과 |
+| `rules[].id` | string | 필수 | policy.yaml 의 규칙 id. 'default' 는 기본 정책이 쓰였다는 뜻 |
+| `rules[].result` | "matched" \| "not_matched" | 필수 | 규칙이 걸렸는지 |
+| `rules[].reason` | string | 선택 | 걸린 규칙의 사람이 읽는 근거. matched 일 때만 있다 |
+| `plan_hash` | string | 필수 | 입력과 정책과 결과를 정규화해 sha256 한 값. 같은 입력이면 항상 같다 |
+
+### 예시 (fixtures/rollback/03-pii-onprem.json 을 롤백 판단에 넣은 결과)
+
+```json
+{
+  "run_id": "r-012",
+  "app": "todo",
+  "decision": "rollback",
+  "serve_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "targets": [
+    "local"
+  ],
+  "failover_allowed": false,
+  "rules": [
+    {
+      "id": "RB1",
+      "result": "not_matched"
+    },
+    {
+      "id": "RB2",
+      "result": "not_matched"
+    },
+    {
+      "id": "RB3",
+      "result": "matched",
+      "reason": "온프레에 개인정보가 쓰임: cloud_run 으로 되돌리지 않고 온프레 안에서만 정상 버전(sha256:0000000000000000000000000000000000000000000000000000000000000000)으로 복구"
+    },
+    {
+      "id": "RB4",
+      "result": "not_matched"
+    },
+    {
+      "id": "default",
+      "result": "matched",
+      "reason": "정상 버전(sha256:0000000000000000000000000000000000000000000000000000000000000000)으로 복귀. 대상은 좁히기 규칙을 따름"
+    }
+  ],
+  "plan_hash": "c5b1b28590a6765e8d71fc23318881e57593459c81d6aa396a2326c0c215a2aa"
+}
+```
+
+## decisions.jsonl — DecisionLog
+
+- **JSON Schema**: [`DecisionLog.schema.json`](./DecisionLog.schema.json)
+- **만드는 쪽**: 정책 엔진과 롤백 판단 모듈 (이 저장소)
+- **쓰는 쪽**: 발표·감사·디버깅 (사람), 필요하면 대시보드
+- **내용**: 모든 결정을 한 줄씩 추가만 하는 기록. kind 로 배포/롤백 구분
+- **검증**: `npx tsx src/validate.ts --type decision_log --file <파일>`
+
+### 필드
+
+**kind = "deploy"** — 배포 결정 한 건
+
+| 필드 | 타입 | 필수 | 설명 |
+|---|---|---|---|
+| `kind` | "deploy" | 필수 | 배포 결정 |
+| `time` | string | 필수 | 결정 시각 (ISO 8601). CLI 가 붙인다. 엔진은 시간을 쓰지 않는다 |
+| `run_id` | string | 필수 | 파이프라인 실행 id. 모든 파일이 같은 값을 가져야 한다 |
+| `digest` | string | 필수 | 결정한 이미지의 digest (plan.digest) |
+| `decision` | "allow" \| "block" \| "needs_approval" | 필수 | allow=배포 진행, block=배포 안 함, needs_approval=사람 승인 후 진행 |
+| `targets` | string[] | 필수 | plan.targets |
+| `rule_ids` | string[] | 필수 | 걸린 규칙 id 만 (plan 의 rules 중 matched) |
+| `plan_hash` | string | 필수 | plan.plan_hash |
+
+**kind = "rollback"** — 롤백 결정 한 건
+
+| 필드 | 타입 | 필수 | 설명 |
+|---|---|---|---|
+| `kind` | "rollback" | 필수 | 롤백 결정 |
+| `time` | string | 필수 | 결정 시각 (ISO 8601). CLI 가 붙인다. 엔진은 시간을 쓰지 않는다 |
+| `run_id` | string | 필수 | 파이프라인 실행 id. 모든 파일이 같은 값을 가져야 한다 |
+| `digest` | string | 필수 | 문제가 난 배포 후보(candidate)의 digest |
+| `serve_digest` | string \| null | 필수 | 결정 후 트래픽을 받을 버전. manual_recovery 면 null |
+| `decision` | "keep_stable" \| "rollback" \| "manual_recovery" | 필수 | keep_stable=정상 버전이 계속 트래픽을 받음, rollback=정상 버전으로 되돌림, manual_recovery=자동으로 못 되돌림 (사람이 복구) |
+| `targets` | string[] | 필수 | rollback_plan.targets |
+| `failover_allowed` | boolean | 필수 | rollback_plan.failover_allowed |
+| `rule_ids` | string[] | 필수 | 걸린 규칙 id 만 (plan 의 rules 중 matched) |
+| `plan_hash` | string | 필수 | rollback_plan.plan_hash |
+
+### 예시 (Plan 예시로 만든 배포 결정 한 줄 (시간은 고정값))
+
+```json
+{
+  "kind": "deploy",
+  "time": "2026-09-30T00:00:00.000Z",
+  "run_id": "r-003",
+  "digest": "sha256:c3d4e5f60718293a4b5c6d7e8f9001122334455667788990aabbccddeeff0011",
+  "decision": "allow",
+  "targets": [
+    "local"
+  ],
+  "rule_ids": [
+    "R4"
+  ],
+  "plan_hash": "da19c0464646730057ec290e8cb204845af69a9fe4a59eeb0aca97dc51031b93"
+}
+```

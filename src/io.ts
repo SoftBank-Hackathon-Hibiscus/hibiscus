@@ -5,7 +5,8 @@ import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { z } from "zod";
-import { type DecisionLog, DecisionLogSchema } from "./schema.js";
+import { lintPolicy } from "./policy-refs.js";
+import { type DecisionLog, DecisionLogSchema, type Policy, PolicySchema } from "./schema.js";
 
 export class CliError extends Error {}
 
@@ -75,6 +76,16 @@ export function validate<T>(schema: z.ZodType<T>, data: unknown, label: string, 
     return `  - ${where}: ${issue.message}`;
   });
   throw new CliError(`${label} 형식 오류: ${path}\n${lines.join("\n")}`);
+}
+
+/**
+ * policy.yaml 을 읽고 검증한다. 형식 오류면 CliError.
+ * 스키마에 없는 facts 키를 읽는 규칙이 있으면 stderr 에 경고를 내고 계속한다.
+ */
+export function loadPolicy(path: string): Policy {
+  const policy = validate(PolicySchema, loadYaml(path, "policy"), "policy", path);
+  for (const w of lintPolicy(policy)) console.error(`경고: ${w}`);
+  return policy;
 }
 
 export function writeJson(path: string, value: unknown): void {

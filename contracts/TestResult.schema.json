@@ -1,0 +1,88 @@
+{
+  "$id": "TestResult.schema.json",
+  "title": "TestResult",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "파이프라인 실행 id. 모든 파일이 같은 값을 가져야 한다"
+    },
+    "app": {
+      "type": "string",
+      "minLength": 1,
+      "description": "앱 이름"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[A-Za-z0-9]+$",
+      "description": "컨테이너 이미지 지문. 'sha256:<hex>'. 테스트한 이미지 = 결정한 이미지 = 서명·배포할 이미지"
+    },
+    "passed": {
+      "type": "boolean",
+      "description": "재생 테스트 통과 여부. false 면 정책 엔진이 차단한다"
+    },
+    "match": {
+      "type": "object",
+      "properties": {
+        "total": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "재생한 요청 수"
+        },
+        "matched": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "응답이 일치한 요청 수"
+        }
+      },
+      "required": [
+        "total",
+        "matched"
+      ],
+      "description": "재생 결과 요약"
+    },
+    "failures": {
+      "default": [],
+      "description": "실패한 요청 목록. 형식은 테스트 파트가 정한다 (정책 엔진은 내용을 보지 않음)",
+      "type": "array",
+      "items": {}
+    },
+    "facts": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "db": {
+          "description": "앱이 쓰는 DB. 소문자만. R5 가 읽는다",
+          "type": "string",
+          "enum": [
+            "sqlite",
+            "postgres",
+            "mysql",
+            "none"
+          ]
+        },
+        "writes_local_file": {
+          "description": "앱이 쓰는 로컬 파일 경로 목록",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": {},
+      "description": "테스트 중 관찰한 사실. 정의된 키(db, writes_local_file)는 타입이 고정되고, 그 밖의 키는 자유"
+    }
+  },
+  "required": [
+    "run_id",
+    "app",
+    "digest",
+    "passed",
+    "match"
+  ],
+  "description": "테스트 파트가 만드는 테스트 판정 결과"
+}

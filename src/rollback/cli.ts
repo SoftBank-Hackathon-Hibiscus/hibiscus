@@ -3,8 +3,8 @@
  *
  *   npx tsx src/rollback/cli.ts --request rollback_request.json --policy policy.yaml --out rollback_plan.json [--log decisions.jsonl]
  */
-import { CliError, appendDecisionLog, loadJson, loadYaml, parseArgs, requireArgs, runCli, validate, writeJson } from "../io.js";
-import { PolicySchema, RollbackRequestSchema } from "../schema.js";
+import { CliError, appendDecisionLog, loadJson, loadPolicy, parseArgs, requireArgs, runCli, validate, writeJson } from "../io.js";
+import { RollbackRequestSchema } from "../schema.js";
 import { decideRollback } from "./engine.js";
 
 const USAGE = `사용법:
@@ -30,7 +30,7 @@ runCli(() => {
   const logPath = args.log ?? "decisions.jsonl";
 
   const request = validate(RollbackRequestSchema, loadJson(requestPath, "rollback_request"), "rollback_request", requestPath);
-  const policy = validate(PolicySchema, loadYaml(policyPath, "policy"), "policy", policyPath);
+  const policy = loadPolicy(policyPath);
   if (!policy.rollback) throw new CliError(`policy 에 rollback 섹션이 없습니다: ${policyPath}`);
 
   const plan = decideRollback(request, policy);
