@@ -7,10 +7,12 @@ import { z } from "zod";
 // ---------------------------------------------------------------------------
 // 입력 1: test_result.json (테스트 파트가 만듦)
 // ---------------------------------------------------------------------------
+export const DigestSchema = z.string().regex(/^sha256:[A-Za-z0-9]+$/, "digest 는 'sha256:<hex>' 형식이어야 합니다");
+
 export const TestResultSchema = z.object({
   run_id: z.string().min(1),
   app: z.string().min(1),
-  digest: z.string().regex(/^sha256:[A-Za-z0-9]+$/, "digest 는 'sha256:<hex>' 형식이어야 합니다"),
+  digest: DigestSchema,
   passed: z.boolean(),
   match: z.object({
     total: z.number().int().nonnegative(),
@@ -112,6 +114,46 @@ export const RuleSchema = z.strictObject({
 });
 export type Rule = z.infer<typeof RuleSchema>;
 
+// ---------------------------------------------------------------------------
+// policy.yaml 의 rollback 섹션 (정책 인식 롤백). 조건 문법은 배포 규칙과 같다.
+// 컨텍스트는 { request: rollback_request.json }
+// ---------------------------------------------------------------------------
+/**
+ * keep_stable      : 컷오버 전 실패 등. 정상 버전(stable)이 계속 트래픽을 받는다
+ * rollback         : 정상 버전(stable)으로 되돌린다
+ * manual_recovery  : 자동으로 되돌릴 수 없다. 사람이 복구한다
+ */
+export const RollbackDecisionSchema = z.enum(["keep_stable", "rollback", "manual_recovery"]);
+export type RollbackDecision = z.infer<typeof RollbackDecisionSchema>;
+
+export const RollbackEffectSchema = z.strictObject({
+  decision: RollbackDecisionSchema.optional(),
+  /** 대상을 좁힌다 (정상 버전의 대상과 교집합) */
+  targets: z.array(z.string().min(1)).min(1).optional(),
+  /** false 로 정하면 뒤에서 되돌릴 수 없다 */
+  failover_allowed: z.boolean().optional(),
+});
+
+export const RollbackRuleSchema = z.strictObject({
+  id: z.string().min(1),
+  description: z.string().optional(),
+  if: ConditionSchema,
+  then: RollbackEffectSchema,
+  reason: z.string().min(1),
+});
+export type RollbackRule = z.infer<typeof RollbackRuleSchema>;
+
+export const RollbackPolicySchema = z.strictObject({
+  rules: z.array(RollbackRuleSchema),
+  default: z.strictObject({
+    decision: RollbackDecisionSchema,
+    /** 어떤 규칙도 failover 를 정하지 않았을 때의 값 (최종 targets 에 local·cloud_run 이 모두 있어야 유효) */
+    failover_allowed: z.boolean(),
+    reason: z.string().min(1).default("기본 롤백 정책 적용"),
+  }),
+});
+export type RollbackPolicy = z.infer<typeof RollbackPolicySchema>;
+
 export const PolicySchema = z
   .strictObject({
     version: z.literal(1),
@@ -123,6 +165,8 @@ export const PolicySchema = z
       failover_allowed: z.boolean(),
       reason: z.string().min(1).default("기본 정책 적용"),
     }),
+    /** 롤백 판단 규칙. 없으면 롤백 CLI 가 에러로 멈춘다 */
+    rollback: RollbackPolicySchema.optional(),
   })
   .superRefine((policy, ctx) => {
     const known = new Set(policy.known_targets);
@@ -133,19 +177,23 @@ export const PolicySchema = z
         }
       });
     };
+    const checkRules = (rules: ReadonlyArray<{ id: string; then: { targets?: readonly string[] } }>, basePath: string[], label: string) => {
+      const seen = new Set<string>();
+      rules.forEach((rule, i) => {
+        if (rule.id === "default") {
+          ctx.addIssue({ code: "custom", path: [...basePath, i, "id"], message: "규칙 id 'default' 는 예약어입니다" });
+        }
+        if (seen.has(rule.id)) {
+          ctx.addIssue({ code: "custom", path: [...basePath, i, "id"], message: `규칙 id 중복: ${rule.id}` });
+        }
+        seen.add(rule.id);
+        checkTargets(rule.then.targets, [...basePath, i, "then", "targets"], `${label}규칙 ${rule.id}`);
+      });
+    };
 
-    const seen = new Set<string>();
-    policy.rules.forEach((rule, i) => {
-      if (rule.id === "default") {
-        ctx.addIssue({ code: "custom", path: ["rules", i, "id"], message: "규칙 id 'default' 는 예약어입니다" });
-      }
-      if (seen.has(rule.id)) {
-        ctx.addIssue({ code: "custom", path: ["rules", i, "id"], message: `규칙 id 중복: ${rule.id}` });
-      }
-      seen.add(rule.id);
-      checkTargets(rule.then.targets, ["rules", i, "then", "targets"], `규칙 ${rule.id}`);
-    });
+    checkRules(policy.rules, ["rules"], "");
     checkTargets(policy.default.targets, ["default", "targets"], "default");
+    if (policy.rollback) checkRules(policy.rollback.rules, ["rollback", "rules"], "롤백 ");
   });
 export type Policy = z.infer<typeof PolicySchema>;
 
@@ -174,9 +222,44 @@ export const PlanSchema = z.object({
 export type Plan = z.infer<typeof PlanSchema>;
 
 // ---------------------------------------------------------------------------
-// 결정 기록: decisions.jsonl 의 한 줄
+// 롤백 입력: rollback_request.json / 출력: rollback_plan.json
 // ---------------------------------------------------------------------------
-export const DecisionLogSchema = z.object({
+export const RollbackRequestSchema = z.object({
+  run_id: z.string().min(1),
+  app: z.string().min(1),
+  /** before_cutover: 후보로 트래픽을 넘기기 전 실패. after_cutover: 넘긴 뒤 실패 */
+  stage: z.enum(["before_cutover", "after_cutover"]),
+  /** 이번 배포 후보 (문제가 난 버전) */
+  candidate: z.object({ digest: DigestSchema, targets: z.array(z.string().min(1)) }),
+  /** 이번 배포 전 정상 버전 (되돌아갈 곳) */
+  stable: z.object({ digest: DigestSchema, targets: z.array(z.string().min(1)).min(1) }),
+  state: z.object({
+    writes_since_cutover: z.boolean(),
+    pii_written_onprem: z.boolean(),
+    db_migration_backward_compatible: z.boolean(),
+  }),
+});
+export type RollbackRequest = z.infer<typeof RollbackRequestSchema>;
+
+export const RollbackPlanSchema = z.object({
+  run_id: z.string(),
+  app: z.string(),
+  decision: RollbackDecisionSchema,
+  /** 결정 후 트래픽을 받아야 할 버전. keep_stable / rollback → stable.digest, manual_recovery → null */
+  serve_digest: z.string().nullable(),
+  /** keep_stable / rollback → stable.targets 에서 좁힌 결과, manual_recovery → [] */
+  targets: z.array(z.string()),
+  failover_allowed: z.boolean(),
+  rules: z.array(RuleResultSchema),
+  plan_hash: z.string().regex(/^[0-9a-f]{64}$/),
+});
+export type RollbackPlan = z.infer<typeof RollbackPlanSchema>;
+
+// ---------------------------------------------------------------------------
+// 결정 기록: decisions.jsonl 의 한 줄. kind 로 배포/롤백을 구분한다
+// ---------------------------------------------------------------------------
+export const DeployDecisionLogSchema = z.object({
+  kind: z.literal("deploy"),
   time: z.string(),
   run_id: z.string(),
   digest: z.string(),
@@ -185,4 +268,20 @@ export const DecisionLogSchema = z.object({
   rule_ids: z.array(z.string()),
   plan_hash: z.string(),
 });
+export const RollbackDecisionLogSchema = z.object({
+  kind: z.literal("rollback"),
+  time: z.string(),
+  run_id: z.string(),
+  /** 문제가 난 배포 후보 */
+  digest: z.string(),
+  serve_digest: z.string().nullable(),
+  decision: RollbackDecisionSchema,
+  targets: z.array(z.string()),
+  failover_allowed: z.boolean(),
+  rule_ids: z.array(z.string()),
+  plan_hash: z.string(),
+});
+export const DecisionLogSchema = z.discriminatedUnion("kind", [DeployDecisionLogSchema, RollbackDecisionLogSchema]);
 export type DecisionLog = z.infer<typeof DecisionLogSchema>;
+export type DeployDecisionLog = z.infer<typeof DeployDecisionLogSchema>;
+export type RollbackDecisionLog = z.infer<typeof RollbackDecisionLogSchema>;

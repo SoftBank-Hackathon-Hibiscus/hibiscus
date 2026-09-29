@@ -152,10 +152,86 @@ R5의 이유: 클라우드에서는 인스턴스가 교체되면 SQLite 파일�
 ### `decisions.jsonl` (한 줄씩 추가만)
 
 ```json
-{"time":"2026-09-29T13:40:02.172Z","run_id":"r-004","digest":"sha256:d4e5...","decision":"needs_approval","targets":["local"],"rule_ids":["R3","R4"],"plan_hash":"7ecaf343..."}
+{"kind":"deploy","time":"2026-09-29T13:40:02.172Z","run_id":"r-004","digest":"sha256:d4e5...","decision":"needs_approval","targets":["local"],"rule_ids":["R3","R4"],"plan_hash":"7ecaf343..."}
+{"kind":"rollback","time":"2026-09-29T14:02:11.004Z","run_id":"r-012","digest":"sha256:3333...","serve_digest":"sha256:0000...","decision":"rollback","targets":["local"],"failover_allowed":false,"rule_ids":["RB3","default"],"plan_hash":"..."}
 ```
 
-`rule_ids`는 걸린 규칙만. 시간 값은 CLI에서만 붙이고 엔진(`decide`)은 시간을 쓰지 않는다.
+`kind`로 배포 결정과 롤백 결정을 구분한다. `rule_ids`는 걸린 규칙만. 시간 값은 CLI에서만 붙이고 엔진(`decide`, `decideRollback`)은 시간을 쓰지 않는다.
+
+## 정책 인식 롤백 (`src/rollback/`)
+
+배포 후 문제가 생겼을 때 "되돌려도 되는가, 어디로 되돌리는가"를 규칙으로 판단한다. 실제 롤백 실행은 배포 파트가 하고, 여기서는 판단만 한다.
+
+```bash
+npx tsx src/rollback/cli.ts --request rollback_request.json --policy policy.yaml --out rollback_plan.json
+```
+
+### 입력 `rollback_request.json`
+
+```json
+{
+  "run_id": "r-010",
+  "app": "todo",
+  "stage": "after_cutover",
+  "candidate": { "digest": "sha256:...", "targets": ["local"] },
+  "stable":    { "digest": "sha256:...", "targets": ["local", "cloud_run"] },
+  "state": {
+    "writes_since_cutover": false,
+    "pii_written_onprem": false,
+    "db_migration_backward_compatible": true
+  }
+}
+```
+
+- `candidate`: 이번 배포 후보 (문제가 난 버전). `stable`: 이번 배포 전 정상 버전 (되돌아갈 곳)
+- `stage`: `before_cutover`(트래픽을 후보로 넘기기 전 실패) / `after_cutover`(넘긴 뒤 실패)
+
+### 규칙 (`policy.yaml`의 `rollback` 섹션, 조건 문법은 배포 규칙과 같고 컨텍스트는 `{ request }`)
+
+| id | 조건 | 효과 |
+|---|---|---|
+| RB1 | `stage = before_cutover` | keep_stable (되돌릴 것이 없음, 정상 버전이 계속 받음) |
+| RB2 | DB 마이그레이션이 정상 버전과 비호환 | manual_recovery (자동 롤백 차단) |
+| RB3 | 온프레에 개인정보가 쓰임 | targets [local], failover 금지 (cloud_run으로 되돌리지 않음) |
+| RB4 | 컷오버 후 쓰기 없음 | rollback (정상 버전의 대상 그대로) |
+| default | | rollback, failover 허용 (대상은 좁히기 규칙을 따름) |
+
+**병합** (배포 엔진과 같은 원칙)
+- `decision`은 `rollback < keep_stable < manual_recovery` 순으로 강한 쪽만 남고, `keep_stable`/`manual_recovery`가 나오면 즉시 멈춘다. 그래서 개인정보와 DB 비호환이 동시에 있으면 규칙 순서와 무관하게 `manual_recovery`다.
+- `targets`는 `stable.targets`에서 시작해 좁히기만 되고, 교집합이 비면 `manual_recovery`다. 롤백 규칙의 `targets`도 `known_targets` 검증을 받는다.
+- `failover_allowed`는 `false`가 이긴다. 최종 `targets`에 `local`과 `cloud_run`이 둘 다 있을 때만 `true`가 될 수 있고, 아무 규칙도 정하지 않으면 `default.failover_allowed`를 쓴다.
+
+### 출력 `rollback_plan.json`
+
+```json
+{
+  "run_id": "r-012", "app": "todo",
+  "decision": "rollback",
+  "serve_digest": "sha256:0000...",
+  "targets": ["local"],
+  "failover_allowed": false,
+  "rules": [
+    { "id": "RB1", "result": "not_matched" },
+    { "id": "RB2", "result": "not_matched" },
+    { "id": "RB3", "result": "matched", "reason": "온프레에 개인정보가 쓰임: cloud_run 으로 되돌리지 않고 ..." },
+    { "id": "RB4", "result": "not_matched" },
+    { "id": "default", "result": "matched", "reason": "정상 버전(sha256:0000...)으로 복귀. 대상은 좁히기 규칙을 따름" }
+  ],
+  "plan_hash": "..."
+}
+```
+
+- `serve_digest`: 결정 후 트래픽을 받아야 할 버전. 모든 경우에 명시된다.
+
+| decision | serve_digest | targets | failover_allowed |
+|---|---|---|---|
+| `keep_stable` | `stable.digest` | `stable.targets`에서 좁힌 결과 | 병합 규칙대로 |
+| `rollback` | `stable.digest` | `stable.targets`에서 좁힌 결과 | 병합 규칙대로 |
+| `manual_recovery` | `null` | `[]` | `false` |
+
+- 결정 기록은 같은 `decisions.jsonl`에 `"kind": "rollback"`으로 추가된다 (`digest`는 후보, `serve_digest`는 결정 후 운영 버전). 배포 결정은 `"kind": "deploy"`다.
+
+예시 요청 6개가 `fixtures/rollback/`에 있다.
 
 ## 개인정보 후보 판정 (`src/pii/`)
 
@@ -215,6 +291,9 @@ PII_LLM_MODEL=claude-opus-5-5 npx tsx src/pii/cli.ts --src samples/ambiguous --r
 src/schema.ts        zod 스키마 + 타입 (입력 2개, policy, plan, 기록)
 src/engine.ts        decide(test, pii, policy) -> plan   순수 함수, 파일 입출력 없음
 src/cli.ts           파일 읽기/검증/쓰기, decisions.jsonl 추가
+src/io.ts            CLI 공용 입출력 도우미 (인자, JSON/YAML, 검증, 기록)
+src/rollback/engine.ts decideRollback(request, policy) -> rollback_plan   순수 함수
+src/rollback/cli.ts  rollback_request.json -> rollback_plan.json
 src/pii/extractor.ts 1층 추출기 (SQL / Prisma 칼럼 + 근거 조각)
 src/pii/redact.ts    근거 조각의 비밀값 가리기
 src/pii/classifier.ts 판정기 인터페이스 (+ 구현 re-export)
@@ -224,10 +303,11 @@ src/pii/replay.ts    녹화 재생 판정기
 src/pii/prompt.md    LLM 프롬프트
 src/pii/cli.ts       앱 폴더 -> pii.json
 policy.yaml          규칙 (가상 회사 예시)
-fixtures/            정책 엔진 입력 예시 4세트
+fixtures/            정책 엔진 입력 예시 4세트, fixtures/rollback/ 롤백 요청 예시 6개
 samples/             판정기 샘플 앱 5개 (실행하지 않는 코드 조각)
 recordings/          저장된 LLM 응답 (replay 용)
 tests/engine.test.ts 정책 엔진 테스트
+tests/rollback.test.ts 롤백 판단 테스트
 tests/pii.test.ts    판정기 테스트 + 끝에서 끝
 scripts/demo.mjs     fixtures 일괄 실행
 ```

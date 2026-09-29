@@ -4,3 +4,5 @@ decisions.jsonl
 plan.json
 *.log
 pii.json
+pii.json
+rollback_plan.json

@@ -9,7 +9,8 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "demo": "node scripts/demo.mjs",
-    "pii": "tsx src/pii/cli.ts"
+    "pii": "tsx src/pii/cli.ts",
+    "rollback": "tsx src/rollback/cli.ts"
   },
   "license": "MIT",
   "dependencies": {

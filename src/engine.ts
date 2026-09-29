@@ -18,7 +18,7 @@ import type {
   TestResult,
 } from "./schema.js";
 
-/** 규칙 조건이 바라보는 루트 컨텍스트 */
+/** 배포 규칙이 바라보는 루트 컨텍스트. 조건 DSL(evaluate/renderTemplate) 자체는 어떤 루트 객체든 받는다 (롤백 엔진도 재사용) */
 export interface Context {
   test: TestResult;
   pii: PiiReport;
@@ -61,7 +61,7 @@ function primitiveEquals(a: unknown, b: JsonPrimitive): boolean {
   return a === b;
 }
 
-export function evaluate(cond: Condition, root: Context, scope: unknown = root): EvalResult {
+export function evaluate(cond: Condition, root: object, scope: unknown = root): EvalResult {
   if ("all" in cond) {
     const items: unknown[] = [];
     for (const c of cond.all) {
@@ -123,7 +123,7 @@ function formatValue(v: unknown): string {
  * `{path}` 는 먼저 scope(배열 원소) 에서 찾고, 없으면 루트({test, pii}) 에서 찾는다.
  * `{$.path}` 는 항상 루트.
  */
-export function renderTemplate(template: string, root: Context, scope: unknown): string {
+export function renderTemplate(template: string, root: object, scope: unknown): string {
   return template.replace(/\{([^{}]+)\}/g, (_m, rawPath: string) => {
     const path = rawPath.trim();
     const fromScope = getPath(root, scope, path);
@@ -136,7 +136,7 @@ export function renderTemplate(template: string, root: Context, scope: unknown):
  * `some` 으로 잡힌 원소가 있으면 원소마다 한 번씩 렌더링해 "; " 로 잇는다.
  * 없으면 루트 컨텍스트 기준으로 한 번만 렌더링한다.
  */
-export function renderReason(template: string, root: Context, items: unknown[]): string {
+export function renderReason(template: string, root: object, items: unknown[]): string {
   if (items.length === 0) return renderTemplate(template, root, root);
   return items.map((item) => renderTemplate(template, root, item)).join("; ");
 }

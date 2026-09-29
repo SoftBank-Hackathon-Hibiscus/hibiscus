@@ -76,3 +76,50 @@ default:
   targets: [local, cloud_run]
   failover_allowed: true
   reason: "개인정보 없음, 테스트 통과: 하이브리드 배포 허용"
+
+# ---------------------------------------------------------------------------
+# 정책 인식 롤백. 배포 후 문제가 생겼을 때 "되돌려도 되는가, 어디로" 를 판단한다.
+# 실제 롤백 실행은 배포 파트가 한다.
+#
+# 용어: candidate = 이번 배포 후보(문제가 난 버전), stable = 이번 배포 전 정상 버전(되돌아갈 곳)
+# 컨텍스트는 { request: rollback_request.json }. 조건 문법은 위와 같다.
+# then 은 decision (keep_stable | rollback | manual_recovery), targets (좁히기), failover_allowed 를 받는다.
+#
+# 병합 방식:
+#   decision         : rollback < keep_stable < manual_recovery 순으로 강한 쪽만 남는다.
+#                      keep_stable / manual_recovery 가 나오면 그 즉시 멈춘다.
+#   targets          : stable.targets 에서 시작해 좁히기만 된다. 교집합이 비면 manual_recovery.
+#   failover_allowed : false 가 이긴다. 최종 targets 에 local 과 cloud_run 이 모두 있을 때만 true 가능.
+#   어떤 규칙도 decision 을 정하지 않으면 default 를 쓴다.
+# 결과의 serve_digest 는 결정 후 트래픽을 받을 버전: keep_stable / rollback → stable, manual_recovery → null
+# ---------------------------------------------------------------------------
+rollback:
+  rules:
+    - id: RB1
+      description: 컷오버 전 실패는 아직 트래픽이 후보로 가지 않았으므로 되돌릴 것이 없다. 정상 버전이 계속 받는다
+      if: { path: request.stage, eq: before_cutover }
+      then: { decision: keep_stable }
+      reason: "컷오버 전 실패: 정상 버전({request.stable.digest}) 유지, 롤백 불필요"
+
+    - id: RB2
+      description: DB 스키마가 이전 버전과 호환되지 않으면 자동으로 되돌릴 수 없다
+      if: { path: request.state.db_migration_backward_compatible, eq: false }
+      then: { decision: manual_recovery }
+      reason: "DB 마이그레이션이 이전 버전과 호환되지 않음: 자동 롤백 차단, 수동 복구 필요"
+
+    - id: RB3
+      description: 온프레에 개인정보가 쓰였으면 클라우드로 되돌리지 않는다 (데이터가 클라우드로 흘러가면 안 됨)
+      if: { path: request.state.pii_written_onprem, eq: true }
+      then: { targets: [local], failover_allowed: false }
+      reason: "온프레에 개인정보가 쓰임: cloud_run 으로 되돌리지 않고 온프레 안에서만 정상 버전({request.stable.digest})으로 복구"
+
+    - id: RB4
+      description: 컷오버 후 쓰기가 없었으면 데이터 손실 없이 정상 버전으로 돌아갈 수 있다
+      if: { path: request.state.writes_since_cutover, eq: false }
+      then: { decision: rollback }
+      reason: "컷오버 후 쓰기 없음: 정상 버전({request.stable.digest})의 대상 그대로 복귀"
+
+  default:
+    decision: rollback
+    failover_allowed: true
+    reason: "정상 버전({request.stable.digest})으로 복귀. 대상은 좁히기 규칙을 따름"

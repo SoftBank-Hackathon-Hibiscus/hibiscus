@@ -7,7 +7,8 @@
  *     --record             llm 호출 결과를 recordings/<run-id>.json 에 저장
  */
 import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
+import { CliError, parseArgs, requireArgs, runCli, writeJson } from "../io.js";
 import { PiiReportSchema } from "../schema.js";
 import {
   type Classifier,
@@ -36,30 +37,7 @@ const USAGE = `사용법:
   ANTHROPIC_API_KEY  llm 판정기에 필요
   PII_LLM_MODEL      llm 판정기가 쓸 모델 (기본: claude-haiku-4-5-20251001)`;
 
-class CliError extends Error {}
-const FLAGS = new Set(["record", "help"]);
-
-function parseArgs(argv: string[]): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i]!;
-    if (arg === "-h") {
-      out.help = "true";
-      continue;
-    }
-    if (!arg.startsWith("--")) throw new CliError(`알 수 없는 인자: ${arg}`);
-    const key = arg.slice(2);
-    if (FLAGS.has(key)) {
-      out[key] = "true";
-      continue;
-    }
-    const value = argv[i + 1];
-    if (value === undefined || value.startsWith("--")) throw new CliError(`${arg} 뒤에 값이 필요합니다`);
-    out[key] = value;
-    i++;
-  }
-  return out;
-}
+const FLAGS = new Set(["record"]);
 
 function pickClassifier(args: Record<string, string>, runId: string): { classifier: Classifier; notes: string[] } {
   const mode = args.classifier ?? "heuristic";
@@ -106,15 +84,13 @@ function pickClassifier(args: Record<string, string>, runId: string): { classifi
   throw new CliError(`--classifier 는 heuristic | llm | replay 중 하나여야 합니다: ${mode}`);
 }
 
-async function main(argv: string[]): Promise<number> {
-  const args = parseArgs(argv);
+runCli(async () => {
+  const args = parseArgs(process.argv.slice(2), FLAGS);
   if (args.help) {
     console.log(USAGE);
     return 0;
   }
-  for (const key of ["src", "run-id", "out"]) {
-    if (!args[key]) throw new CliError(`--${key} 옵션이 필요합니다\n\n${USAGE}`);
-  }
+  requireArgs(args, ["src", "run-id", "out"], USAGE);
   const src = args.src!;
   const runId = args["run-id"]!;
   const outPath = args.out!;
@@ -130,8 +106,7 @@ async function main(argv: string[]): Promise<number> {
   const results = await classifier.classify(candidates);
 
   const report = PiiReportSchema.parse({ run_id: runId, pii: results });
-  mkdirSync(dirname(resolve(outPath)), { recursive: true });
-  writeFileSync(outPath, JSON.stringify(report, null, 2) + "\n", "utf8");
+  writeJson(outPath, report);
 
   console.log(`[pii] run_id=${runId} src=${src} classifier=${classifier.name}`);
   for (const n of notes) console.log(`  ! ${n}`);
@@ -143,17 +118,4 @@ async function main(argv: string[]): Promise<number> {
   }
   console.log(`  -> ${outPath}`);
   return 0;
-}
-
-main(process.argv.slice(2))
-  .then((code) => {
-    process.exitCode = code;
-  })
-  .catch((e: unknown) => {
-    if (e instanceof CliError) {
-      console.error(`오류: ${e.message}`);
-      process.exitCode = 1;
-    } else {
-      throw e;
-    }
-  });
+});
