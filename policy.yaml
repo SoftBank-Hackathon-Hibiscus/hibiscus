@@ -1,0 +1,56 @@
+# 정책 파일. 규칙은 위에서부터 차례로 검사한다.
+#
+#   id      : 규칙 식별자 (plan.json 의 rules[].id 와 decisions.jsonl 의 rule_ids 에 그대로 실린다)
+#   if      : 조건. 컨텍스트는 { test: test_result.json, pii: pii.json }
+#   then    : 걸렸을 때 효과. decision / targets / failover_allowed 중 필요한 것만 적는다
+#   reason  : 사람이 읽는 근거. {경로} 로 값을 넣을 수 있다
+#
+# 조건 문법 (엔진은 이 문법만 안다. 규칙 내용은 회사마다 자유롭게 바꿀 수 있다):
+#   { path, eq | ne | in | gt | lt | exists }   값 비교
+#   { path, eq_path | ne_path }                 두 필드 비교
+#   { some: <배열 경로>, where: <조건> }         배열 원소 중 조건을 만족하는 것이 있으면 참
+#                                               where 안에서는 원소가 기준이고 $. 로 루트 접근.
+#                                               reason 의 {경로} 는 원소 -> 루트 순으로 찾는다
+#   { all: [...] } / { any: [...] } / { not: ... }
+#
+# decision 은 allow < needs_approval < block 순으로 강한 쪽만 남고,
+# block 이 나오면 그 즉시 검사를 멈춘다. targets / failover_allowed 는 나중 규칙이 덮어쓴다.
+# 어떤 규칙도 targets 를 정하지 않으면 default 를 쓴다.
+#
+# 아래 규칙은 가상의 플랫폼팀 정책 예시다.
+
+version: 1
+
+rules:
+  - id: R1
+    description: 테스트가 실패한 이미지는 배포하지 않는다
+    if: { path: test.passed, eq: false }
+    then: { decision: block }
+    reason: "테스트 실패 ({test.match.matched}/{test.match.total} 일치)"
+
+  - id: R2
+    description: 테스트 결과와 개인정보 후보가 서로 다른 실행(run_id)이면 입력 불일치로 차단
+    if: { path: test.run_id, ne_path: pii.run_id }
+    then: { decision: block }
+    reason: "입력 불일치: test_result.run_id={test.run_id} != pii.run_id={pii.run_id}"
+
+  - id: R3
+    description: 확신 없는 개인정보 후보가 있으면 사람 승인이 필요하다
+    if:
+      some: pii.pii
+      where: { path: confident, eq: false }
+    then: { decision: needs_approval }
+    reason: "확신 없는 개인정보 후보({table}.{column}, {kind}): {evidence}"
+
+  - id: R4
+    description: 개인정보 후보가 하나라도 있으면 온프레(local)에만 배포하고 클라우드 failover 를 막는다
+    if: { some: pii.pii }
+    then:
+      targets: [local]
+      failover_allowed: false
+    reason: "개인정보({column}, {kind}) 발견: {evidence}"
+
+default:
+  targets: [local, cloud_run]
+  failover_allowed: true
+  reason: "개인정보 없음, 테스트 통과: 하이브리드 배포 허용"
