@@ -36,8 +36,13 @@ describe("decideRollback: 판단 규칙 5가지", () => {
     expect(plan.targets).toEqual([]);
     expect(plan.failover_allowed).toBe(false);
     expect(matchedIds(plan)).toEqual(["RB2"]);
-    // RB2 에서 멈추므로 RB3/RB4 는 평가 목록에 없다
-    expect(plan.rules.map((r) => r.id)).toEqual(["RB1", "RB2"]);
+    // manual_recovery 가 나와도 끝까지 평가한다 (이 요청은 RB3/RB4 가 안 걸릴 뿐)
+    expect(plan.rules.map((r) => [r.id, r.result])).toEqual([
+      ["RB1", "not_matched"],
+      ["RB2", "matched"],
+      ["RB3", "not_matched"],
+      ["RB4", "not_matched"],
+    ]);
   });
 
   it("온프레에 개인정보 쓰임 (RB3) → rollback, targets [local], failover false", () => {
@@ -77,13 +82,29 @@ describe("decideRollback: 판단 규칙 5가지", () => {
 });
 
 describe("decideRollback: 병합", () => {
-  it("개인정보 + DB 비호환이 동시에 있으면 manual_recovery 가 이긴다", () => {
+  it("개인정보 + DB 비호환이 동시에 있으면 manual_recovery 가 이기고, RB3 는 뒤에서 좁혀 allowed_targets = [local]", () => {
     const plan = decideRollback(loadRequest("06-pii-and-db-incompatible"), policy);
     expect(plan.decision).toBe("manual_recovery");
     expect(plan.serve_digest).toBeNull();
     expect(plan.targets).toEqual([]);
     expect(plan.failover_allowed).toBe(false);
     expect(matchedIds(plan)).toEqual(["RB2"]);
+    expect(plan.rules.find((r) => r.id === "RB3")?.result).toBe("matched_after_block");
+    expect(plan.requires).toEqual([{ id: "manual_db_recovery", hint: "DB 스키마를 이전 버전과 호환되게 복구한 뒤 롤백", rule_id: "RB2", allowed_targets: ["local"] }]);
+  });
+
+  it("keep_stable 은 halt 와 무관하게 즉시 멈추고, manual_recovery 규칙에 halt 를 붙이면 그 자리에서 멈춘다", () => {
+    const section = policy.rollback!;
+    const halted = PolicySchema.parse({
+      ...policy,
+      rollback: { ...section, rules: section.rules.map((r) => (r.id === "RB2" ? { ...r, halt: true } : r)) },
+    });
+    const plan = decideRollback(loadRequest("06-pii-and-db-incompatible"), halted);
+    expect(plan.rules.map((r) => r.id)).toEqual(["RB1", "RB2"]);
+    expect(plan.requires?.[0]?.allowed_targets).toEqual(["local", "cloud_run"]); // RB3 가 평가되지 않아 좁혀지지 않음
+
+    const before = decideRollback(loadRequest("01-before-cutover"), policy);
+    expect(before.rules.map((r) => r.id)).toEqual(["RB1"]);
   });
 
   it("규칙 순서를 바꿔 개인정보 규칙이 먼저 걸려도 manual_recovery 가 이긴다", () => {
@@ -151,6 +172,51 @@ describe("decideRollback: 병합", () => {
     const plan = decideRollback(loadRequest("04-no-writes"), custom);
     expect(plan.targets).toEqual(["local", "cloud_run"]);
     expect(plan.failover_allowed).toBe(false);
+  });
+});
+
+describe("decideRollback: 해결 조건 (requires)", () => {
+  it("RB2 DB 비호환 → manual_db_recovery 해결 조건", () => {
+    const plan = decideRollback(loadRequest("02-db-incompatible"), policy);
+    expect(plan.decision).toBe("manual_recovery");
+    // manual_recovery 라 targets 는 비지만, 해결 조건은 정상 버전의 대상(stable.targets) 안에서 충족해야 한다
+    expect(plan.requires).toEqual([{ id: "manual_db_recovery", hint: "DB 스키마를 이전 버전과 호환되게 복구한 뒤 롤백", rule_id: "RB2", allowed_targets: ["local", "cloud_run"] }]);
+  });
+
+  it("rollback / keep_stable 이면 해결 조건이 없다", () => {
+    for (const f of ["01-before-cutover", "03-pii-onprem", "04-no-writes", "05-default"]) {
+      const plan = decideRollback(loadRequest(f), policy);
+      expect(plan.requires, f).toBeUndefined();
+    }
+  });
+
+  it("교집합이 비어 엔진이 manual_recovery 로 가면 manual_target_recovery 를 넣는다", () => {
+    const req = { ...loadRequest("03-pii-onprem"), stable: { digest: STABLE, targets: ["cloud_run"] } };
+    const plan = decideRollback(req, policy);
+    expect(plan.decision).toBe("manual_recovery");
+    expect(plan.requires?.map((r) => [r.id, r.rule_id])).toEqual([["manual_target_recovery", "RB3"]]);
+    expect(plan.requires?.[0]?.allowed_targets).toEqual(["cloud_run"]); // 교집합이 비기 직전의 targets
+  });
+
+  it("manual_recovery 를 내는 롤백 규칙에 requires 가 없으면 정책 로드 에러", () => {
+    const result = PolicySchema.safeParse({
+      ...policy,
+      rollback: {
+        rules: [{ id: "RBX", if: { path: "request.stage", eq: "after_cutover" }, then: { decision: "manual_recovery" }, reason: "x" }],
+        default: policy.rollback!.default,
+      },
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.map((i) => i.message)).toContain("롤백 규칙 RBX: decision 'manual_recovery' 을(를) 내는 규칙은 requires(해결 조건)가 최소 1개 있어야 합니다");
+    }
+    // keep_stable 은 해결 조건이 필요 없다
+    expect(
+      PolicySchema.safeParse({
+        ...policy,
+        rollback: { rules: [{ id: "RBY", if: { path: "request.stage", eq: "before_cutover" }, then: { decision: "keep_stable" }, reason: "x" }], default: policy.rollback!.default },
+      }).success,
+    ).toBe(true);
   });
 });
 

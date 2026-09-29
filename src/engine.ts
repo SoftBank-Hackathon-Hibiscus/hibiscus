@@ -13,7 +13,9 @@ import type {
   JsonPrimitive,
   PiiReport,
   Plan,
+  PlanRequirement,
   Policy,
+  Requirement,
   RuleResult,
   TestResult,
 } from "./schema.js";
@@ -30,14 +32,18 @@ export interface Context {
 
 /**
  * 점 표기 경로로 값을 꺼낸다. `$.` 로 시작하면 루트 컨텍스트, 아니면 현재 scope 기준.
+ * `@` 는 현재 scope 값 자체 (some 의 원소가 문자열일 때 그 문자열). `@.x` 는 원소의 x.
  * 중간에 값이 없으면 undefined.
  */
 export function getPath(root: unknown, scope: unknown, path: string): unknown {
   let cur: unknown = scope;
   let p = path;
   if (p === "$") return root;
+  if (p === "@") return scope;
   if (p.startsWith("$.")) {
     cur = root;
+    p = p.slice(2);
+  } else if (p.startsWith("@.")) {
     p = p.slice(2);
   }
   for (const key of p.split(".")) {
@@ -101,6 +107,8 @@ export function evaluate(cond: Condition, root: object, scope: unknown = root): 
   if ("gt" in cond) return { matched: typeof value === "number" && value > cond.gt, items: [] };
   if ("lt" in cond) return { matched: typeof value === "number" && value < cond.lt, items: [] };
   if ("exists" in cond) return { matched: (value !== undefined) === cond.exists, items: [] };
+  if ("starts_with" in cond) return { matched: typeof value === "string" && value.startsWith(cond.starts_with), items: [] };
+  if ("matches" in cond) return { matched: typeof value === "string" && new RegExp(cond.matches, cond.flags).test(value), items: [] };
   if ("eq_path" in cond) return { matched: value === getPath(root, scope, cond.eq_path), items: [] };
   if ("ne_path" in cond) return { matched: value !== getPath(root, scope, cond.ne_path), items: [] };
 
@@ -127,10 +135,44 @@ export function renderTemplate(template: string, root: object, scope: unknown): 
   return template.replace(/\{([^{}]+)\}/g, (_m, rawPath: string) => {
     const path = rawPath.trim();
     const fromScope = getPath(root, scope, path);
-    const value = fromScope !== undefined || path.startsWith("$") ? fromScope : getPath(root, root, path);
+    const value = fromScope !== undefined || path.startsWith("$") || path.startsWith("@") ? fromScope : getPath(root, root, path);
     return formatValue(value);
   });
 }
+
+// ---------------------------------------------------------------------------
+// 해결 조건(requires) 모으기: id 로 합치고 (먼저 요구한 규칙이 남는다) id 순 정렬
+// ---------------------------------------------------------------------------
+
+export class RequirementCollector {
+  private readonly map = new Map<string, Omit<PlanRequirement, "allowed_targets">>();
+
+  add(req: Requirement, ruleId: string): void {
+    if (this.map.has(req.id)) return;
+    this.map.set(req.id, { id: req.id, ...(req.hint !== undefined ? { hint: req.hint } : {}), rule_id: ruleId });
+  }
+
+  addAll(reqs: readonly Requirement[] | undefined, ruleId: string): void {
+    for (const r of reqs ?? []) this.add(r, ruleId);
+  }
+
+  /**
+   * id 순 정렬. 하나도 없으면 undefined (plan 에 필드를 싣지 않는다).
+   * allowedTargets: 이 결정서의 해결 조건을 충족해야 하는 위치 (모든 항목에 같은 값)
+   */
+  toList(allowedTargets: readonly string[]): PlanRequirement[] | undefined {
+    if (this.map.size === 0) return undefined;
+    return [...this.map.values()]
+      .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+      .map((r) => ({ ...r, allowed_targets: [...allowedTargets] }));
+  }
+}
+
+/** 규칙들이 허용하는 대상의 교집합이 비어 엔진이 스스로 차단할 때 넣는 해결 조건 */
+export const TARGET_CONFLICT_REQUIREMENT: Requirement = {
+  id: "resolve_target_conflict",
+  hint: "규칙들이 허용하는 배포 대상의 교집합이 비어 있음. 정책 또는 앱을 조정해 한 대상이라도 남게 한다",
+};
 
 /**
  * `some` 으로 잡힌 원소가 있으면 원소마다 한 번씩 렌더링해 "; " 로 잇는다.
@@ -201,19 +243,25 @@ export function intersect(current: readonly string[], next: readonly string[]): 
  *   추가할 수 없고, 한 번 제외된 대상은 뒤 규칙이 다시 넣을 수 없다. 교집합이 비면 block.
  * - failover_allowed 는 false 가 이긴다: 한 번 false 면 뒤에서 true 로 못 돌린다.
  *   최종 targets 에 local 과 cloud_run 이 모두 없으면 항상 false.
- * - block 이 나오면 그 즉시 멈춘다. 이후 규칙은 plan.rules 에 실리지 않는다.
+ * - block 이 나와도 끝까지 평가한다. 뒤 규칙은 decision 을 바꾸지 못하고 targets 좁히기와
+ *   해결 조건 수집만 반영되며 rules 에 "matched_after_block" 으로 기록된다.
+ *   halt: true 인 규칙이 걸리면 그 즉시 멈춘다 (이후 규칙은 rules 에 실리지 않는다).
  * - 아무 규칙도 targets 를 정하지 않았으면 policy.default 를 쓴다 (rules 에 id "default" 로 기록).
- * - requires 는 걸린 규칙들의 것을 모아 중복 제거·정렬한다. 비어 있으면 plan 에 싣지 않는다.
+ * - requires(해결 조건) 는 걸린 규칙들의 것을 id 로 합치고 정렬한다. 비어 있으면 plan 에 싣지 않는다.
+ *   교집합 공백으로 엔진이 스스로 block 할 때는 resolve_target_conflict 를 넣는다.
+ *   allowed_targets 는 끝까지 좁힌 결과 (그것이 비면 비기 직전의 비어 있지 않은 targets).
  */
 export function decide(test: TestResult, pii: PiiReport, policy: Policy): Plan {
   const root: Context = { test, pii };
 
   let decision: Decision = "allow";
   let targets: string[] = [...policy.default.targets];
+  /** 차단으로 targets 가 비어도 "고친 뒤 어디로 가게 될지" 를 알리기 위해 마지막으로 비어 있지 않던 targets 를 기억한다 */
+  let lastNonEmptyTargets: string[] = [...targets];
   let narrowedByRule = false;
   let failoverAllowed: boolean | undefined;
   const rules: RuleResult[] = [];
-  const requires = new Set<string>();
+  const requires = new RequirementCollector();
 
   for (const rule of policy.rules) {
     const result = evaluate(rule.if, root);
@@ -223,26 +271,31 @@ export function decide(test: TestResult, pii: PiiReport, policy: Policy): Plan {
     }
 
     let reason = renderReason(rule.reason, root, result.items);
+    // 이미 block 이면 뒤 규칙은 decision 을 바꾸지 못한다. targets 좁히기와 해결 조건만 반영한다.
+    const afterBlock = decision === "block";
 
-    if (rule.then.decision !== undefined) decision = escalate(decision, rule.then.decision);
-    for (const r of rule.then.requires ?? []) requires.add(r);
+    if (!afterBlock && rule.then.decision !== undefined) decision = escalate(decision, rule.then.decision);
+    requires.addAll(rule.then.requires, rule.id);
 
-    if (rule.then.targets !== undefined) {
+    // targets 가 이미 비었으면(교집합 공백) 더 좁힐 것이 없다
+    if (rule.then.targets !== undefined && targets.length > 0) {
       const narrowed = intersect(targets, rule.then.targets);
       if (narrowed.length === 0) {
         decision = "block";
         reason += ` → 허용된 배포 대상이 없음 (지금까지 [${targets.join(", ")}] ∩ 규칙 [${rule.then.targets.join(", ")}] = [])`;
+        requires.add(TARGET_CONFLICT_REQUIREMENT, rule.id);
       }
       targets = narrowed;
+      if (narrowed.length > 0) lastNonEmptyTargets = narrowed;
       narrowedByRule = true;
     }
 
     if (rule.then.failover_allowed === false) failoverAllowed = false;
     else if (rule.then.failover_allowed === true && failoverAllowed === undefined) failoverAllowed = true;
 
-    rules.push({ id: rule.id, result: "matched", reason });
+    rules.push({ id: rule.id, result: afterBlock ? "matched_after_block" : "matched", reason });
 
-    if (decision === "block") break;
+    if (rule.halt) break;
   }
 
   if (decision === "block") {
@@ -257,6 +310,10 @@ export function decide(test: TestResult, pii: PiiReport, policy: Policy): Plan {
   const failoverPossible = FAILOVER_REQUIRED_TARGETS.every((t) => targets.includes(t));
   failoverAllowed = failoverPossible && (failoverAllowed ?? policy.default.failover_allowed);
 
+  // 해결 조건은 최종 targets 안에서만 충족해야 한다. 차단이면 차단 전 마지막 targets.
+  const allowedTargets = targets.length > 0 ? targets : lastNonEmptyTargets;
+  const requiresList = requires.toList(allowedTargets);
+
   const body: Omit<Plan, "plan_hash"> = {
     run_id: test.run_id,
     app: test.app,
@@ -264,8 +321,8 @@ export function decide(test: TestResult, pii: PiiReport, policy: Policy): Plan {
     decision,
     targets,
     failover_allowed: failoverAllowed,
-    // 걸린 규칙들의 requires 를 모은다. "무엇을 고쳐야 다른 대상에 갈 수 있는지" 를 다음 단계에 알린다
-    ...(requires.size > 0 ? { requires: [...requires].sort() } : {}),
+    // 걸린 규칙들의 해결 조건. "무엇을 고쳐야 다른 대상에 갈 수 있는지" 를 다음 단계에 알린다
+    ...(requiresList ? { requires: requiresList } : {}),
     rules,
   };
 

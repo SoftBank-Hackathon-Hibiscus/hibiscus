@@ -100,8 +100,29 @@ export type Condition =
   | { path: string; gt: number }
   | { path: string; lt: number }
   | { path: string; exists: boolean }
+  | { path: string; starts_with: string }
+  | { path: string; matches: string; flags?: string }
   | { path: string; eq_path: string }
   | { path: string; ne_path: string };
+
+/** { path, matches, flags? }: 정규식과 플래그(i, m, s, u 등)가 함께 올바른지 검사한다 */
+const MatchesCondition = z
+  .strictObject({
+    path: z.string().min(1),
+    matches: z.string().min(1),
+    flags: z.string().regex(/^[gimsuy]*$/, "정규식 플래그는 g i m s u y 만 쓸 수 있습니다").optional(),
+  })
+  .refine(
+    (c) => {
+      try {
+        new RegExp(c.matches, c.flags);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    { message: "올바른 정규식이 아닙니다", path: ["matches"] },
+  );
 
 export const ConditionSchema: z.ZodType<Condition> = z.lazy(() =>
   z.union([
@@ -115,10 +136,26 @@ export const ConditionSchema: z.ZodType<Condition> = z.lazy(() =>
     z.strictObject({ path: z.string().min(1), gt: z.number() }),
     z.strictObject({ path: z.string().min(1), lt: z.number() }),
     z.strictObject({ path: z.string().min(1), exists: z.boolean() }),
+    z.strictObject({ path: z.string().min(1), starts_with: z.string().min(1) }),
+    MatchesCondition,
     z.strictObject({ path: z.string().min(1), eq_path: z.string().min(1) }),
     z.strictObject({ path: z.string().min(1), ne_path: z.string().min(1) }),
   ]),
 );
+
+// ---------------------------------------------------------------------------
+// 해결 조건 (requires): "이 규칙에 걸린 이유를 없애려면 무엇이 필요한가"
+// policy.yaml 에서는 문자열(id 만) 또는 { id, hint } 로 적는다. 엔진은 항상 객체로 본다.
+// ---------------------------------------------------------------------------
+export const RequirementSchema = z.strictObject({
+  id: z.string().min(1).describe("해결 조건 id (예: managed_db, fix_tests)"),
+  hint: z.string().min(1).optional().describe("사람이 읽는 설명. 무엇을 하면 되는지"),
+});
+export type Requirement = z.infer<typeof RequirementSchema>;
+
+const RequiresSchema = z
+  .array(z.union([z.string().min(1), RequirementSchema]))
+  .transform((items): Requirement[] => items.map((item) => (typeof item === "string" ? { id: item } : item)));
 
 export const DecisionSchema = z
   .enum(["allow", "block", "needs_approval"])
@@ -130,8 +167,8 @@ export const EffectSchema = z.strictObject({
   decision: z.enum(["block", "needs_approval"]).optional(),
   targets: z.array(z.string().min(1)).min(1).optional(),
   failover_allowed: z.boolean().optional(),
-  /** 이 규칙이 걸린 이유를 없애려면 무엇이 필요한지 (예: managed_db). 다음 단계(AI 수정)가 읽는다 */
-  requires: z.array(z.string().min(1)).optional(),
+  /** 해결 조건. block / needs_approval 을 내는 규칙은 최소 1개 있어야 한다 (PolicySchema 가 검사) */
+  requires: RequiresSchema.optional(),
 });
 export type Effect = z.infer<typeof EffectSchema>;
 
@@ -141,6 +178,11 @@ export const RuleSchema = z.strictObject({
   if: ConditionSchema,
   then: EffectSchema,
   reason: z.string().min(1),
+  /**
+   * true 면 이 규칙이 걸렸을 때 뒤 규칙을 평가하지 않는다 (예: 입력이 섞여 뒤 판단이 무의미할 때).
+   * 기본은 false: block 이 나와도 끝까지 평가해 targets 좁히기와 해결 조건을 모두 모은다.
+   */
+  halt: z.boolean().optional(),
 });
 export type Rule = z.infer<typeof RuleSchema>;
 
@@ -164,6 +206,8 @@ export const RollbackEffectSchema = z.strictObject({
   targets: z.array(z.string().min(1)).min(1).optional(),
   /** false 로 정하면 뒤에서 되돌릴 수 없다 */
   failover_allowed: z.boolean().optional(),
+  /** 해결 조건. manual_recovery 를 내는 규칙은 최소 1개 있어야 한다 */
+  requires: RequiresSchema.optional(),
 });
 
 export const RollbackRuleSchema = z.strictObject({
@@ -172,6 +216,8 @@ export const RollbackRuleSchema = z.strictObject({
   if: ConditionSchema,
   then: RollbackEffectSchema,
   reason: z.string().min(1),
+  /** true 면 걸렸을 때 즉시 멈춘다. keep_stable 은 halt 와 무관하게 항상 즉시 멈춘다 */
+  halt: z.boolean().optional(),
 });
 export type RollbackRule = z.infer<typeof RollbackRuleSchema>;
 
@@ -209,7 +255,8 @@ export const PolicySchema = z
         }
       });
     };
-    const checkRules = (rules: ReadonlyArray<{ id: string; then: { targets?: readonly string[] } }>, basePath: string[], label: string) => {
+    type RuleLike = { id: string; then: { targets?: readonly string[]; decision?: string; requires?: readonly Requirement[] } };
+    const checkRules = (rules: ReadonlyArray<RuleLike>, basePath: string[], label: string, decisionsNeedingRequires: readonly string[]) => {
       const seen = new Set<string>();
       rules.forEach((rule, i) => {
         if (rule.id === "default") {
@@ -220,12 +267,20 @@ export const PolicySchema = z
         }
         seen.add(rule.id);
         checkTargets(rule.then.targets, [...basePath, i, "then", "targets"], `${label}규칙 ${rule.id}`);
+        // 멈추는 결정(차단·승인 필요·수동 복구)을 내는 규칙은 "무엇을 하면 풀리는지" 를 반드시 적어야 한다
+        if (rule.then.decision !== undefined && decisionsNeedingRequires.includes(rule.then.decision) && !(rule.then.requires && rule.then.requires.length > 0)) {
+          ctx.addIssue({
+            code: "custom",
+            path: [...basePath, i, "then", "requires"],
+            message: `${label}규칙 ${rule.id}: decision '${rule.then.decision}' 을(를) 내는 규칙은 requires(해결 조건)가 최소 1개 있어야 합니다`,
+          });
+        }
       });
     };
 
-    checkRules(policy.rules, ["rules"], "");
+    checkRules(policy.rules, ["rules"], "", ["block", "needs_approval"]);
     checkTargets(policy.default.targets, ["default", "targets"], "default");
-    if (policy.rollback) checkRules(policy.rollback.rules, ["rollback", "rules"], "롤백 ");
+    if (policy.rollback) checkRules(policy.rollback.rules, ["rollback", "rules"], "롤백 ", ["manual_recovery"]);
   });
 export type Policy = z.infer<typeof PolicySchema>;
 
@@ -235,13 +290,32 @@ export type Policy = z.infer<typeof PolicySchema>;
 export const RuleResultSchema = z
   .object({
     id: z.string().describe("policy.yaml 의 규칙 id. 'default' 는 기본 정책이 쓰였다는 뜻"),
-    result: z.enum(["matched", "not_matched"]).describe("규칙이 걸렸는지"),
-    reason: z.string().optional().describe("걸린 규칙의 사람이 읽는 근거. matched 일 때만 있다"),
+    result: z
+      .enum(["matched", "not_matched", "matched_after_block"])
+      .describe("규칙이 걸렸는지. matched_after_block = 이미 block(롤백은 manual_recovery)이 정해진 뒤 걸림: decision 은 못 바꾸고 targets 좁히기와 해결 조건만 반영됨"),
+    reason: z.string().optional().describe("걸린 규칙의 사람이 읽는 근거. matched / matched_after_block 일 때만 있다"),
   })
   .describe("평가된 규칙 하나의 결과");
 export type RuleResult = z.infer<typeof RuleResultSchema>;
 
 const PlanHashSchema = z.string().regex(/^[0-9a-f]{64}$/).describe("입력과 정책과 결과를 정규화해 sha256 한 값. 같은 입력이면 항상 같다");
+
+/** plan 에 실리는 해결 조건. 걸린 규칙들의 requires 를 id 로 합치고 정렬한 것 */
+export const PlanRequirementSchema = z
+  .strictObject({
+    id: z.string().describe("해결 조건 id (예: managed_db, fix_tests)"),
+    hint: z.string().optional().describe("사람이 읽는 설명. 정책에 적혀 있을 때만"),
+    rule_id: z.string().describe("이 조건을 처음 요구한 규칙 id"),
+    allowed_targets: z
+      .array(z.string())
+      .describe("이 해결 조건을 충족해야 하는 위치. 결정서의 최종 targets. 차단이라 targets 가 비었으면 차단 전 마지막 targets (고친 뒤 어디로 가게 될지)"),
+  })
+  .describe("해결 조건 하나");
+export type PlanRequirement = z.infer<typeof PlanRequirementSchema>;
+const PlanRequiresSchema = z
+  .array(PlanRequirementSchema)
+  .optional()
+  .describe("걸린 규칙들의 해결 조건 (id 로 합치고 id 순 정렬). block / needs_approval / manual_recovery 면 최소 1개. 하나도 없으면 필드가 없다");
 
 export const PlanSchema = z
   .object({
@@ -251,10 +325,7 @@ export const PlanSchema = z
     decision: DecisionSchema,
     targets: z.array(z.string()).describe("배포할 대상 (known_targets 의 부분집합). block 이면 빈 배열"),
     failover_allowed: z.boolean().describe("온프레 장애 시 Cloud Run 으로 전환해도 되는지. local 과 cloud_run 이 모두 있을 때만 true 가능"),
-    requires: z
-      .array(z.string())
-      .optional()
-      .describe("걸린 규칙들의 requires 를 모은 것 (중복 제거, 정렬). 무엇을 고쳐야 다른 대상에 갈 수 있는지. 하나도 없으면 필드가 없다"),
+    requires: PlanRequiresSchema,
     rules: z.array(RuleResultSchema).describe("평가된 모든 규칙과 결과 (block 이후 규칙은 없음)"),
     plan_hash: PlanHashSchema,
   })
@@ -294,6 +365,7 @@ export const RollbackPlanSchema = z
     serve_digest: z.string().nullable().describe("결정 후 트래픽을 받아야 할 버전. keep_stable / rollback → stable.digest, manual_recovery → null"),
     targets: z.array(z.string()).describe("keep_stable / rollback → stable.targets 에서 좁힌 결과, manual_recovery → []"),
     failover_allowed: z.boolean().describe("온프레 장애 시 Cloud Run 전환 허용 여부. false 가 이기고, local 과 cloud_run 이 모두 있을 때만 true 가능"),
+    requires: PlanRequiresSchema,
     rules: z.array(RuleResultSchema).describe("평가된 롤백 규칙과 결과"),
     plan_hash: PlanHashSchema,
   })

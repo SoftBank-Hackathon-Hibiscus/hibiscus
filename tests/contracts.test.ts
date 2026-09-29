@@ -109,7 +109,7 @@ describe("JSON Schema 의 선택/필수 표시", () => {
 
   it("설명이 필드에 붙어 있다", () => {
     const props = jsonSchemas.get("Plan")!.properties as Record<string, JsonSchema>;
-    expect(props.requires!.description).toContain("무엇을 고쳐야");
+    expect(props.requires!.description).toContain("해결 조건");
     expect(props.plan_hash!.description).toContain("sha256");
   });
 });
@@ -133,7 +133,11 @@ describe("contracts/ 폴더가 최신인지", () => {
       expect(readme).toContain(`--type ${c.typeKey}`);
     }
     expect(readme).toContain("| `state.pii_written_onprem` | boolean | 필수 |");
-    expect(readme).toContain("| `requires` | string[] | 선택 |");
+    expect(readme).toContain("| `requires` | object[] | 선택 |");
+    expect(readme).toContain("| `requires[].hint` | string | 선택 |");
+    expect(readme).toContain("| `requires[].rule_id` | string | 필수 |");
+    expect(readme).toContain("| `requires[].allowed_targets` | string[] | 필수 |");
+    expect(readme).toContain("해결 조건은 `allowed_targets` 안에서만 충족한다");
     expect(readme).toContain("**kind = \"rollback\"**");
     expect(readme).toContain("팀과 합의가 필요한 점");
     expect(readme).toContain("```mermaid");

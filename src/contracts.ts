@@ -275,9 +275,11 @@ const AGREEMENTS = `## 팀과 합의가 필요한 점
 
 1. **run_id 와 digest 는 끝까지 그대로 전달한다.** 테스트 파트가 정한 \`run_id\` 와 이미지 \`digest\` 가 test_result → pii → plan → 서명 → 배포 → rollback_request 까지 바뀌지 않아야 한다. 정책 엔진은 test_result 와 pii 의 \`run_id\` 가 다르면 차단한다(R2). digest 는 \`sha256:<hex>\` 형식만 받는다.
 2. **비밀값은 어떤 파일에도 넣지 않는다.** API 키, 토큰, 접속 문자열을 \`facts\`, \`failures\`, \`evidence\` 등에 넣지 말 것. 개인정보 판정 모듈은 근거 조각의 비밀처럼 보이는 값을 \`[REDACTED]\` 로 가리지만, 다른 파트의 파일은 각자 책임진다.
-3. **선택 필드는 "없을 수 있다" 는 뜻이지 "null 을 넣어도 된다" 는 뜻이 아니다.** 예: \`plan.requires\` 는 없거나 문자열 배열이다. \`pii[].source\` 도 마찬가지.
+3. **선택 필드는 "없을 수 있다" 는 뜻이지 "null 을 넣어도 된다" 는 뜻이 아니다.** 예: \`plan.requires\` 는 없거나 객체 배열이다. \`pii[].source\` 도 마찬가지.
 4. **최근 추가된 필드**
-   - \`plan.requires\` (선택, string[]): 걸린 규칙들이 요구하는 것의 합집합 (예: \`["managed_db"]\`). AI 수정 파트가 "무엇을 고쳐야 클라우드에 갈 수 있는지" 읽는다. 없으면 필드 자체가 없다.
+   - \`plan.requires\` / \`rollback_plan.requires\` (선택, \`[{ id, hint?, rule_id, allowed_targets }]\`): 해결 조건. 걸린 규칙들이 "이 규칙을 피하려면 무엇이 필요한가" 를 적은 것을 id 로 합치고 id 순으로 정렬한 것 (예: \`[{ "id": "managed_db", "hint": "SQLite를 PostgreSQL로 전환 (allowed_targets 안의 환경에서)", "rule_id": "R5", "allowed_targets": ["local"] }]\`). AI 수정 파트가 \`id\` 로 분기하고 \`hint\` 를 사람에게 보여준다. \`decision\` 이 \`block\` / \`needs_approval\` / \`manual_recovery\` 면 항상 1개 이상 있다. 없으면 필드 자체가 없다. 엔진이 스스로 차단할 때(허용 대상 교집합 공백)는 \`resolve_target_conflict\` / \`manual_target_recovery\` 가 들어간다.
+   - \`rules[].result\` 는 \`matched\` / \`not_matched\` / \`matched_after_block\` 세 가지다. \`block\`(롤백은 \`manual_recovery\`)이 나와도 엔진은 끝까지 평가해 targets 좁히기와 해결 조건을 모두 모으므로, 차단 뒤에 걸린 규칙은 \`matched_after_block\` 으로 온다. 이 규칙들은 decision 을 바꾸지 않았다. 유일한 예외는 \`halt: true\` 인 규칙(현재 R2 입력 불일치)과 롤백의 \`keep_stable\`: 그 자리에서 멈추고 뒤 규칙은 목록에 없다.
+   - **해결 조건은 \`allowed_targets\` 안에서만 충족한다.** \`allowed_targets\` 는 그 결정서의 최종 \`targets\` 이고, 차단이라 \`targets\` 가 비었으면 차단 전 마지막 \`targets\` 다 (고친 뒤 어디로 가게 될지). 예: \`allowed_targets\` 가 \`["local"]\` 이면 관리형 DB 도 온프레(예: 로컬 PostgreSQL)여야 하며 Cloud SQL 로 옮기면 안 된다. 개인정보 규칙(R4)이 온프레로 좁힌 앱의 데이터를 클라우드로 보내는 "수정" 이 되지 않게 하기 위해서다. 한 결정서의 모든 해결 조건은 같은 \`allowed_targets\` 를 가진다.
    - \`decisions.jsonl\` 의 \`kind\` (\`deploy\` | \`rollback\`): 같은 파일에 두 종류의 결정이 섞이므로 반드시 \`kind\` 로 구분해서 읽을 것. 두 종류는 필드 구성이 다르다.
    - \`rollback_plan.serve_digest\` (string | null): 결정 후 트래픽을 받아야 할 버전. \`keep_stable\`/\`rollback\` 이면 \`stable.digest\`, \`manual_recovery\` 면 null. 배포 파트는 \`decision\` 이 아니라 이 값으로 라우팅 대상을 정하면 된다.
    - \`rollback_request.candidate\` / \`stable\`: 예전 이름 \`current\` / \`previous\` 는 받지 않는다. candidate = 이번 배포 후보(문제가 난 버전), stable = 이번 배포 전 정상 버전.

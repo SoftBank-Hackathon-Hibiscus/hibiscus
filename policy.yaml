@@ -3,21 +3,33 @@
 #   id      : 규칙 식별자 (plan.json 의 rules[].id 와 decisions.jsonl 의 rule_ids 에 그대로 실린다)
 #   if      : 조건. 컨텍스트는 { test: test_result.json, pii: pii.json }
 #   then    : 걸렸을 때 효과. decision / targets / failover_allowed / requires 중 필요한 것만 적는다
-#             requires 는 "이 규칙을 피하려면 무엇이 필요한가" 의 목록 (예: managed_db). plan.json 의
-#             requires 에 모여서 다음 단계(AI 수정 파트)가 무엇을 고쳐야 할지 알 수 있게 한다
+#             requires 는 "해결 조건": 이 규칙에 걸린 이유를 없애려면 무엇이 필요한가.
+#               - { id: managed_db, hint: "SQLite를 PostgreSQL로 전환 (allowed_targets 안의 환경에서)" }  처럼 설명과 함께, 또는
+#               - managed_db  처럼 id 만 (문자열)
+#             plan.json 의 requires 에 [{ id, hint, rule_id, allowed_targets }] 로 모여서 다음 단계(AI 수정 파트)가 읽는다.
+#             allowed_targets 는 끝까지 좁힌 targets (차단으로 비면 비기 직전의 targets):
+#             해결 조건은 그 위치 안에서만 충족해야 한다. hint 는 위치를 정하지 않게 쓴다.
+#             block / needs_approval 을 내는 규칙은 requires 가 최소 1개 있어야 한다 (없으면 로드 에러).
 #   reason  : 사람이 읽는 근거. {경로} 로 값을 넣을 수 있다
 #
 # 조건 문법 (엔진은 이 문법만 안다. 규칙 내용은 회사마다 자유롭게 바꿀 수 있다):
 #   { path, eq | ne | in | gt | lt | exists }   값 비교
+#   { path, starts_with }                       문자열 접두어
+#   { path, matches, flags? }                   정규식 (flags 는 i m s 등 JS 정규식 플래그, 선택)
 #   { path, eq_path | ne_path }                 두 필드 비교
 #   { some: <배열 경로>, where: <조건> }         배열 원소 중 조건을 만족하는 것이 있으면 참
 #                                               where 안에서는 원소가 기준이고 $. 로 루트 접근.
-#                                               reason 의 {경로} 는 원소 -> 루트 순으로 찾는다
+#                                               원소가 문자열이면 path "@" 가 원소 자체.
+#                                               reason 의 {경로} 는 원소 -> 루트 순으로 찾는다 ({@} 는 원소)
 #   { all: [...] } / { any: [...] } / { not: ... }
 #
 # 병합 방식 (안전한 쪽으로만 움직인다):
 #   decision         : allow < needs_approval < block 순으로 강한 쪽만 남는다.
-#                      block 이 나오면 그 즉시 검사를 멈춘다.
+#                      block 이 나와도 끝까지 평가한다. 뒤 규칙은 decision 을 못 바꾸고 targets 좁히기와
+#                      requires 수집만 반영되며 plan.rules 에 matched_after_block 으로 기록된다.
+#                      (차단 사유를 한 번에 다 알려주기 위해)
+#   halt             : 규칙에 halt: true 를 붙이면 그 규칙이 걸렸을 때 즉시 멈춘다.
+#                      입력이 섞인 경우(R2)처럼 뒤 판단이 의미 없을 때만 쓴다.
 #   targets          : default.targets 에서 시작해 좁히기만 된다. 규칙이 targets 를 정하면
 #                      지금까지의 targets 와 교집합만 남긴다 (첫 규칙도 default 와의 교집합).
 #                      그래서 default 에 없는 대상은 어떤 규칙으로도 추가할 수 없고,
@@ -39,13 +51,20 @@ rules:
   - id: R1
     description: 테스트가 실패한 이미지는 배포하지 않는다
     if: { path: test.passed, eq: false }
-    then: { decision: block }
+    then:
+      decision: block
+      requires:
+        - { id: fix_tests, hint: "재생 불일치 요청을 고친 뒤 다시 테스트" }
     reason: "테스트 실패 ({test.match.matched}/{test.match.total} 일치)"
 
   - id: R2
-    description: 테스트 결과와 개인정보 후보가 서로 다른 실행(run_id)이면 입력 불일치로 차단
+    description: 테스트 결과와 개인정보 후보가 서로 다른 실행(run_id)이면 입력 불일치로 차단. 입력이 섞였으면 뒤 규칙의 판단이 의미 없으므로 즉시 멈춘다
     if: { path: test.run_id, ne_path: pii.run_id }
-    then: { decision: block }
+    halt: true
+    then:
+      decision: block
+      requires:
+        - { id: rerun_same_run, hint: "같은 run_id로 테스트와 개인정보 판정을 다시 실행" }
     reason: "입력 불일치: test_result.run_id={test.run_id} != pii.run_id={pii.run_id}"
 
   - id: R3
@@ -53,7 +72,10 @@ rules:
     if:
       some: pii.pii
       where: { path: confident, eq: false }
-    then: { decision: needs_approval }
+    then:
+      decision: needs_approval
+      requires:
+        - { id: human_review_pii, hint: "해당 칼럼이 개인정보인지 사람이 확인" }
     reason: "확신 없는 개인정보 후보({table}.{column}, {kind}): {evidence}"
 
   - id: R4
@@ -69,8 +91,27 @@ rules:
     if: { path: test.facts.db, eq: sqlite }
     then:
       targets: [local]
-      requires: [managed_db]
+      requires:
+        - { id: managed_db, hint: "SQLite를 PostgreSQL로 전환 (allowed_targets 안의 환경에서)" }
     reason: "SQLite 사용 ({test.facts.db}): 관리형 DB로 전환하기 전까지 클라우드 배포 제외"
+
+  - id: R6
+    description: >-
+      로컬 폴더에 파일을 쓰면 클라우드에서는 인스턴스 교체·스케일아웃 시 파일이 사라지거나 갈라진다.
+      /tmp 와 로그 파일은 무시. DB 파일(.db/.sqlite/.sqlite3)은 R5(managed_db)가 담당하므로 여기서는 제외
+    if:
+      some: test.facts.writes_local_file
+      where:
+        not:
+          any:
+            - { path: "@", starts_with: "/tmp/" }
+            - { path: "@", matches: "\\.log$" }
+            - { path: "@", matches: "\\.(db|sqlite|sqlite3)$", flags: i }
+    then:
+      targets: [local]
+      requires:
+        - { id: object_storage, hint: "로컬 폴더에 쓰는 파일을 오브젝트 스토리지로 이전 (allowed_targets 안의 환경에서)" }
+    reason: "로컬 파일 쓰기: {@}"
 
 default:
   targets: [local, cloud_run]
@@ -83,11 +124,14 @@ default:
 #
 # 용어: candidate = 이번 배포 후보(문제가 난 버전), stable = 이번 배포 전 정상 버전(되돌아갈 곳)
 # 컨텍스트는 { request: rollback_request.json }. 조건 문법은 위와 같다.
-# then 은 decision (keep_stable | rollback | manual_recovery), targets (좁히기), failover_allowed 를 받는다.
+# then 은 decision (keep_stable | rollback | manual_recovery), targets (좁히기), failover_allowed, requires 를 받는다.
+# manual_recovery 를 내는 규칙은 requires(해결 조건)가 최소 1개 있어야 한다.
 #
 # 병합 방식:
 #   decision         : rollback < keep_stable < manual_recovery 순으로 강한 쪽만 남는다.
-#                      keep_stable / manual_recovery 가 나오면 그 즉시 멈춘다.
+#                      keep_stable 은 되돌릴 것이 없으므로 그 즉시 멈춘다.
+#                      manual_recovery 는 끝까지 평가한다 (뒤 규칙은 targets 좁히기와 requires 만 반영,
+#                      matched_after_block 으로 기록). halt: true 인 규칙이 걸리면 즉시 멈춘다.
 #   targets          : stable.targets 에서 시작해 좁히기만 된다. 교집합이 비면 manual_recovery.
 #   failover_allowed : false 가 이긴다. 최종 targets 에 local 과 cloud_run 이 모두 있을 때만 true 가능.
 #   어떤 규칙도 decision 을 정하지 않으면 default 를 쓴다.
@@ -104,7 +148,10 @@ rollback:
     - id: RB2
       description: DB 스키마가 이전 버전과 호환되지 않으면 자동으로 되돌릴 수 없다
       if: { path: request.state.db_migration_backward_compatible, eq: false }
-      then: { decision: manual_recovery }
+      then:
+        decision: manual_recovery
+        requires:
+          - { id: manual_db_recovery, hint: "DB 스키마를 이전 버전과 호환되게 복구한 뒤 롤백" }
       reason: "DB 마이그레이션이 이전 버전과 호환되지 않음: 자동 롤백 차단, 수동 복구 필요"
 
     - id: RB3

@@ -53,9 +53,10 @@ runCli(() => {
   console.log(`  decision : ${plan.decision}`);
   console.log(`  targets  : ${plan.targets.length ? plan.targets.join(", ") : "(none)"}`);
   console.log(`  failover : ${plan.failover_allowed}`);
-  if (plan.requires) console.log(`  requires : ${plan.requires.join(", ")}`);
+  for (const r of plan.requires ?? []) console.log(`  requires : ${r.id} (${r.rule_id}, in [${r.allowed_targets.join(", ")}])${r.hint ? ` — ${r.hint}` : ""}`);
   for (const r of plan.rules) {
     if (r.result === "matched") console.log(`  [${r.id}] ${r.reason}`);
+    else if (r.result === "matched_after_block") console.log(`  [${r.id}] (차단 후) ${r.reason}`);
   }
   console.log(`  plan_hash: ${plan.plan_hash}`);
   console.log(`  -> ${outPath} (기록: ${logPath})`);

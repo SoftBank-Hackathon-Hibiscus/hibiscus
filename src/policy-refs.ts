@@ -22,10 +22,12 @@ interface RefCollector {
   add(path: string, rule: string, use: "condition" | "reason"): void;
 }
 
-/** scope 기준 경로를 루트 기준 표기로 바꾼다. scope 가 없으면 그대로 */
+/** scope 기준 경로를 루트 기준 표기로 바꾼다. scope 가 없으면 그대로. `@` 는 원소 자체 → `배열[]` */
 function absolute(path: string, scopePrefix: string | undefined): string {
   if (path === "$") return "$";
   if (path.startsWith("$.")) return path.slice(2);
+  if (path === "@") return scopePrefix ? `${scopePrefix}[]` : "@";
+  if (path.startsWith("@.")) return scopePrefix ? `${scopePrefix}[].${path.slice(2)}` : path.slice(2);
   return scopePrefix ? `${scopePrefix}[].${path}` : path;
 }
 
@@ -51,7 +53,7 @@ function walkReason(template: string, rule: string, somePrefix: string | undefin
     if (path.startsWith("$")) {
       out.add(absolute(path, undefined), rule, "reason");
     } else if (somePrefix) {
-      out.add(`${somePrefix}[].${path}`, rule, "reason");
+      out.add(absolute(path, somePrefix), rule, "reason");
     } else {
       out.add(path, rule, "reason");
     }
@@ -100,7 +102,7 @@ export function lintPolicy(policy: Policy): string[] {
   const warnings: string[] = [];
   const known = new Set(KNOWN_FACTS_KEYS);
   for (const ref of collectPolicyPaths(policy).deploy) {
-    const m = /^test\.facts\.([^.[]+)/.exec(ref.path);
+    const m = /^test\.facts\.([^.[\]]+)/.exec(ref.path);
     if (m && !known.has(m[1]!)) {
       warnings.push(
         `규칙 ${ref.rules.join(", ")} 이(가) 정의되지 않은 facts 키를 읽습니다: ${m[1]} (경로 ${ref.path}). ` +
