@@ -6,20 +6,10 @@
  *     --recording <파일>   replay 용 녹화 파일 (기본: recordings/<run-id>.json)
  *     --record             llm 호출 결과를 recordings/<run-id>.json 에 저장
  */
-import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
 import { CliError, parseArgs, requireArgs, runCli, writeJson } from "../io.js";
 import { PiiReportSchema } from "../schema.js";
-import {
-  type Classifier,
-  HeuristicClassifier,
-  LlmClassifier,
-  ReplayClassifier,
-  createAnthropicCall,
-  loadRecording,
-  resolveLlmModel,
-} from "./classifier.js";
 import { extract, loadSources } from "./extractor.js";
+import { selectClassifier } from "./select.js";
 
 const USAGE = `사용법:
   npx tsx src/pii/cli.ts --src <앱 폴더> --run-id <run_id> --out <pii.json> [--classifier heuristic|llm|replay] [--recording <파일>] [--record]
@@ -39,51 +29,6 @@ const USAGE = `사용법:
 
 const FLAGS = new Set(["record"]);
 
-function pickClassifier(args: Record<string, string>, runId: string): { classifier: Classifier; notes: string[] } {
-  const mode = args.classifier ?? "heuristic";
-  const heuristic = new HeuristicClassifier();
-  const notes: string[] = [];
-
-  if (mode === "heuristic") return { classifier: heuristic, notes };
-
-  if (mode === "llm") {
-    if (!process.env.ANTHROPIC_API_KEY) {
-      notes.push("ANTHROPIC_API_KEY 가 없어 heuristic 으로 판정합니다 (llm 요청됨)");
-      return { classifier: heuristic, notes };
-    }
-    const model = resolveLlmModel();
-    notes.push(`LLM 모델: ${model} (환경변수 PII_LLM_MODEL 로 변경 가능)`);
-    const recordPath = join("recordings", `${runId}.json`);
-    const classifier = new LlmClassifier({
-      base: heuristic,
-      call: createAnthropicCall({ model }),
-      onExchange: args.record
-        ? (request, response) => {
-            mkdirSync(dirname(recordPath), { recursive: true });
-            const recording = { recorded_at: new Date().toISOString(), model, request, response };
-            writeFileSync(recordPath, JSON.stringify(recording, null, 2) + "\n", "utf8");
-            notes.push(`LLM 응답을 저장했습니다: ${recordPath}`);
-          }
-        : undefined,
-    });
-    return { classifier, notes };
-  }
-
-  if (mode === "replay") {
-    const path = args.recording ?? join("recordings", `${runId}.json`);
-    let recording;
-    try {
-      recording = loadRecording(path);
-    } catch (e) {
-      throw new CliError(`녹화 파일을 읽을 수 없습니다: ${path} (${(e as Error).message})`);
-    }
-    notes.push(`녹화 재생: ${path}`);
-    return { classifier: new ReplayClassifier(heuristic, recording), notes };
-  }
-
-  throw new CliError(`--classifier 는 heuristic | llm | replay 중 하나여야 합니다: ${mode}`);
-}
-
 runCli(async () => {
   const args = parseArgs(process.argv.slice(2), FLAGS);
   if (args.help) {
@@ -102,7 +47,7 @@ runCli(async () => {
     throw new CliError(`앱 폴더를 읽을 수 없습니다: ${src} (${(e as Error).message})`);
   }
   const candidates = extract(files);
-  const { classifier, notes } = pickClassifier(args, runId);
+  const { classifier, notes } = selectClassifier({ mode: args.classifier, runId, recording: args.recording, record: args.record === "true" });
   const results = await classifier.classify(candidates);
 
   const report = PiiReportSchema.parse({ run_id: runId, pii: results });

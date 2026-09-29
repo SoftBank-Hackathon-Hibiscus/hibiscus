@@ -165,6 +165,40 @@ R5의 이유: 클라우드에서는 인스턴스가 교체되면 SQLite 파일�
 
 `kind`로 배포 결정과 롤백 결정을 구분한다. `rule_ids`는 걸린 규칙만. 시간 값은 CLI에서만 붙이고 엔진(`decide`, `decideRollback`)은 시간을 쓰지 않는다.
 
+## 보안 단계 실행기 (`src/stage.ts`)
+
+개인정보 판정과 정책 결정을 명령 하나로 실행한다. CI에서 바로 쓰도록 결정을 종료 코드로 알린다.
+
+```bash
+npx tsx src/stage.ts --src samples/signup-contact --test fixtures/01-allow/test_result.json --policy policy.yaml --out-dir out/r-001
+```
+
+| 옵션 | 설명 |
+|---|---|
+| `--src` | 분석할 앱 소스 폴더 (필수) |
+| `--test` | `test_result.json` (필수). `run_id`를 여기서 가져와 개인정보 판정에도 같은 값을 쓴다 |
+| `--policy` | 정책 YAML (필수) |
+| `--out-dir` | `pii.json`과 `plan.json`을 쓸 폴더 (필수) |
+| `--classifier` | `heuristic`(기본) / `llm` / `replay` |
+| `--recording` | replay용 녹화 파일 |
+| `--log` | 결정 기록 파일. 기본 `./decisions.jsonl` |
+| `--json` | 사람이 읽는 출력 대신 한 줄 JSON 요약을 stdout에 출력 |
+
+순서는 test_result 검증 → policy 로드 → 개인정보 판정 → 정책 결정 → 파일 저장 → 결정 기록이다. 중간에 실패하면 `오류 [단계: test_result] ...`처럼 어느 단계에서 왜 실패했는지 출력한다.
+
+| 결과 | 종료 코드 |
+|---|---|
+| allow | 0 |
+| needs_approval | 2 |
+| block | 3 |
+| 실행 오류 (파일 없음, 형식 오류 등) | 1 |
+
+`--json`의 요약은 `{ run_id, decision, targets, failover_allowed, requires, plan_path, pii_path }` 한 줄이다. 따로 실행한 개인정보 CLI와 정책 CLI의 결과와 같은 파일이 나온다 (테스트로 확인).
+
+```bash
+npx tsx src/stage.ts --src samples/ambiguous --test fixtures/01-allow/test_result.json --policy policy.yaml --out-dir out/r-001 --json
+```
+
 ## 파일 계약 (`contracts/`)
 
 다른 파트와 주고받는 파일 6개(test_result, pii, plan, rollback_request, rollback_plan, decisions.jsonl)의 JSON Schema와 설명 문서가 [`contracts/`](contracts/README.md)에 있다. `src/schema.ts`의 zod 스키마에서 자동 생성하므로 스키마를 바꾸면 다시 만든다.
@@ -316,6 +350,9 @@ src/schema.ts        zod 스키마 + 타입 (입력 2개, policy, plan, 기록)
 src/engine.ts        decide(test, pii, policy) -> plan   순수 함수, 파일 입출력 없음
 src/cli.ts           파일 읽기/검증/쓰기, decisions.jsonl 추가
 src/io.ts            CLI 공용 입출력 도우미 (인자, JSON/YAML, 검증, 기록)
+src/stage.ts         보안 단계 실행기 CLI (개인정보 판정 + 정책 결정, 종료 코드로 결정 알림)
+src/stage-runner.ts  runStage(): 실행기의 본체 (단계별 오류 표시)
+src/pii/select.ts    --classifier 에 따른 판정기 선택 (pii CLI 와 실행기가 공유)
 src/policy-refs.ts   규칙이 읽는 경로 수집, 모르는 facts 키 경고
 src/contracts.ts     계약 6개 목록, zod -> JSON Schema, contracts/README.md 렌더링
 src/validate.ts      다른 파트용 파일 검증 CLI
@@ -339,6 +376,7 @@ tests/engine.test.ts 정책 엔진 테스트
 tests/rollback.test.ts 롤백 판단 테스트
 tests/contracts.test.ts fixtures 를 JSON Schema 로 검증 + contracts/ 최신 여부
 tests/facts.test.ts  facts 키 타입, 정책 경로 수집, 모르는 키 경고
+tests/stage.test.ts  보안 단계 실행기 (종료 코드, 파일 생성, 두 CLI 와 동일성)
 tests/pii.test.ts    판정기 테스트 + 끝에서 끝
 scripts/demo.mjs     fixtures 일괄 실행
 ```

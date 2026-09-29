@@ -269,7 +269,10 @@ flowchart LR
   RB -->|rollback_plan.json| D
   PE -.->|decisions.jsonl kind=deploy| L[(결정 기록)]
   RB -.->|decisions.jsonl kind=rollback| L
-\`\`\``;
+  ST[보안 단계 실행기<br/>src/stage.ts] -.->|개인정보 판정 + 정책 결정을 한 명령으로| PE
+\`\`\`
+
+보안 단계 실행기(\`npx tsx src/stage.ts --src <앱> --test test_result.json --policy policy.yaml --out-dir <폴더>\`)는 개인정보 판정과 정책 결정을 한 번에 돌려 \`pii.json\` 과 \`plan.json\` 을 만들고, 결정을 종료 코드로 알린다 (allow 0, needs_approval 2, block 3, 실행 오류 1). 파일 형식은 위와 같다.`;
 
 const AGREEMENTS = `## 팀과 합의가 필요한 점
 

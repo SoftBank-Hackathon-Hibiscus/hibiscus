@@ -12,7 +12,8 @@
     "pii": "tsx src/pii/cli.ts",
     "rollback": "tsx src/rollback/cli.ts",
     "contracts": "tsx scripts/contracts.ts",
-    "validate": "tsx src/validate.ts"
+    "validate": "tsx src/validate.ts",
+    "stage": "tsx src/stage.ts"
   },
   "license": "MIT",
   "dependencies": {
