@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -121,20 +121,27 @@ describe("runStage (라이브러리)", () => {
     expect(first.exitCode).toBe(EXIT_CODES.allow);
   });
 
-  it("따로 실행한 두 CLI(pii → 정책)의 결과와 stage 의 결과가 같다", async () => {
+  it("따로 실행한 세 CLI(마이그레이션 → pii → 정책)의 결과와 stage 의 결과가 같다", async () => {
     const separate = tmp();
     const staged = tmp();
 
-    // 1) 개인정보 판정 CLI
+    // 1) 마이그레이션 판정 CLI → test_result.facts.migration 에 넣는다 (stage 가 하는 일을 손으로)
+    const migrationPath = join(separate, "migration.json");
+    const m = runCli("src/migration/cli.ts", ["--src", sample("signup-contact"), "--out", migrationPath]);
+    expect(m.code, m.stderr).toBe(0);
+    const original = JSON.parse(readFileSync(fixtureTest("01-allow"), "utf8"));
+    const enrichedPath = join(separate, "test_result.json");
+    writeFileSync(enrichedPath, JSON.stringify({ ...original, facts: { ...original.facts, migration: JSON.parse(readFileSync(migrationPath, "utf8")) } }));
+    // 2) 개인정보 판정 CLI
     const piiPath = join(separate, "pii.json");
     const p = runCli("src/pii/cli.ts", ["--src", sample("signup-contact"), "--run-id", "r-001", "--out", piiPath]);
     expect(p.code, p.stderr).toBe(0);
-    // 2) 정책 엔진 CLI
+    // 3) 정책 엔진 CLI
     const planPath = join(separate, "plan.json");
-    const d = runCli("src/cli.ts", ["--test", fixtureTest("01-allow"), "--pii", piiPath, "--policy", POLICY, "--out", planPath, "--log", join(separate, "d.jsonl")]);
+    const d = runCli("src/cli.ts", ["--test", enrichedPath, "--pii", piiPath, "--policy", POLICY, "--out", planPath, "--log", join(separate, "d.jsonl")]);
     expect(d.code, d.stderr).toBe(0);
 
-    // 3) stage
+    // 4) stage (원본 test_result 를 주면 실행기가 마이그레이션을 스스로 판정한다)
     const result = await runStage({ src: sample("signup-contact"), testPath: fixtureTest("01-allow"), policyPath: POLICY, outDir: staged, logPath: join(staged, "d.jsonl") });
 
     expect(JSON.parse(readFileSync(join(staged, "pii.json"), "utf8"))).toEqual(JSON.parse(readFileSync(piiPath, "utf8")));

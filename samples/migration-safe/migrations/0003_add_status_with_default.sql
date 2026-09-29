@@ -1,0 +1,3 @@
+-- NOT NULL 이라도 DEFAULT 가 있으면 옛 버전의 INSERT 가 깨지지 않는다
+ALTER TABLE todos ADD COLUMN status TEXT NOT NULL DEFAULT 'open';
+ALTER TABLE todos ADD COLUMN priority NUMERIC(3, 1) NOT NULL DEFAULT 0;

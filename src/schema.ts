@@ -14,6 +14,39 @@ export const DigestSchema = z
 
 const RunIdSchema = z.string().min(1).describe("파이프라인 실행 id. 모든 파일이 같은 값을 가져야 한다");
 
+// ---------------------------------------------------------------------------
+// 파괴적 DB 마이그레이션 판정 결과 (src/migration/ 이 만든다. test_result.facts.migration 에 실린다)
+// ---------------------------------------------------------------------------
+export const MIGRATION_KINDS = [
+  "drop_table",
+  "drop_column",
+  "rename_table",
+  "rename_column",
+  "alter_column_type",
+  "add_not_null_without_default",
+  "truncate",
+] as const;
+export const MigrationKindSchema = z.enum(MIGRATION_KINDS);
+export type MigrationKind = z.infer<typeof MigrationKindSchema>;
+
+export const MigrationFindingSchema = z
+  .object({
+    kind: MigrationKindSchema.describe("파괴적 변경의 종류"),
+    statement: z.string().describe("해당 SQL 문장 (한 줄로 줄임)"),
+    evidence: z.string().describe("위치 '파일:줄'"),
+  })
+  .describe("파괴적 변경 하나");
+export type MigrationFinding = z.infer<typeof MigrationFindingSchema>;
+
+export const MigrationReportSchema = z
+  .object({
+    destructive: z.boolean().describe("파괴적 변경이 하나라도 있는지. R7 이 읽는다"),
+    backward_compatible: z.boolean().describe("이전 버전과 호환되는지 = 파괴적 변경이 없을 때 true"),
+    findings: z.array(MigrationFindingSchema).describe("파괴적 변경 목록. 없으면 빈 배열"),
+  })
+  .describe("파괴적 DB 마이그레이션 판정. 실행기(src/stage.ts)가 facts.migration 이 없으면 채운다");
+export type MigrationReport = z.infer<typeof MigrationReportSchema>;
+
 /**
  * 테스트 파트가 관찰한 사실 중 "정책이 읽는 키" 만 타입을 정한다.
  * 여기 없는 키는 자유롭게 넣을 수 있고 그대로 보존된다 (정책 엔진은 읽지 않는다).
@@ -22,9 +55,10 @@ const RunIdSchema = z.string().min(1).describe("파이프라인 실행 id. 모�
 export const FactsSchema = z
   .looseObject({
     db: z.enum(["sqlite", "postgres", "mysql", "none"]).optional().describe("앱이 쓰는 DB. 소문자만. R5 가 읽는다"),
-    writes_local_file: z.array(z.string()).optional().describe("앱이 쓰는 로컬 파일 경로 목록"),
+    writes_local_file: z.array(z.string()).optional().describe("앱이 쓰는 로컬 파일 경로 목록. R6 가 읽는다"),
+    migration: MigrationReportSchema.optional(),
   })
-  .describe("테스트 중 관찰한 사실. 정의된 키(db, writes_local_file)는 타입이 고정되고, 그 밖의 키는 자유");
+  .describe("테스트 중 관찰한 사실. 정의된 키(db, writes_local_file, migration)는 타입이 고정되고, 그 밖의 키는 자유");
 export type Facts = z.infer<typeof FactsSchema>;
 /** 정책 규칙이 참조해도 되는 facts 키 */
 export const KNOWN_FACTS_KEYS: readonly string[] = Object.keys(FactsSchema.shape);

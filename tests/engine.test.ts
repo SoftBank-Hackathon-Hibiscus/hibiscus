@@ -51,6 +51,7 @@ describe("fixtures", () => {
       { id: "R4", result: "not_matched" },
       { id: "R5", result: "matched_after_block", reason: "SQLite 사용 (sqlite): 관리형 DB로 전환하기 전까지 클라우드 배포 제외" },
       { id: "R6", result: "not_matched" },
+      { id: "R7", result: "not_matched" },
     ]);
     expect(plan.requires?.map((r) => r.id)).toEqual(["fix_tests", "managed_db"]);
   });
@@ -411,6 +412,7 @@ describe("block 이후 계속 평가 / halt", () => {
       ["R4", "matched_after_block"],
       ["R5", "matched_after_block"],
       ["R6", "not_matched"],
+      ["R7", "not_matched"],
     ]);
     expect(plan.rules.find((r) => r.id === "R4")?.reason).toBe("개인정보(contact, phone) 발견: src/routes/signup.js:24");
     expect(plan.requires).toEqual([

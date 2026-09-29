@@ -12,8 +12,8 @@ const base = JSON.parse(readFileSync(join(ROOT, "fixtures", "01-allow", "test_re
 const withFacts = (facts: unknown) => ({ ...base, facts });
 
 describe("test_result.facts: 정책이 읽는 키만 타입 고정", () => {
-  it("정의된 키는 db, writes_local_file", () => {
-    expect([...KNOWN_FACTS_KEYS].sort()).toEqual(["db", "writes_local_file"]);
+  it("정의된 키는 db, migration, writes_local_file", () => {
+    expect([...KNOWN_FACTS_KEYS].sort()).toEqual(["db", "migration", "writes_local_file"]);
   });
 
   it('facts.db = "SQLite" (대문자) → 형식 오류', () => {

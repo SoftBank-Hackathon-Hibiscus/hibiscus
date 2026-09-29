@@ -9,11 +9,22 @@
 import { join, resolve } from "node:path";
 import { decide } from "./engine.js";
 import { appendDecisionLog, loadJson, loadPolicy, validate, writeJson } from "./io.js";
+import { analyzeMigrations } from "./migration/analyzer.js";
+import { filterSince, loadMigrationFiles } from "./migration/loader.js";
 import { extract, loadSources } from "./pii/extractor.js";
 import { selectClassifier } from "./pii/select.js";
-import { type Decision, type PiiReport, PiiReportSchema, type Plan, type PlanRequirement, TestResultSchema } from "./schema.js";
+import {
+  type Decision,
+  type MigrationReport,
+  type PiiReport,
+  PiiReportSchema,
+  type Plan,
+  type PlanRequirement,
+  type TestResult,
+  TestResultSchema,
+} from "./schema.js";
 
-export type StageName = "test_result" | "policy" | "pii" | "decide" | "write" | "log";
+export type StageName = "test_result" | "policy" | "migration" | "pii" | "decide" | "write" | "log";
 
 export class StageError extends Error {
   constructor(
@@ -43,6 +54,8 @@ export interface StageOptions {
   recording?: string;
   /** 결정 기록 파일. 기본 ./decisions.jsonl */
   logPath?: string;
+  /** 마이그레이션 판정: 이 이름보다 뒤의 마이그레이션만 검사 */
+  since?: string;
 }
 
 export interface StageSummary {
@@ -59,6 +72,12 @@ export interface StageResult {
   summary: StageSummary;
   plan: Plan;
   pii: PiiReport;
+  /** 마이그레이션 판정 결과. facts.migration 이 이미 있었으면 그 값 */
+  migration: MigrationReport;
+  /** 마이그레이션 판정을 실행기가 채웠는지 (false 면 테스트 파트 값을 존중함) */
+  migrationComputed: boolean;
+  /** 정책 엔진에 실제로 들어간 test_result (facts.migration 이 채워진 것) */
+  test: TestResult;
   /** 판정기 선택 등 사람에게 알릴 것 */
   notes: string[];
   exitCode: number;
@@ -74,8 +93,16 @@ async function step<T>(stage: StageName, fn: () => T | Promise<T>): Promise<T> {
 }
 
 export async function runStage(opts: StageOptions): Promise<StageResult> {
-  const test = await step("test_result", () => validate(TestResultSchema, loadJson(opts.testPath, "test_result"), "test_result", opts.testPath));
+  const loaded = await step("test_result", () => validate(TestResultSchema, loadJson(opts.testPath, "test_result"), "test_result", opts.testPath));
   const policy = await step("policy", () => loadPolicy(opts.policyPath));
+
+  // 마이그레이션 판정: 테스트 파트가 facts.migration 을 이미 넣었으면 그 값을 존중한다
+  const existing = loaded.facts.migration;
+  const migrationComputed = existing === undefined;
+  const migration = migrationComputed
+    ? await step("migration", () => analyzeMigrations(filterSince(loadMigrationFiles(opts.src), opts.since).files))
+    : existing;
+  const test: TestResult = migrationComputed ? { ...loaded, facts: { ...loaded.facts, migration } } : loaded;
 
   const { pii, notes } = await step("pii", async () => {
     const files = loadSources(opts.src);
@@ -92,6 +119,9 @@ export async function runStage(opts: StageOptions): Promise<StageResult> {
   await step("write", () => {
     writeJson(piiPath, pii);
     writeJson(planPath, plan);
+    // 정책 엔진에 실제로 들어간 입력. 이걸로 src/cli.ts 를 돌리면 같은 plan_hash 가 나온다
+    writeJson(join(opts.outDir, "test_result.json"), test);
+    if (migrationComputed) writeJson(join(opts.outDir, "migration.json"), migration);
   });
 
   const logPath = opts.logPath ?? "decisions.jsonl";
@@ -119,6 +149,9 @@ export async function runStage(opts: StageOptions): Promise<StageResult> {
     },
     plan,
     pii,
+    migration,
+    migrationComputed,
+    test,
     notes,
     exitCode: EXIT_CODES[plan.decision],
   };

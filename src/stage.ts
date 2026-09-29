@@ -14,12 +14,15 @@ const USAGE = `사용법:
 옵션:
   --classifier  heuristic (기본) | llm | replay
   --recording   replay 용 녹화 파일 (기본 recordings/<run_id>.json)
+  --since       마이그레이션 판정: 이 이름보다 뒤의 마이그레이션만 검사
   --log         결정 기록 파일 (기본 ./decisions.jsonl)
   --json        사람이 읽는 출력 대신 한 줄 JSON 요약을 stdout 에 출력
   --help        이 도움말
 
 종료 코드: allow 0, needs_approval 2, block 3, 실행 오류 1
-out-dir 에 pii.json 과 plan.json 을 쓴다. run_id 는 test_result.json 의 값을 쓴다.`;
+out-dir 에 pii.json, plan.json, 정책에 실제로 들어간 test_result.json 을 쓴다.
+test_result 의 facts.migration 이 없으면 마이그레이션 판정을 돌려 채우고 migration.json 도 쓴다.
+run_id 는 test_result.json 의 값을 쓴다.`;
 
 const FLAGS = new Set(["json"]);
 
@@ -40,6 +43,7 @@ async function main(argv: string[]): Promise<number> {
     classifier: args.classifier,
     recording: args.recording,
     logPath: args.log,
+    since: args.since,
   });
 
   if (json) {
@@ -53,6 +57,8 @@ async function main(argv: string[]): Promise<number> {
   for (const n of result.notes) console.log(`  ! ${n}`);
   console.log(`  pii      : ${result.pii.pii.length}건 -> ${summary.pii_path}`);
   for (const p of result.pii.pii) console.log(`    - ${p.table}.${p.column} ${p.kind} confident=${p.confident} ${p.evidence}`);
+  console.log(`  migration: destructive=${result.migration.destructive} (${result.migrationComputed ? "실행기가 판정" : "test_result 의 값"})`);
+  for (const f of result.migration.findings) console.log(`    - ${f.kind} ${f.evidence}: ${f.statement}`);
   console.log(`  decision : ${summary.decision} (종료 코드 ${result.exitCode})`);
   console.log(`  targets  : ${summary.targets.length ? summary.targets.join(", ") : "(none)"}`);
   console.log(`  failover : ${summary.failover_allowed}`);

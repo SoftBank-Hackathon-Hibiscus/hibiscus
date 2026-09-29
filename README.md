@@ -48,7 +48,7 @@ npm run typecheck
 }
 ```
 
-`facts`는 정책이 읽는 키만 타입이 정해져 있다. `db`는 `sqlite` | `postgres` | `mysql` | `none`(소문자), `writes_local_file`은 문자열 배열이다. 그 밖의 키는 자유롭게 넣을 수 있고 그대로 보존된다. 규칙이 정의되지 않은 facts 키를 읽으면 정책을 불러올 때 경고가 난다. 규칙이 실제로 읽는 경로 목록은 [contracts/README.md](contracts/README.md)의 "정책이 읽는 필드"에 자동 생성된다.
+`facts`는 정책이 읽는 키만 타입이 정해져 있다. `db`는 `sqlite` | `postgres` | `mysql` | `none`(소문자), `writes_local_file`은 문자열 배열, `migration`은 파괴적 마이그레이션 판정 `{ destructive, backward_compatible, findings }`이다 (없으면 보안 단계 실행기가 채운다). 그 밖의 키는 자유롭게 넣을 수 있고 그대로 보존된다. 규칙이 정의되지 않은 facts 키를 읽으면 정책을 불러올 때 경고가 난다. 규칙이 실제로 읽는 경로 목록은 [contracts/README.md](contracts/README.md)의 "정책이 읽는 필드"에 자동 생성된다.
 
 ### `pii.json` (개인정보 후보. 지금은 가짜 파일, 나중에 AI 판정 결과)
 
@@ -110,6 +110,7 @@ default:
 | R4 | 개인정보 후보 있음 | targets [local], failover 금지 | |
 | R5 | `test.facts.db = sqlite` | targets [local] | managed_db: SQLite를 PostgreSQL로 전환 (allowed_targets 안의 환경에서) |
 | R6 | `test.facts.writes_local_file`에 `/tmp/`, `*.log`, DB 파일(`*.db`, `*.sqlite`, `*.sqlite3`, 대소문자 무시) 제외 원소 있음 | targets [local] | object_storage: 로컬 폴더에 쓰는 파일을 오브젝트 스토리지로 이전 (allowed_targets 안의 환경에서) |
+| R7 | `test.facts.migration.destructive = true` | block | two_phase_migration: 파괴적 변경을 확장→전환→정리 2단계 배포로 나누기 (먼저 새 구조를 추가하고, 옛 구조는 다음 배포에서 제거) |
 | default | | targets [local, cloud_run], failover 허용 | |
 
 R5의 이유: 클라우드에서는 인스턴스가 교체되면 SQLite 파일이 사라진다. R6도 같은 이유로, 로컬 폴더에 쓰는 파일은 인스턴스 교체나 스케일아웃 때 사라지거나 갈라진다. 무시할 경로는 규칙의 `where`에 `@`(원소 자체)와 `starts_with` / `matches`로 적는다. DB 파일은 R5가 담당하므로 R6는 `.db`, `.sqlite`, `.sqlite3`을 무시해 해결 조건이 겹치지 않는다 (SQLite 앱이 `/app/data.db`만 쓰면 managed_db 하나만 나온다). cloud_run이 빠지므로 failover도 자동으로 false가 된다.
@@ -165,6 +166,41 @@ R5의 이유: 클라우드에서는 인스턴스가 교체되면 SQLite 파일�
 
 `kind`로 배포 결정과 롤백 결정을 구분한다. `rule_ids`는 걸린 규칙만. 시간 값은 CLI에서만 붙이고 엔진(`decide`, `decideRollback`)은 시간을 쓰지 않는다.
 
+## 파괴적 DB 마이그레이션 판정 (`src/migration/`)
+
+개인정보 판정처럼 코드에서 사실을 뽑는 모듈이다. 앱 폴더의 `migrations/**/*.sql`과 `prisma/migrations/*/migration.sql`에서 이전 버전과 호환되지 않는 변경을 찾는다. 결정적이고 AI를 쓰지 않는다.
+
+```bash
+npx tsx src/migration/cli.ts --src samples/migration-destructive --out migration.json
+npx tsx src/migration/cli.ts --src samples/migration-prisma --since 20240101000000_init --out migration.json
+```
+
+| 옵션 | 설명 |
+|---|---|
+| `--src` | 앱 소스 폴더 (필수) |
+| `--since` | 이 마이그레이션 이름보다 뒤의 파일만 검사 (이미 적용된 것은 건너뜀). 없으면 전부 |
+| `--out` | 출력할 `migration.json` (필수) |
+
+**탐지하는 파괴적 변경**: `DROP TABLE`, `DROP COLUMN`, `RENAME TABLE`/`RENAME COLUMN`, `ALTER COLUMN ... TYPE`(MySQL `MODIFY`/`CHANGE` 포함), 기존 테이블에 DEFAULT 없는 `NOT NULL` 칼럼 추가, `TRUNCATE`. `--` 주석, `/* */` 주석, `'...'` 문자열 안의 키워드는 무시한다. `ADD CONSTRAINT`, `DROP DEFAULT`, `NOT NULL DEFAULT ...`, `CREATE TABLE` 안의 `NOT NULL`은 안전으로 본다.
+
+**출력** (= `test_result.facts.migration` 형식)
+
+```json
+{
+  "destructive": true,
+  "backward_compatible": false,
+  "findings": [
+    { "kind": "drop_column", "statement": "ALTER TABLE users DROP COLUMN phone", "evidence": "migrations/0002_drop_phone_rename_name.sql:2" }
+  ]
+}
+```
+
+`kind`는 `drop_table` | `drop_column` | `rename_table` | `rename_column` | `alter_column_type` | `add_not_null_without_default` | `truncate`. `backward_compatible`는 파괴적 변경이 없을 때 `true`다.
+
+**facts 연결**: 보안 단계 실행기는 `test_result.facts.migration`이 없을 때만 이 판정을 돌려 채우고, 있으면 테스트 파트 값을 존중한다. `destructive: true`면 R7이 차단하고 해결 조건 `two_phase_migration`을 낸다. 이유는 옛 버전과 새 버전이 같은 DB를 동시에 쓰는 무중단 배포와 롤백이 깨지기 때문이다.
+
+**샘플**: `samples/migration-safe`(NULL 허용 칼럼, 인덱스, NOT NULL + DEFAULT → 안전), `samples/migration-destructive`(DROP COLUMN, RENAME COLUMN, DEFAULT 없는 NOT NULL), `samples/migration-tricky`(주석과 문자열 안에만 위험 키워드 → 안전), `samples/migration-prisma`(Prisma 형식, RENAME TABLE).
+
 ## 보안 단계 실행기 (`src/stage.ts`)
 
 개인정보 판정과 정책 결정을 명령 하나로 실행한다. CI에서 바로 쓰도록 결정을 종료 코드로 알린다.
@@ -181,10 +217,11 @@ npx tsx src/stage.ts --src samples/signup-contact --test fixtures/01-allow/test_
 | `--out-dir` | `pii.json`과 `plan.json`을 쓸 폴더 (필수) |
 | `--classifier` | `heuristic`(기본) / `llm` / `replay` |
 | `--recording` | replay용 녹화 파일 |
+| `--since` | 마이그레이션 판정에서 이 이름보다 뒤의 파일만 검사 |
 | `--log` | 결정 기록 파일. 기본 `./decisions.jsonl` |
 | `--json` | 사람이 읽는 출력 대신 한 줄 JSON 요약을 stdout에 출력 |
 
-순서는 test_result 검증 → policy 로드 → 개인정보 판정 → 정책 결정 → 파일 저장 → 결정 기록이다. 중간에 실패하면 `오류 [단계: test_result] ...`처럼 어느 단계에서 왜 실패했는지 출력한다.
+순서는 test_result 검증 → policy 로드 → 마이그레이션 판정(`facts.migration`이 없을 때만) → 개인정보 판정 → 정책 결정 → 파일 저장 → 결정 기록이다. 중간에 실패하면 `오류 [단계: test_result] ...`처럼 어느 단계에서 왜 실패했는지 출력한다. out-dir에는 `pii.json`, `plan.json`과 함께 정책에 실제로 들어간 `test_result.json`이 남고, 마이그레이션을 실행기가 판정했으면 `migration.json`도 남는다. 남은 `test_result.json`으로 `src/cli.ts`를 돌리면 같은 plan_hash가 나온다.
 
 | 결과 | 종료 코드 |
 |---|---|
@@ -353,6 +390,9 @@ src/io.ts            CLI 공용 입출력 도우미 (인자, JSON/YAML, 검증, 
 src/stage.ts         보안 단계 실행기 CLI (개인정보 판정 + 정책 결정, 종료 코드로 결정 알림)
 src/stage-runner.ts  runStage(): 실행기의 본체 (단계별 오류 표시)
 src/pii/select.ts    --classifier 에 따른 판정기 선택 (pii CLI 와 실행기가 공유)
+src/migration/analyzer.ts 파괴적 마이그레이션 탐지 (순수 함수: 주석·문자열 제거, 문장 분리, 패턴)
+src/migration/loader.ts   migrations/ 와 prisma/migrations/ 파일 찾기, --since
+src/migration/cli.ts      앱 폴더 -> migration.json
 src/policy-refs.ts   규칙이 읽는 경로 수집, 모르는 facts 키 경고
 src/contracts.ts     계약 6개 목록, zod -> JSON Schema, contracts/README.md 렌더링
 src/validate.ts      다른 파트용 파일 검증 CLI
@@ -370,13 +410,14 @@ src/pii/prompt.md    LLM 프롬프트
 src/pii/cli.ts       앱 폴더 -> pii.json
 policy.yaml          규칙 (가상 회사 예시)
 fixtures/            정책 엔진 입력 예시 4세트, fixtures/rollback/ 롤백 요청 예시 6개
-samples/             판정기 샘플 앱 5개 (실행하지 않는 코드 조각)
+samples/             판정기 샘플 앱 5개 + 마이그레이션 샘플 4개 (실행하지 않는 코드 조각)
 recordings/          저장된 LLM 응답 (replay 용)
 tests/engine.test.ts 정책 엔진 테스트
 tests/rollback.test.ts 롤백 판단 테스트
 tests/contracts.test.ts fixtures 를 JSON Schema 로 검증 + contracts/ 최신 여부
 tests/facts.test.ts  facts 키 타입, 정책 경로 수집, 모르는 키 경고
-tests/stage.test.ts  보안 단계 실행기 (종료 코드, 파일 생성, 두 CLI 와 동일성)
+tests/stage.test.ts  보안 단계 실행기 (종료 코드, 파일 생성, 세 CLI 와 동일성)
+tests/migration.test.ts 파괴적 마이그레이션 판정 (탐지, 샘플, --since, CLI, R7, 실행기 연결)
 tests/pii.test.ts    판정기 테스트 + 끝에서 끝
 scripts/demo.mjs     fixtures 일괄 실행
 ```

@@ -113,6 +113,21 @@ rules:
         - { id: object_storage, hint: "로컬 폴더에 쓰는 파일을 오브젝트 스토리지로 이전 (allowed_targets 안의 환경에서)" }
     reason: "로컬 파일 쓰기: {@}"
 
+  - id: R7
+    description: >-
+      파괴적 DB 마이그레이션(DROP/RENAME/타입 변경/DEFAULT 없는 NOT NULL 추가/TRUNCATE)은
+      옛 버전과 새 버전이 같은 DB 를 동시에 쓰는 무중단 배포와 롤백을 깨뜨린다.
+      facts.migration 은 테스트 파트가 주거나, 없으면 실행기(src/stage.ts)가 마이그레이션 파일에서 판정한다
+    if:
+      all:
+        - { path: test.facts.migration.destructive, eq: true }
+        - { some: test.facts.migration.findings }
+    then:
+      decision: block
+      requires:
+        - { id: two_phase_migration, hint: "파괴적 변경을 확장→전환→정리 2단계 배포로 나누기 (먼저 새 구조를 추가하고, 옛 구조는 다음 배포에서 제거)" }
+    reason: "파괴적 마이그레이션 {kind}: {statement} ({evidence})"
+
 default:
   targets: [local, cloud_run]
   failover_allowed: true

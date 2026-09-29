@@ -66,15 +66,70 @@
           ]
         },
         "writes_local_file": {
-          "description": "앱이 쓰는 로컬 파일 경로 목록",
+          "description": "앱이 쓰는 로컬 파일 경로 목록. R6 가 읽는다",
           "type": "array",
           "items": {
             "type": "string"
           }
+        },
+        "migration": {
+          "type": "object",
+          "properties": {
+            "destructive": {
+              "type": "boolean",
+              "description": "파괴적 변경이 하나라도 있는지. R7 이 읽는다"
+            },
+            "backward_compatible": {
+              "type": "boolean",
+              "description": "이전 버전과 호환되는지 = 파괴적 변경이 없을 때 true"
+            },
+            "findings": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "drop_table",
+                      "drop_column",
+                      "rename_table",
+                      "rename_column",
+                      "alter_column_type",
+                      "add_not_null_without_default",
+                      "truncate"
+                    ],
+                    "description": "파괴적 변경의 종류"
+                  },
+                  "statement": {
+                    "type": "string",
+                    "description": "해당 SQL 문장 (한 줄로 줄임)"
+                  },
+                  "evidence": {
+                    "type": "string",
+                    "description": "위치 '파일:줄'"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "statement",
+                  "evidence"
+                ],
+                "description": "파괴적 변경 하나"
+              },
+              "description": "파괴적 변경 목록. 없으면 빈 배열"
+            }
+          },
+          "required": [
+            "destructive",
+            "backward_compatible",
+            "findings"
+          ],
+          "description": "파괴적 DB 마이그레이션 판정. 실행기(src/stage.ts)가 facts.migration 이 없으면 채운다"
         }
       },
       "additionalProperties": {},
-      "description": "테스트 중 관찰한 사실. 정의된 키(db, writes_local_file)는 타입이 고정되고, 그 밖의 키는 자유"
+      "description": "테스트 중 관찰한 사실. 정의된 키(db, writes_local_file, migration)는 타입이 고정되고, 그 밖의 키는 자유"
     }
   },
   "required": [

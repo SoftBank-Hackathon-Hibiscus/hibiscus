@@ -57,6 +57,11 @@ flowchart LR
 | `pii.pii[].table` | R3 | reason |
 | `pii.run_id` | R2 | 조건, reason |
 | `test.facts.db` | R5 | 조건, reason |
+| `test.facts.migration.destructive` | R7 | 조건 |
+| `test.facts.migration.findings` | R7 | 조건 |
+| `test.facts.migration.findings[].evidence` | R7 | reason |
+| `test.facts.migration.findings[].kind` | R7 | reason |
+| `test.facts.migration.findings[].statement` | R7 | reason |
 | `test.facts.writes_local_file` | R6 | 조건 |
 | `test.facts.writes_local_file[]` | R6 | 조건, reason |
 | `test.match.matched` | R1 | reason |
@@ -90,7 +95,8 @@ flowchart LR
    - `rollback_request.candidate` / `stable`: 예전 이름 `current` / `previous` 는 받지 않는다. candidate = 이번 배포 후보(문제가 난 버전), stable = 이번 배포 전 정상 버전.
    - `failover_allowed` (plan, rollback_plan): `local` 과 `cloud_run` 이 모두 targets 에 있을 때만 true 가 될 수 있다. 배포 파트는 이 값이 false 면 온프레 장애 시 Cloud Run 으로 넘기지 않는다.
 5. **targets 의 값은 policy.yaml 의 `known_targets`(현재 `local`, `cloud_run`) 안에서만 나온다.** 배포 파트가 새 대상을 지원하면 `known_targets` 에 먼저 추가해야 한다.
-   - **`test_result.facts` 는 정책이 읽는 키만 타입이 정해져 있다** (`db`: `sqlite` | `postgres` | `mysql` | `none` 소문자, `writes_local_file`: string[]). 대문자 `"SQLite"` 나 숫자는 형식 오류다. 그 밖의 키(예: `framework`)는 자유롭게 넣을 수 있고 그대로 보존된다. 정책이 새 키를 읽어야 하면 스키마에 먼저 추가한다 ("정책이 읽는 필드" 표 참고).
+   - **`test_result.facts` 는 정책이 읽는 키만 타입이 정해져 있다** (`db`: `sqlite` | `postgres` | `mysql` | `none` 소문자, `writes_local_file`: string[], `migration`: 파괴적 마이그레이션 판정 `{ destructive, backward_compatible, findings }`). 대문자 `"SQLite"` 나 숫자는 형식 오류다. 그 밖의 키(예: `framework`)는 자유롭게 넣을 수 있고 그대로 보존된다. 정책이 새 키를 읽어야 하면 스키마에 먼저 추가한다 ("정책이 읽는 필드" 표 참고).
+   - **`facts.migration` 은 테스트 파트가 넣어도 되고 비워 둬도 된다.** 비워 두면 보안 단계 실행기(`src/stage.ts`)가 앱 폴더의 `migrations/**/*.sql` 과 `prisma/migrations/*/migration.sql` 을 읽어 판정해 채운다 (`--since <이름>` 으로 이미 적용된 마이그레이션은 건너뛴다). 넣어 주면 그 값을 존중한다. 단독 실행은 `npx tsx src/migration/cli.ts --src <앱> --out migration.json`. `destructive: true` 면 R7 이 차단하고 해결 조건 `two_phase_migration` 을 낸다.
 6. **decisions.jsonl 은 추가만 한다.** 기존 줄을 고치거나 지우지 않는다. 시간(`time`)은 CLI 가 붙이므로 같은 입력으로 다시 돌리면 `plan_hash` 는 같고 `time` 만 다르다.
 7. **파일 형식을 바꾸고 싶으면 `src/schema.ts` 를 고치고 `npm run contracts` 로 이 문서를 다시 만든다.** 손으로 고친 문서는 다음 생성 때 사라진다.
 
@@ -114,9 +120,16 @@ flowchart LR
 | `match.total` | integer | 필수 | 재생한 요청 수 |
 | `match.matched` | integer | 필수 | 응답이 일치한 요청 수 |
 | `failures` | any[] | 선택 (기본값 `[]`) | 실패한 요청 목록. 형식은 테스트 파트가 정한다 (정책 엔진은 내용을 보지 않음) |
-| `facts` | object | 선택 (기본값 `{}`) | 테스트 중 관찰한 사실. 정의된 키(db, writes_local_file)는 타입이 고정되고, 그 밖의 키는 자유 |
+| `facts` | object | 선택 (기본값 `{}`) | 테스트 중 관찰한 사실. 정의된 키(db, writes_local_file, migration)는 타입이 고정되고, 그 밖의 키는 자유 |
 | `facts.db` | "sqlite" \| "postgres" \| "mysql" \| "none" | 선택 | 앱이 쓰는 DB. 소문자만. R5 가 읽는다 |
-| `facts.writes_local_file` | string[] | 선택 | 앱이 쓰는 로컬 파일 경로 목록 |
+| `facts.writes_local_file` | string[] | 선택 | 앱이 쓰는 로컬 파일 경로 목록. R6 가 읽는다 |
+| `facts.migration` | object | 선택 | 파괴적 DB 마이그레이션 판정. 실행기(src/stage.ts)가 facts.migration 이 없으면 채운다 |
+| `facts.migration.destructive` | boolean | 필수 | 파괴적 변경이 하나라도 있는지. R7 이 읽는다 |
+| `facts.migration.backward_compatible` | boolean | 필수 | 이전 버전과 호환되는지 = 파괴적 변경이 없을 때 true |
+| `facts.migration.findings` | object[] | 필수 | 파괴적 변경 목록. 없으면 빈 배열 |
+| `facts.migration.findings[].kind` | "drop_table" \| "drop_column" \| "rename_table" \| "rename_column" \| "alter_column_type" \| "add_not_null_without_default" \| "truncate" | 필수 | 파괴적 변경의 종류 |
+| `facts.migration.findings[].statement` | string | 필수 | 해당 SQL 문장 (한 줄로 줄임) |
+| `facts.migration.findings[].evidence` | string | 필수 | 위치 '파일:줄' |
 | `facts.*` | any | 선택 | 그 밖의 키는 자유. 그대로 보존되지만 정책은 읽지 않는다 |
 
 ### 예시 (fixtures/03-pii-confident/test_result.json)
@@ -242,9 +255,13 @@ flowchart LR
     {
       "id": "R6",
       "result": "not_matched"
+    },
+    {
+      "id": "R7",
+      "result": "not_matched"
     }
   ],
-  "plan_hash": "4d8ff29cd5629eda03fa81d5e66a53e959646d6b7144655981af3e6f83f63051"
+  "plan_hash": "89eec3b89006ff6e1797a29f2f08708fb80a0c0ff8b29884b19b69269d7e3e2d"
 }
 ```
 
@@ -424,6 +441,6 @@ flowchart LR
   "rule_ids": [
     "R4"
   ],
-  "plan_hash": "4d8ff29cd5629eda03fa81d5e66a53e959646d6b7144655981af3e6f83f63051"
+  "plan_hash": "89eec3b89006ff6e1797a29f2f08708fb80a0c0ff8b29884b19b69269d7e3e2d"
 }
 ```

@@ -288,7 +288,8 @@ const AGREEMENTS = `## 팀과 합의가 필요한 점
    - \`rollback_request.candidate\` / \`stable\`: 예전 이름 \`current\` / \`previous\` 는 받지 않는다. candidate = 이번 배포 후보(문제가 난 버전), stable = 이번 배포 전 정상 버전.
    - \`failover_allowed\` (plan, rollback_plan): \`local\` 과 \`cloud_run\` 이 모두 targets 에 있을 때만 true 가 될 수 있다. 배포 파트는 이 값이 false 면 온프레 장애 시 Cloud Run 으로 넘기지 않는다.
 5. **targets 의 값은 policy.yaml 의 \`known_targets\`(현재 \`local\`, \`cloud_run\`) 안에서만 나온다.** 배포 파트가 새 대상을 지원하면 \`known_targets\` 에 먼저 추가해야 한다.
-   - **\`test_result.facts\` 는 정책이 읽는 키만 타입이 정해져 있다** (\`db\`: \`sqlite\` | \`postgres\` | \`mysql\` | \`none\` 소문자, \`writes_local_file\`: string[]). 대문자 \`"SQLite"\` 나 숫자는 형식 오류다. 그 밖의 키(예: \`framework\`)는 자유롭게 넣을 수 있고 그대로 보존된다. 정책이 새 키를 읽어야 하면 스키마에 먼저 추가한다 ("정책이 읽는 필드" 표 참고).
+   - **\`test_result.facts\` 는 정책이 읽는 키만 타입이 정해져 있다** (\`db\`: \`sqlite\` | \`postgres\` | \`mysql\` | \`none\` 소문자, \`writes_local_file\`: string[], \`migration\`: 파괴적 마이그레이션 판정 \`{ destructive, backward_compatible, findings }\`). 대문자 \`"SQLite"\` 나 숫자는 형식 오류다. 그 밖의 키(예: \`framework\`)는 자유롭게 넣을 수 있고 그대로 보존된다. 정책이 새 키를 읽어야 하면 스키마에 먼저 추가한다 ("정책이 읽는 필드" 표 참고).
+   - **\`facts.migration\` 은 테스트 파트가 넣어도 되고 비워 둬도 된다.** 비워 두면 보안 단계 실행기(\`src/stage.ts\`)가 앱 폴더의 \`migrations/**/*.sql\` 과 \`prisma/migrations/*/migration.sql\` 을 읽어 판정해 채운다 (\`--since <이름>\` 으로 이미 적용된 마이그레이션은 건너뛴다). 넣어 주면 그 값을 존중한다. 단독 실행은 \`npx tsx src/migration/cli.ts --src <앱> --out migration.json\`. \`destructive: true\` 면 R7 이 차단하고 해결 조건 \`two_phase_migration\` 을 낸다.
 6. **decisions.jsonl 은 추가만 한다.** 기존 줄을 고치거나 지우지 않는다. 시간(\`time\`)은 CLI 가 붙이므로 같은 입력으로 다시 돌리면 \`plan_hash\` 는 같고 \`time\` 만 다르다.
 7. **파일 형식을 바꾸고 싶으면 \`src/schema.ts\` 를 고치고 \`npm run contracts\` 로 이 문서를 다시 만든다.** 손으로 고친 문서는 다음 생성 때 사라진다.`;
 
