@@ -91,10 +91,12 @@ default:
 
 **효과(`then`)**: `decision: block | needs_approval`, `targets: [...]`, `failover_allowed: bool`. 적지 않은 키는 바꾸지 않는다.
 
-**병합 규칙**
+**병합 규칙** (안전한 쪽으로만 움직인다)
 - `decision`은 `allow < needs_approval < block` 순으로 강한 쪽만 남는다.
 - `block`이 나오면 그 즉시 멈춘다. 이후 규칙은 `plan.rules`에 실리지 않는다.
-- `targets` / `failover_allowed`는 나중 규칙이 덮어쓴다. 어떤 규칙도 `targets`를 정하지 않으면 `default`를 쓰고 `rules`에 `id: default`로 기록한다.
+- `targets`는 좁히기만 된다. 규칙이 `targets`를 정하면 지금까지의 `targets`와 교집합만 남긴다. 한 번 제외된 대상은 뒤 규칙이 다시 넣을 수 없다. 교집합이 비면 `block`이 되고 그 규칙의 `reason` 뒤에 "허용된 배포 대상이 없음"이 붙는다.
+- 어떤 규칙도 `targets`를 정하지 않으면 `default`를 쓰고 `rules`에 `id: default`로 기록한다.
+- `failover_allowed`는 `false`가 이긴다. 한 번 `false`면 뒤 규칙이 `true`로 되돌릴 수 없다. 최종 `targets`에 `local`과 `cloud_run`이 모두 없으면 항상 `false`다.
 
 **`reason` 템플릿**: `{경로}`를 값으로 치환한다. `some`에 걸린 원소가 있으면 원소마다 렌더링해 `; `로 잇는다. 경로는 원소 → 루트 순으로 찾고, `{$.경로}`는 항상 루트.
 

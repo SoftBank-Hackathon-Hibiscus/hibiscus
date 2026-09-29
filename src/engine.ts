@@ -182,9 +182,24 @@ export function sha256Hex(text: string): string {
 // ---------------------------------------------------------------------------
 
 /**
+ * failover 는 "온프레 장애 시 Cloud Run 으로 전환" 을 뜻하므로
+ * 이 두 대상이 모두 배포 대상일 때만 의미가 있다.
+ */
+export const FAILOVER_REQUIRED_TARGETS = ["local", "cloud_run"] as const;
+
+/** 앞 목록의 순서를 유지한 채 교집합을 구한다. */
+export function intersect(current: readonly string[], next: readonly string[]): string[] {
+  const allowed = new Set(next);
+  return current.filter((t) => allowed.has(t));
+}
+
+/**
  * 규칙을 위에서부터 차례로 검사한다.
- * - 걸린 규칙의 then 을 누적 적용한다 (targets / failover_allowed 는 나중 규칙이 덮어쓴다).
  * - decision 은 강한 쪽으로만 올라간다 (allow < needs_approval < block).
+ * - targets 는 좁히기만 된다: 규칙이 targets 를 정하면 지금까지의 targets 와 교집합만 남긴다.
+ *   한 번 제외된 대상은 뒤 규칙이 다시 넣을 수 없다. 교집합이 비면 block.
+ * - failover_allowed 는 false 가 이긴다: 한 번 false 면 뒤에서 true 로 못 돌린다.
+ *   최종 targets 에 local 과 cloud_run 이 모두 없으면 항상 false.
  * - block 이 나오면 그 즉시 멈춘다. 이후 규칙은 plan.rules 에 실리지 않는다.
  * - 아무 규칙도 targets 를 정하지 않았으면 policy.default 를 쓴다 (rules 에 id "default" 로 기록).
  */
@@ -203,11 +218,23 @@ export function decide(test: TestResult, pii: PiiReport, policy: Policy): Plan {
       continue;
     }
 
-    rules.push({ id: rule.id, result: "matched", reason: renderReason(rule.reason, root, result.items) });
+    let reason = renderReason(rule.reason, root, result.items);
 
     if (rule.then.decision !== undefined) decision = escalate(decision, rule.then.decision);
-    if (rule.then.targets !== undefined) targets = [...rule.then.targets];
-    if (rule.then.failover_allowed !== undefined) failoverAllowed = rule.then.failover_allowed;
+
+    if (rule.then.targets !== undefined) {
+      const narrowed = targets === undefined ? [...rule.then.targets] : intersect(targets, rule.then.targets);
+      if (narrowed.length === 0) {
+        decision = "block";
+        reason += ` → 허용된 배포 대상이 없음 (지금까지 [${(targets ?? []).join(", ")}] ∩ 규칙 [${rule.then.targets.join(", ")}] = [])`;
+      }
+      targets = narrowed;
+    }
+
+    if (rule.then.failover_allowed === false) failoverAllowed = false;
+    else if (rule.then.failover_allowed === true && failoverAllowed === undefined) failoverAllowed = true;
+
+    rules.push({ id: rule.id, result: "matched", reason });
 
     if (decision === "block") break;
   }
@@ -215,14 +242,14 @@ export function decide(test: TestResult, pii: PiiReport, policy: Policy): Plan {
   if (decision === "block") {
     // 차단이면 배포 위치는 없다.
     targets = [];
-    failoverAllowed = false;
   } else if (targets === undefined) {
     targets = [...policy.default.targets];
-    failoverAllowed = failoverAllowed ?? policy.default.failover_allowed;
     rules.push({ id: "default", result: "matched", reason: renderTemplate(policy.default.reason, root, root) });
-  } else {
-    failoverAllowed = failoverAllowed ?? policy.default.failover_allowed;
   }
+
+  // false 가 이긴다. 아무도 정하지 않았으면 default. failover 에 필요한 대상이 빠져 있으면 무조건 false.
+  const failoverPossible = FAILOVER_REQUIRED_TARGETS.every((t) => targets.includes(t));
+  failoverAllowed = failoverPossible && (failoverAllowed ?? policy.default.failover_allowed);
 
   const body: Omit<Plan, "plan_hash"> = {
     run_id: test.run_id,

@@ -119,6 +119,82 @@ describe("결정성 (plan_hash)", () => {
   });
 });
 
+describe("targets 좁히기 / failover 는 false 가 이긴다", () => {
+  const withRules = (...extra: unknown[]) => PolicySchema.parse({ ...policy, rules: [...policy.rules, ...extra] });
+
+  it("R4 뒤에 '테스트 통과 → [local, cloud_run]' 규칙을 추가해도 개인정보 앱은 [local] 만", () => {
+    const custom = withRules({
+      id: "X1",
+      if: { path: "test.passed", eq: true },
+      then: { targets: ["local", "cloud_run"], failover_allowed: true },
+      reason: "테스트 통과",
+    });
+    const { test, pii } = loadFixture("03-pii-confident");
+    const plan = decide(test, pii, custom);
+
+    expect(plan.decision).toBe("allow");
+    expect(matchedIds(plan)).toEqual(["R4", "X1"]);
+    expect(plan.targets).toEqual(["local"]);
+    // R4 가 false 로 정한 failover 를 X1 이 true 로 되돌리지 못한다
+    expect(plan.failover_allowed).toBe(false);
+
+    // 개인정보가 없는 앱은 X1 이 첫 targets 이므로 그대로 [local, cloud_run]
+    const clean = loadFixture("01-allow");
+    const cleanPlan = decide(clean.test, clean.pii, custom);
+    expect(cleanPlan.targets).toEqual(["local", "cloud_run"]);
+    expect(cleanPlan.failover_allowed).toBe(true);
+    expect(matchedIds(cleanPlan)).toEqual(["X1"]);
+  });
+
+  it("targets 만 [local] 로 정하고 failover 를 안 적은 규칙 → failover_allowed=false", () => {
+    const custom = PolicySchema.parse({
+      ...policy,
+      rules: [{ id: "L1", if: { path: "test.passed", eq: true }, then: { targets: ["local"] }, reason: "온프레만" }],
+    });
+    const { test, pii } = loadFixture("01-allow");
+    const plan = decide(test, pii, custom);
+
+    expect(plan.decision).toBe("allow");
+    expect(plan.targets).toEqual(["local"]);
+    // default.failover_allowed 는 true 지만 cloud_run 이 없으므로 failover 불가
+    expect(plan.failover_allowed).toBe(false);
+  });
+
+  it("두 규칙의 targets 교집합이 비면 block", () => {
+    const custom = PolicySchema.parse({
+      ...policy,
+      rules: [
+        { id: "A", if: { path: "test.passed", eq: true }, then: { targets: ["local"] }, reason: "A" },
+        { id: "B", if: { path: "test.passed", eq: true }, then: { targets: ["cloud_run"] }, reason: "B" },
+        { id: "C", if: { path: "test.passed", eq: true }, then: { targets: ["local"] }, reason: "C" },
+      ],
+    });
+    const { test, pii } = loadFixture("01-allow");
+    const plan = decide(test, pii, custom);
+
+    expect(plan.decision).toBe("block");
+    expect(plan.targets).toEqual([]);
+    expect(plan.failover_allowed).toBe(false);
+    // B 에서 멈춘다. C 는 평가하지 않는다
+    expect(matchedIds(plan)).toEqual(["A", "B"]);
+    expect(plan.rules.find((r) => r.id === "B")?.reason).toContain("허용된 배포 대상이 없음");
+  });
+
+  it("교집합은 앞 목록의 순서를 유지한다", () => {
+    const custom = PolicySchema.parse({
+      ...policy,
+      rules: [
+        { id: "A", if: { path: "test.passed", eq: true }, then: { targets: ["cloud_run", "local", "edge"] }, reason: "A" },
+        { id: "B", if: { path: "test.passed", eq: true }, then: { targets: ["local", "cloud_run"] }, reason: "B" },
+      ],
+    });
+    const { test, pii } = loadFixture("01-allow");
+    const plan = decide(test, pii, custom);
+    expect(plan.targets).toEqual(["cloud_run", "local"]);
+    expect(plan.failover_allowed).toBe(true);
+  });
+});
+
 describe("policy 스키마", () => {
   it("규칙 id 가 중복되면 거부", () => {
     const dup = { ...policy, rules: [policy.rules[0], policy.rules[0]] };
