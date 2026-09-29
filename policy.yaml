@@ -2,7 +2,9 @@
 #
 #   id      : 규칙 식별자 (plan.json 의 rules[].id 와 decisions.jsonl 의 rule_ids 에 그대로 실린다)
 #   if      : 조건. 컨텍스트는 { test: test_result.json, pii: pii.json }
-#   then    : 걸렸을 때 효과. decision / targets / failover_allowed 중 필요한 것만 적는다
+#   then    : 걸렸을 때 효과. decision / targets / failover_allowed / requires 중 필요한 것만 적는다
+#             requires 는 "이 규칙을 피하려면 무엇이 필요한가" 의 목록 (예: managed_db). plan.json 의
+#             requires 에 모여서 다음 단계(AI 수정 파트)가 무엇을 고쳐야 할지 알 수 있게 한다
 #   reason  : 사람이 읽는 근거. {경로} 로 값을 넣을 수 있다
 #
 # 조건 문법 (엔진은 이 문법만 안다. 규칙 내용은 회사마다 자유롭게 바꿀 수 있다):
@@ -61,6 +63,14 @@ rules:
       targets: [local]
       failover_allowed: false
     reason: "개인정보({column}, {kind}) 발견: {evidence}"
+
+  - id: R5
+    description: SQLite 는 로컬 파일이라 클라우드에서 인스턴스가 교체되면 데이터가 사라진다. 관리형 DB 로 바꾸기 전까지 온프레만
+    if: { path: test.facts.db, eq: sqlite }
+    then:
+      targets: [local]
+      requires: [managed_db]
+    reason: "SQLite 사용 ({test.facts.db}): 관리형 DB로 전환하기 전까지 클라우드 배포 제외"
 
 default:
   targets: [local, cloud_run]

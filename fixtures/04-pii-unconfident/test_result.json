@@ -5,5 +5,5 @@
   "passed": true,
   "match": { "total": 24, "matched": 24 },
   "failures": [],
-  "facts": { "writes_local_file": ["/app/data.db"], "db": "sqlite" }
+  "facts": { "db": "postgres" }
 }

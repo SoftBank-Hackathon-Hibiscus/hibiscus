@@ -203,6 +203,7 @@ export function intersect(current: readonly string[], next: readonly string[]): 
  *   최종 targets 에 local 과 cloud_run 이 모두 없으면 항상 false.
  * - block 이 나오면 그 즉시 멈춘다. 이후 규칙은 plan.rules 에 실리지 않는다.
  * - 아무 규칙도 targets 를 정하지 않았으면 policy.default 를 쓴다 (rules 에 id "default" 로 기록).
+ * - requires 는 걸린 규칙들의 것을 모아 중복 제거·정렬한다. 비어 있으면 plan 에 싣지 않는다.
  */
 export function decide(test: TestResult, pii: PiiReport, policy: Policy): Plan {
   const root: Context = { test, pii };
@@ -212,6 +213,7 @@ export function decide(test: TestResult, pii: PiiReport, policy: Policy): Plan {
   let narrowedByRule = false;
   let failoverAllowed: boolean | undefined;
   const rules: RuleResult[] = [];
+  const requires = new Set<string>();
 
   for (const rule of policy.rules) {
     const result = evaluate(rule.if, root);
@@ -223,6 +225,7 @@ export function decide(test: TestResult, pii: PiiReport, policy: Policy): Plan {
     let reason = renderReason(rule.reason, root, result.items);
 
     if (rule.then.decision !== undefined) decision = escalate(decision, rule.then.decision);
+    for (const r of rule.then.requires ?? []) requires.add(r);
 
     if (rule.then.targets !== undefined) {
       const narrowed = intersect(targets, rule.then.targets);
@@ -261,6 +264,8 @@ export function decide(test: TestResult, pii: PiiReport, policy: Policy): Plan {
     decision,
     targets,
     failover_allowed: failoverAllowed,
+    // 걸린 규칙들의 requires 를 모은다. "무엇을 고쳐야 다른 대상에 갈 수 있는지" 를 다음 단계에 알린다
+    ...(requires.size > 0 ? { requires: [...requires].sort() } : {}),
     rules,
   };
 

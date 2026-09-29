@@ -119,6 +119,7 @@ function main(argv: string[]): number {
   console.log(`  decision : ${plan.decision}`);
   console.log(`  targets  : ${plan.targets.length ? plan.targets.join(", ") : "(none)"}`);
   console.log(`  failover : ${plan.failover_allowed}`);
+  if (plan.requires) console.log(`  requires : ${plan.requires.join(", ")}`);
   for (const r of plan.rules) {
     if (r.result === "matched") console.log(`  [${r.id}] ${r.reason}`);
   }

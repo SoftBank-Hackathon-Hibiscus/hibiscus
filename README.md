@@ -92,7 +92,22 @@ default:
 | `{ some: <배열 경로>, where?: <조건> }` | 배열 원소 중 조건을 만족하는 것이 있는가. `where` 안에서는 원소가 기준, `$.`로 루트 접근 |
 | `{ all: [...] }` / `{ any: [...] }` / `{ not: ... }` | 논리 결합 |
 
-**효과(`then`)**: `decision: block | needs_approval`, `targets: [...]`, `failover_allowed: bool`. 적지 않은 키는 바꾸지 않는다.
+**효과(`then`)**: `decision: block | needs_approval`, `targets: [...]`, `failover_allowed: bool`, `requires: [...]`. 적지 않은 키는 바꾸지 않는다.
+
+`requires`는 "이 규칙을 피하려면 무엇이 필요한가"의 목록이다 (예: `managed_db`). 걸린 규칙들의 `requires`가 `plan.json`의 `requires`에 모여서, 다음 단계(AI 수정 파트)가 무엇을 고쳐야 클라우드에 갈 수 있는지 알 수 있다.
+
+**기본 규칙 (가상 플랫폼팀 예시)**
+
+| id | 조건 | 효과 |
+|---|---|---|
+| R1 | `test.passed = false` | block |
+| R2 | `test.run_id ≠ pii.run_id` | block (입력 불일치) |
+| R3 | 확신 없는 개인정보 후보 있음 | needs_approval |
+| R4 | 개인정보 후보 있음 | targets [local], failover 금지 |
+| R5 | `test.facts.db = sqlite` | targets [local], requires [managed_db] |
+| default | | targets [local, cloud_run], failover 허용 |
+
+R5의 이유: 클라우드에서는 인스턴스가 교체되면 SQLite 파일이 사라진다. 관리형 DB로 바꾸기 전까지 온프레에만 배포한다. cloud_run이 빠지므로 failover도 자동으로 false가 된다.
 
 **병합 규칙** (안전한 쪽으로만 움직인다)
 - `decision`은 `allow < needs_approval < block` 순으로 강한 쪽만 남는다.
@@ -130,6 +145,7 @@ default:
 
 - `decision`: `allow` | `block` | `needs_approval`
 - `targets`: `block`이면 빈 배열
+- `requires`: 걸린 규칙들의 `requires`를 합친 것 (중복 제거, 정렬). 하나도 없으면 필드가 없다. 예: `["managed_db"]`
 - `rules`: 평가된 모든 규칙과 결과. `matched`인 것만 `reason`이 있다
 - `plan_hash`: `{ inputs: {test, pii}, policy, plan(해시 제외) }`를 키 정렬 JSON으로 만든 뒤 sha256. 입력·정책·결과 중 하나라도 바뀌면 달라진다
 
@@ -219,7 +235,7 @@ scripts/demo.mjs     fixtures 일괄 실행
 ## 다른 모듈과의 연결
 
 - **입력**: 테스트 파트의 `test_result.json`, 이 저장소의 `src/pii/cli.ts`가 만드는 `pii.json`
-- **출력**: `plan.json` → 서명 파트 (사람 승인은 `decision: needs_approval`일 때), → 배포 파트 (`targets`, `failover_allowed`)
+- **출력**: `plan.json` → 서명 파트 (사람 승인은 `decision: needs_approval`일 때), → 배포 파트 (`targets`, `failover_allowed`), → AI 수정 파트 (`requires`: 무엇을 고쳐야 다른 대상에 갈 수 있는지)
 - 모노레포로 옮길 때 이 폴더를 통째로 옮기면 된다. 외부 의존성은 `zod`, `yaml`, 그리고 LLM 호출용 `@anthropic-ai/sdk`뿐이다.
 
 ```bash

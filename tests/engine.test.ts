@@ -276,10 +276,72 @@ describe("policy 스키마", () => {
       ],
     });
     const { test, pii } = loadFixture("01-allow");
-    const plan = decide(test, pii, custom);
+    const sqliteTest = { ...test, facts: { db: "sqlite", writes_local_file: ["/app/data.db"] } };
+    const plan = decide(sqliteTest, pii, custom);
     expect(plan.decision).toBe("allow");
     expect(plan.targets).toEqual(["local"]);
-    expect(matchedIds(plan)).toEqual(["C1"]);
+    expect(matchedIds(plan)).toEqual(["R5", "C1"]);
     expect(plan.rules.find((r) => r.id === "C1")?.reason).toBe("로컬 파일 DB(sqlite) 사용");
+  });
+});
+
+describe("R5: SQLite / requires", () => {
+  it("facts.db = sqlite → targets [local], failover false, requires [managed_db]", () => {
+    const { test, pii } = loadFixture("01-allow");
+    const plan = decide({ ...test, facts: { db: "sqlite" } }, pii, policy);
+
+    expect(plan.decision).toBe("allow");
+    expect(plan.targets).toEqual(["local"]);
+    expect(plan.failover_allowed).toBe(false);
+    expect(plan.requires).toEqual(["managed_db"]);
+    expect(matchedIds(plan)).toEqual(["R5"]);
+    expect(plan.rules.find((r) => r.id === "R5")?.reason).toBe("SQLite 사용 (sqlite): 관리형 DB로 전환하기 전까지 클라우드 배포 제외");
+  });
+
+  it("facts.db = postgres → 기존과 동일 (requires 없음)", () => {
+    const { test, pii } = loadFixture("01-allow");
+    const plan = decide({ ...test, facts: { db: "postgres" } }, pii, policy);
+
+    expect(plan.decision).toBe("allow");
+    expect(plan.targets).toEqual(["local", "cloud_run"]);
+    expect(plan.failover_allowed).toBe(true);
+    expect(plan.requires).toBeUndefined();
+    expect("requires" in plan).toBe(false);
+    expect(matchedIds(plan)).toEqual(["default"]);
+  });
+
+  it("sqlite + 개인정보 → targets [local], requires [managed_db], 두 규칙 모두 기록", () => {
+    const { test, pii } = loadFixture("03-pii-confident");
+    const plan = decide({ ...test, facts: { db: "sqlite" } }, pii, policy);
+
+    expect(plan.decision).toBe("allow");
+    expect(plan.targets).toEqual(["local"]);
+    expect(plan.failover_allowed).toBe(false);
+    expect(plan.requires).toEqual(["managed_db"]);
+    expect(matchedIds(plan)).toEqual(["R4", "R5"]);
+  });
+
+  it("requires 는 걸린 규칙들의 것을 합쳐 중복 제거·정렬한다", () => {
+    const custom = PolicySchema.parse({
+      ...policy,
+      rules: [
+        { id: "A", if: { path: "test.passed", eq: true }, then: { requires: ["managed_db", "secrets_manager"] }, reason: "A" },
+        { id: "B", if: { path: "test.passed", eq: true }, then: { requires: ["managed_db", "cdn"] }, reason: "B" },
+        { id: "C", if: { path: "test.passed", eq: false }, then: { requires: ["never"] }, reason: "C" },
+      ],
+    });
+    const { test, pii } = loadFixture("01-allow");
+    const plan = decide(test, pii, custom);
+    expect(plan.requires).toEqual(["cdn", "managed_db", "secrets_manager"]);
+    // targets 를 정한 규칙이 없으므로 default 가 쓰인다
+    expect(matchedIds(plan)).toEqual(["A", "B", "default"]);
+  });
+
+  it("requires 가 plan_hash 에 반영된다", () => {
+    const { test, pii } = loadFixture("01-allow");
+    const sqlite = decide({ ...test, facts: { db: "sqlite" } }, pii, policy);
+    const postgres = decide({ ...test, facts: { db: "postgres" } }, pii, policy);
+    expect(sqlite.plan_hash).not.toBe(postgres.plan_hash);
+    expect(() => PlanSchema.parse(sqlite)).not.toThrow();
   });
 });

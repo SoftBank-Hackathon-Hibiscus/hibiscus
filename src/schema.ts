@@ -98,6 +98,8 @@ export const EffectSchema = z.strictObject({
   decision: z.enum(["block", "needs_approval"]).optional(),
   targets: z.array(z.string().min(1)).min(1).optional(),
   failover_allowed: z.boolean().optional(),
+  /** 이 규칙이 걸린 이유를 없애려면 무엇이 필요한지 (예: managed_db). 다음 단계(AI 수정)가 읽는다 */
+  requires: z.array(z.string().min(1)).optional(),
 });
 export type Effect = z.infer<typeof EffectSchema>;
 
@@ -164,6 +166,8 @@ export const PlanSchema = z.object({
   decision: DecisionSchema,
   targets: z.array(z.string()),
   failover_allowed: z.boolean(),
+  /** 걸린 규칙들의 requires 를 모은 것 (중복 제거, 정렬). 하나도 없으면 필드 자체가 없다 */
+  requires: z.array(z.string()).optional(),
   rules: z.array(RuleResultSchema),
   plan_hash: z.string().regex(/^[0-9a-f]{64}$/),
 });

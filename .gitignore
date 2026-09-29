@@ -3,3 +3,4 @@ out/
 decisions.jsonl
 plan.json
 *.log
+pii.json
