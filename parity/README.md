@@ -75,6 +75,7 @@ python -m parity verify --record records/session.jsonl --target https://guestboo
 ## 출력 JSON 필드 (`test` → result.json, `verify` → verify.json)
 
 형식의 기준은 [`mocks/test_result.json`](mocks/test_result.json)입니다. 키 순서와 타입이 같다는 것을 `tests/test_report.py`와 `tests/test_https_verify.py`가 검사합니다.
+데모를 실제로 돌린 결과는 [`examples/demo_result.json`](examples/demo_result.json)에 있습니다 (다른 파트 연동 확인용).
 
 | 필드 | 타입 | 뜻 |
 |---|---|---|
@@ -230,6 +231,7 @@ parity/
   report.py           3단계  결과 JSON 생성, related_fact 규칙, commit 판정, 요약
   docker_ops.py              docker CLI 호출, /healthz 대기
 mocks/test_result.json       결과 JSON 형식 기준
+examples/demo_result.json    데모 실제 결과 (sample-app, none + restart)
 scripts/                     simulate_usage.py, demo.sh, demo.ps1
 tests/                       python -m unittest
 ```

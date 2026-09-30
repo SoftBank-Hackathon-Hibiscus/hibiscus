@@ -1,0 +1,82 @@
+{
+  "stage": "test",
+  "commit": "98ee114",
+  "image": "guestbook:1",
+  "passed": false,
+  "facts": [
+    {
+      "kind": "sqlite",
+      "path": "/app/data/data.db",
+      "storage": "container_layer",
+      "evidence": "docker diff A /app/data/data.db; header 'SQLite format 3'"
+    },
+    {
+      "kind": "local_upload",
+      "path": "/app/uploads",
+      "storage": "container_layer",
+      "evidence": "docker diff: 2 file(s) written under /app/uploads"
+    }
+  ],
+  "replay": [
+    {
+      "condition": "none",
+      "total": 20,
+      "matched": 20
+    },
+    {
+      "condition": "restart",
+      "total": 20,
+      "matched": 14
+    }
+  ],
+  "mismatches": [
+    {
+      "condition": "restart",
+      "index": 11,
+      "request": "GET /me",
+      "expected": "200 {\"name\":\"alice\"}",
+      "actual": "401 {\"error\":\"login required\"}",
+      "related_fact": null
+    },
+    {
+      "condition": "restart",
+      "index": 12,
+      "request": "POST /posts",
+      "expected": "201 {\"id\":3,\"author\":\"carol\",\"message\":\"재방문했어요\",\"created_at\":\"2026-09-30T11:55:40.176+00:00\"}",
+      "actual": "201 {\"id\":1,\"author\":\"carol\",\"message\":\"재방문했어요\",\"created_at\":\"2026-09-30T11:55:54.500+00:00\"}",
+      "related_fact": "/app/data/data.db"
+    },
+    {
+      "condition": "restart",
+      "index": 13,
+      "request": "GET /posts",
+      "expected": "200 [{\"id\":1,\"author\":\"alice\",\"message\":\"첫 방문 기념!\",\"created_at\":\"2026-09-30T11:55:39.865+00:00\"},{\"id\":2,\"author\":\"bob\",\"message\":\"hello guestbook\",\"created_at\":\"2026-09-30T11:55:39.938+00:00\"},{\"id\"…",
+      "actual": "200 [{\"id\":1,\"author\":\"carol\",\"message\":\"재방문했어요\",\"created_at\":\"2026-09-30T11:55:54.500+00:00\"}]",
+      "related_fact": "/app/data/data.db"
+    },
+    {
+      "condition": "restart",
+      "index": 14,
+      "request": "GET /posts/2",
+      "expected": "200 {\"id\":2,\"author\":\"bob\",\"message\":\"hello guestbook\",\"created_at\":\"2026-09-30T11:55:39.938+00:00\"}",
+      "actual": "404 {\"error\":\"post not found\"}",
+      "related_fact": "/app/data/data.db"
+    },
+    {
+      "condition": "restart",
+      "index": 17,
+      "request": "GET /me",
+      "expected": "200 {\"name\":\"alice\"}",
+      "actual": "401 {\"error\":\"login required\"}",
+      "related_fact": null
+    },
+    {
+      "condition": "restart",
+      "index": 20,
+      "request": "GET /posts",
+      "expected": "200 [{\"id\":1,\"author\":\"alice\",\"message\":\"첫 방문 기념!\",\"created_at\":\"2026-09-30T11:55:39.865+00:00\"},{\"id\":2,\"author\":\"bob\",\"message\":\"hello guestbook\",\"created_at\":\"2026-09-30T11:55:39.938+00:00\"},{\"id\"…",
+      "actual": "200 [{\"id\":1,\"author\":\"carol\",\"message\":\"재방문했어요\",\"created_at\":\"2026-09-30T11:55:54.500+00:00\"}]",
+      "related_fact": "/app/data/data.db"
+    }
+  ]
+}
