@@ -192,7 +192,7 @@ describe("내부 용어·digest 가 설명에 새지 않는다", () => {
     const plan: Plan = {
       ...base,
       rules: [...base.rules, { id: "X", result: "matched", reason: `옛 버전 ${long}`, reason_i18n: { ja: `旧バージョン${long}` } }],
-      requires: [{ id: "x", hint: `이미지 ${long} 로`, hint_i18n: { ja: `イメージ${long}へ` }, rule_id: "X", allowed_targets: ["local"] }],
+      requires: [{ id: "x", hint: `이미지 ${long} 로`, hint_i18n: { ja: `イメージ${long}へ` }, rule_id: "X", allowed_targets: ["onprem"] }],
     };
     for (const lang of ["ko", "ja"] as const) {
       const md = explainPlan(plan, { lang });
@@ -261,7 +261,7 @@ describe("일본어 출력", () => {
   it("문자열만 적은 규칙은 ja 에서도 ko 문구로 나온다 (대체 동작)", () => {
     const custom = PolicySchema.parse({
       ...policy,
-      rules: [{ id: "S1", if: { path: "test.passed", eq: true }, then: { targets: ["local"], requires: [{ id: "x_fix", hint: "한국어 힌트만 있음" }] }, reason: "한국어 근거만 있음" }],
+      rules: [{ id: "S1", if: { path: "test.passed", eq: true }, then: { targets: ["onprem"], requires: [{ id: "x_fix", hint: "한국어 힌트만 있음" }] }, reason: "한국어 근거만 있음" }],
     });
     const plan = decide(baseTest, PiiReportSchema.parse({ run_id: baseTest.run_id, pii: [] }), custom);
     const md = explainPlan(plan, { lang: "ja" });

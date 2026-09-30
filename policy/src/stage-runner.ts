@@ -4,6 +4,7 @@
  *   test_result 검증 → policy 로드 → 개인정보 판정(pii.json) → 정책 결정(plan.json) → 결정 기록 한 줄
  *
  * run_id 는 test_result.json 에서 가져와 개인정보 판정에도 같은 값을 쓴다 (R2 입력 불일치가 생기지 않게).
+ * source_revision(커밋 SHA)은 --source-revision 옵션이 test_result 의 값보다 우선한다. 둘 다 있는데 다르면 멈춘다.
  * 어느 단계에서 실패했는지 StageError.stage 로 알린다. 엔진과 기존 CLI 의 동작은 그대로 재사용한다.
  */
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -22,6 +23,7 @@ import {
   PiiReportSchema,
   type Plan,
   type PlanRequirement,
+  SourceRevisionSchema,
   type TestResult,
   TestResultSchema,
 } from "./schema.js";
@@ -60,10 +62,17 @@ export interface StageOptions {
   since?: string;
   /** true 면 out-dir 에 explain.ko.md, explain.ja.md 를 함께 쓴다 */
   explain?: boolean;
+  /**
+   * 커밋 SHA (소문자 hex 7~40자). test_result.source_revision 보다 우선한다.
+   * test_result 에도 값이 있는데 서로 다르면 실행 오류. "unknown" 은 여기서는 받지 않는다 (형식 오류)
+   */
+  sourceRevision?: string;
 }
 
 export interface StageSummary {
   run_id: string;
+  /** 커밋 SHA. plan 에 있을 때만 */
+  source_revision?: string;
   decision: Decision;
   targets: string[];
   failover_allowed: boolean;
@@ -89,6 +98,21 @@ export interface StageResult {
   exitCode: number;
 }
 
+/**
+ * --source-revision 을 test_result 에 반영한다.
+ * 옵션이 없으면 test_result 의 값(없거나 "unknown" 이면 없음)을 그대로 쓴다.
+ * 옵션이 있으면 형식을 검사하고, test_result 에도 값이 있는데 다르면 에러 (어느 쪽이 맞는지 사람이 봐야 한다).
+ */
+export function applySourceRevision(test: TestResult, given: string | undefined): TestResult {
+  if (given === undefined) return test;
+  const parsed = SourceRevisionSchema.safeParse(given);
+  if (!parsed.success) throw new Error(`--source-revision 형식 오류: ${given} (${parsed.error.issues[0]?.message ?? "소문자 hex 7~40자"})`);
+  if (test.source_revision !== undefined && test.source_revision !== parsed.data) {
+    throw new Error(`test_result.source_revision=${test.source_revision} 인데 --source-revision 은 ${parsed.data} 입니다. 어느 쪽이 맞는지 확인하세요`);
+  }
+  return { ...test, source_revision: parsed.data };
+}
+
 async function step<T>(stage: StageName, fn: () => T | Promise<T>): Promise<T> {
   try {
     return await fn();
@@ -99,7 +123,9 @@ async function step<T>(stage: StageName, fn: () => T | Promise<T>): Promise<T> {
 }
 
 export async function runStage(opts: StageOptions): Promise<StageResult> {
-  const loaded = await step("test_result", () => validate(TestResultSchema, loadJson(opts.testPath, "test_result"), "test_result", opts.testPath));
+  const loaded = await step("test_result", () =>
+    applySourceRevision(validate(TestResultSchema, loadJson(opts.testPath, "test_result"), "test_result", opts.testPath), opts.sourceRevision),
+  );
   const policy = await step("policy", () => loadPolicy(opts.policyPath));
 
   const notes: string[] = [];
@@ -165,6 +191,7 @@ export async function runStage(opts: StageOptions): Promise<StageResult> {
       kind: "deploy",
       run_id: plan.run_id,
       digest: plan.digest,
+      ...(plan.source_revision !== undefined ? { source_revision: plan.source_revision } : {}),
       decision: plan.decision,
       targets: plan.targets,
       rule_ids: matchedRuleIds(plan.rules),
@@ -175,6 +202,7 @@ export async function runStage(opts: StageOptions): Promise<StageResult> {
   return {
     summary: {
       run_id: plan.run_id,
+      ...(plan.source_revision !== undefined ? { source_revision: plan.source_revision } : {}),
       decision: plan.decision,
       targets: plan.targets,
       failover_allowed: plan.failover_allowed,

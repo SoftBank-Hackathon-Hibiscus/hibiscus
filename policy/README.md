@@ -54,6 +54,8 @@ npm run typecheck
 
 `digest`는 `sha256:` 뒤에 소문자 hex 64자, `run_id`는 영문·숫자·`._-`만 1~64자다. 결정 기록의 digest와 plan_hash도 같은 형식으로 검증된다.
 
+`source_revision`(선택)은 테스트한 소스의 **커밋 SHA**로, 소문자 hex 7~40자다. 백엔드가 webhook의 커밋 SHA를 고정해서 넘긴다. 아직 선택이며 `"unknown"`은 없는 것으로 취급한다. 값이 있으면 `plan.json`과 결정 기록에 그대로 전달되고 `plan_hash`에도 반영된다. 없으면 출력에 필드 자체가 없어 기존 `plan_hash`가 바뀌지 않는다.
+
 `facts`는 정책이 읽는 키만 타입이 정해져 있다. `db`는 `sqlite` | `postgres` | `mysql` | `none`(소문자), `writes_local_file`은 문자열 배열, `migration`은 파괴적 마이그레이션 판정 `{ destructive, backward_compatible, findings }`이다 (없으면 보안 단계 실행기가 채운다). 그 밖의 키는 자유롭게 넣을 수 있고 그대로 보존된다. 규칙이 정의되지 않은 facts 키를 읽으면 정책을 불러올 때 경고가 난다. 규칙이 실제로 읽는 경로 목록은 [contracts/README.md](contracts/README.md)의 "정책이 읽는 필드"에 자동 생성된다.
 
 ### `pii.json` (개인정보 후보. 지금은 가짜 파일, 나중에 AI 판정 결과)
@@ -74,7 +76,7 @@ npm run typecheck
 
 ```yaml
 version: 1
-known_targets: [local, cloud_run]   # 이 정책이 아는 배포 대상 전체
+known_targets: [onprem, cloud_run]   # 이 정책이 아는 배포 대상 전체
 rules:
   - id: R1
     if: { path: test.passed, eq: false }
@@ -82,10 +84,10 @@ rules:
     reason: "테스트 실패 ({test.match.matched}/{test.match.total} 일치)"
   - id: R4
     if: { some: pii.pii }
-    then: { targets: [local], failover_allowed: false }
+    then: { targets: [onprem], failover_allowed: false }
     reason: "개인정보({column}, {kind}) 발견: {evidence}"
 default:
-  targets: [local, cloud_run]
+  targets: [onprem, cloud_run]
   failover_allowed: true
 ```
 
@@ -104,7 +106,7 @@ default:
 
 **효과(`then`)**: `decision: block | needs_approval`, `targets: [...]`, `failover_allowed: bool`, `requires: [...]`. 적지 않은 키는 바꾸지 않는다.
 
-**해결 조건(`requires`)**: "이 규칙에 걸린 이유를 없애려면 무엇이 필요한가". `{ id: managed_db, hint: "SQLite를 PostgreSQL로 전환" }`처럼 설명과 함께 적거나, `managed_db`처럼 id만 적는다. 걸린 규칙들의 해결 조건이 `plan.json`의 `requires`에 `[{ id, hint?, rule_id, allowed_targets }]`로 모여(id로 합치고 정렬) 다음 단계(AI 수정 파트)가 무엇을 고쳐야 하는지 읽는다. `allowed_targets`는 이 해결 조건과 연결된 정책 위반이 해소됐다고 가정했을 때 나머지 정책 제약상 가능한 배포 위치다. 한 규칙이 해결 조건을 여러 개 요구하면 모두 충족해야 하고, 수정 후에는 새 버전으로 전체 정책을 다시 평가한다. 계산은 그 조건을 요구한 규칙들을 뺀 나머지 걸린 규칙만으로 `default.targets`에서 다시 좁힌 결과라 조건마다 다를 수 있다 (엔진이 규칙 평가를 한 번 더 도는 방식이며 decision에는 영향이 없다). 예를 들어 SQLite만 걸린 앱의 managed_db는 [local, cloud_run]이고, SQLite와 개인정보가 함께 걸린 앱의 managed_db는 개인정보 규칙이 남으므로 [local]이다. hint에는 위치를 적지 않는다 (결정 설명이 위치를 따로 붙인다).
+**해결 조건(`requires`)**: "이 규칙에 걸린 이유를 없애려면 무엇이 필요한가". `{ id: managed_db, hint: "SQLite를 PostgreSQL로 전환" }`처럼 설명과 함께 적거나, `managed_db`처럼 id만 적는다. 걸린 규칙들의 해결 조건이 `plan.json`의 `requires`에 `[{ id, hint?, rule_id, allowed_targets }]`로 모여(id로 합치고 정렬) 다음 단계(AI 수정 파트)가 무엇을 고쳐야 하는지 읽는다. `allowed_targets`는 이 해결 조건과 연결된 정책 위반이 해소됐다고 가정했을 때 나머지 정책 제약상 가능한 배포 위치다. 한 규칙이 해결 조건을 여러 개 요구하면 모두 충족해야 하고, 수정 후에는 새 버전으로 전체 정책을 다시 평가한다. 계산은 그 조건을 요구한 규칙들을 뺀 나머지 걸린 규칙만으로 `default.targets`에서 다시 좁힌 결과라 조건마다 다를 수 있다 (엔진이 규칙 평가를 한 번 더 도는 방식이며 decision에는 영향이 없다). 예를 들어 SQLite만 걸린 앱의 managed_db는 [onprem, cloud_run]이고, SQLite와 개인정보가 함께 걸린 앱의 managed_db는 개인정보 규칙이 남으므로 [onprem]이다. hint에는 위치를 적지 않는다 (결정 설명이 위치를 따로 붙인다).
 
 **규정집 문구의 다국어**: `reason`과 `requires[].hint`는 문자열(한국어) 또는 `{ ko: "...", ja: "..." }`로 적는다. 결정서의 `reason`/`hint`는 ko 문자열 그대로이고, ja가 있으면 선택 필드 `reason_i18n` / `hint_i18n`에 `{ ja }`가 함께 실린다. 결정 설명은 lang에 맞는 문구를 쓰고 없으면 ko로 대체한다. 기본 규칙(R1~R7, RB1~RB4, default)에는 일본어 문구가 채워져 있다. reason과 hint에는 digest 전체나 `cloud_run` 같은 내부 이름을 넣지 않는다 (설명이 위치와 버전을 따로 붙이고, 혹시 들어 있어도 digest는 앞 12자로 줄인다). `block`이나 `needs_approval`을 내는 규칙은 해결 조건이 최소 1개 있어야 하며 없으면 정책 로드 에러다. 엔진이 교집합 공백으로 스스로 차단할 때는 `resolve_target_conflict`를 넣는다.
 
@@ -115,11 +117,11 @@ default:
 | R1 | `test.passed = false` | block | fix_tests: 재생 불일치 요청을 고친 뒤 다시 테스트 |
 | R2 | `test.run_id ≠ pii.run_id` | block (입력 불일치) | rerun_same_run: 같은 run_id로 테스트와 개인정보 판정을 다시 실행 |
 | R3 | 확신 없는 개인정보 후보 있음 | needs_approval | human_review_pii: 해당 칼럼이 개인정보인지 사람이 확인 |
-| R4 | 개인정보 후보 있음 | targets [local], failover 금지 | |
-| R5 | `test.facts.db = sqlite` | targets [local] | managed_db: SQLite를 PostgreSQL로 전환 |
-| R6 | `test.facts.writes_local_file`에 `/tmp/`, `*.log`, DB 파일(`*.db`, `*.sqlite`, `*.sqlite3`, 대소문자 무시) 제외 원소 있음 | targets [local] | object_storage: 로컬 폴더에 쓰는 파일을 오브젝트 스토리지로 이전 |
+| R4 | 개인정보 후보 있음 | targets [onprem], failover 금지 | |
+| R5 | `test.facts.db = sqlite` | targets [onprem] | managed_db: SQLite를 PostgreSQL로 전환 |
+| R6 | `test.facts.writes_local_file`에 `/tmp/`, `*.log`, DB 파일(`*.db`, `*.sqlite`, `*.sqlite3`, 대소문자 무시) 제외 원소 있음 | targets [onprem] | object_storage: 로컬 폴더에 쓰는 파일을 오브젝트 스토리지로 이전 |
 | R7 | `test.facts.migration.destructive = true` (DROP/RENAME/타입 변경/DEFAULT 없는 NOT NULL 추가/SET NOT NULL/TRUNCATE) | block | two_phase_migration: 파괴적 변경을 확장→전환→정리 2단계 배포로 나누기 (먼저 새 구조를 추가하고, 옛 구조는 다음 배포에서 제거) |
-| default | | targets [local, cloud_run], failover 허용 | |
+| default | | targets [onprem, cloud_run], failover 허용 | |
 
 R5의 이유: 클라우드에서는 인스턴스가 교체되면 SQLite 파일이 사라진다. R6도 같은 이유로, 로컬 폴더에 쓰는 파일은 인스턴스 교체나 스케일아웃 때 사라지거나 갈라진다. 무시할 경로는 규칙의 `where`에 `@`(원소 자체)와 `starts_with` / `matches`로 적는다. DB 파일은 R5가 담당하므로 R6는 `.db`, `.sqlite`, `.sqlite3`을 무시해 해결 조건이 겹치지 않는다 (SQLite 앱이 `/app/data.db`만 쓰면 managed_db 하나만 나온다). cloud_run이 빠지므로 failover도 자동으로 false가 된다.
 
@@ -129,12 +131,12 @@ R5의 이유: 클라우드에서는 인스턴스가 교체되면 SQLite 파일�
 - 규칙에 `halt: true`를 붙이면 그 규칙이 걸렸을 때 즉시 멈추고 이후 규칙은 `plan.rules`에 실리지 않는다. 입력이 섞인 R2(run_id 불일치)에만 붙어 있다. 뒤 규칙의 판단이 의미 없기 때문이다.
 - `targets`는 `default.targets`에서 시작해 좁히기만 된다. 규칙이 `targets`를 정하면 지금까지의 `targets`와 교집합만 남긴다 (첫 규칙도 `default`와의 교집합). 그래서 `default`에 없는 대상은 어떤 규칙으로도 추가할 수 없고, 한 번 제외된 대상은 뒤 규칙이 다시 넣을 수 없다. 교집합이 비면 `block`이 되고 그 규칙의 `reason` 뒤에 "허용된 배포 대상이 없음"이 붙는다.
 - 어떤 규칙도 `targets`를 정하지 않으면 `default`가 그대로 쓰이고 `rules`에 `id: default`로 기록한다.
-- `known_targets`: 규칙과 `default`의 `targets`에 여기 없는 값이 있으면 정책을 불러올 때 `알 수 없는 배포 대상: cloudrun (규칙 R9)` 같은 에러로 멈춘다. 오타가 조용히 무시되지 않게 하기 위함이다.
-- `failover_allowed`는 `false`가 이긴다. 한 번 `false`면 뒤 규칙이 `true`로 되돌릴 수 없다. 최종 `targets`에 `local`과 `cloud_run`이 모두 없으면 항상 `false`다.
+- `known_targets`: 규칙과 `default`의 `targets`에 여기 없는 값이 있으면 정책을 불러올 때 `알 수 없는 배포 대상: cloudrun (규칙 R9)` 같은 에러로 멈춘다. 오타가 조용히 무시되지 않게 하기 위함이다. 배포 대상은 `onprem`(자체 서버)과 `cloud_run` 두 가지다. 옛 이름 `local`은 개발자 기기를 뜻하므로 배포 대상이 아니며, 정책이나 롤백 요청에 적으면 같은 에러가 난다.
+- `failover_allowed`는 `false`가 이긴다. 한 번 `false`면 뒤 규칙이 `true`로 되돌릴 수 없다. 최종 `targets`에 `onprem`과 `cloud_run`이 모두 없으면 항상 `false`다.
 
 **`reason` 템플릿**: `{경로}`를 값으로 치환한다. `some`에 걸린 원소가 있으면 원소마다 렌더링해 `; `로 잇는다. 경로는 원소 → 루트 순으로 찾고, `{$.경로}`는 항상 루트.
 
-기본 `policy.yaml`의 R1~R4는 가상 플랫폼팀의 예시다. 엔진 코드를 고치지 않고 파일만 바꿔 다른 회사 정책을 쓸 수 있다 (`tests/engine.test.ts`의 "sqlite면 local만" 테스트 참고).
+기본 `policy.yaml`의 R1~R4는 가상 플랫폼팀의 예시다. 엔진 코드를 고치지 않고 파일만 바꿔 다른 회사 정책을 쓸 수 있다 (`tests/engine.test.ts`의 "sqlite면 onprem만" 테스트 참고).
 
 ## 출력
 
@@ -145,8 +147,9 @@ R5의 이유: 클라우드에서는 인스턴스가 교체되면 SQLite 파일�
   "run_id": "r-004",
   "app": "todo",
   "digest": "sha256:d4e5...",
+  "source_revision": "9f8e7d6c5b4a39281706f5e4d3c2b1a0f9e8d7c6",
   "decision": "needs_approval",
-  "targets": ["local"],
+  "targets": ["onprem"],
   "failover_allowed": false,
   "rules": [
     { "id": "R1", "result": "not_matched" },
@@ -159,10 +162,11 @@ R5의 이유: 클라우드에서는 인스턴스가 교체되면 SQLite 파일�
 ```
 
 - `decision`: `allow` | `block` | `needs_approval`
+- `source_revision`: test_result의 커밋 SHA 그대로. 입력에 있을 때만 (없거나 `"unknown"`이면 필드가 없다)
 - `targets`: `block`이면 빈 배열
 - `rules`: 평가된 모든 규칙과 결과. block 이후에도 해결 조건과 대상 제한을 모으기 위해 끝까지 평가하며, 그때 걸린 규칙은 `matched_after_block`으로 기록한다 (halt 규칙이 걸리면 즉시 멈춤). `result`는 `matched` / `not_matched` / `matched_after_block`
 - 출력 파일(plan, rollback_plan, decisions.jsonl)의 객체는 모두 strict라 추가 필드가 있으면 zod와 JSON Schema 모두 거부한다. 입력 파일은 모르는 필드를 허용한다.
-- `requires`: 해결 조건 `[{ id, hint?, hint_i18n?, rule_id, allowed_targets }]`. 걸린 규칙들의 것을 id로 합치고 정렬. `allowed_targets`는 이 조건과 연결된 위반이 해소됐다고 가정했을 때 나머지 제약상 가능한 배포 위치(그 조건을 요구한 규칙을 뺀 나머지 규칙으로 좁힌 결과). 수정 후에는 새 버전으로 전체 정책을 다시 평가한다. `block`/`needs_approval`이면 항상 1개 이상. 하나도 없으면 필드가 없다. 예: `[{ "id": "managed_db", "hint": "SQLite를 PostgreSQL로 전환", "hint_i18n": { "ja": "SQLiteをPostgreSQLへ移行" }, "rule_id": "R5", "allowed_targets": ["local", "cloud_run"] }]`
+- `requires`: 해결 조건 `[{ id, hint?, hint_i18n?, rule_id, allowed_targets }]`. 걸린 규칙들의 것을 id로 합치고 정렬. `allowed_targets`는 이 조건과 연결된 위반이 해소됐다고 가정했을 때 나머지 제약상 가능한 배포 위치(그 조건을 요구한 규칙을 뺀 나머지 규칙으로 좁힌 결과). 수정 후에는 새 버전으로 전체 정책을 다시 평가한다. `block`/`needs_approval`이면 항상 1개 이상. 하나도 없으면 필드가 없다. 예: `[{ "id": "managed_db", "hint": "SQLite를 PostgreSQL로 전환", "hint_i18n": { "ja": "SQLiteをPostgreSQLへ移行" }, "rule_id": "R5", "allowed_targets": ["onprem", "cloud_run"] }]`
 - `rules[].reason_i18n`: 정책에 ja 문구가 있을 때만 `{ ja }`가 함께 실린다
 - `rules[].reason`은 `matched`와 `matched_after_block`일 때만 있다
 - `plan_hash`: `{ inputs: {test, pii}, policy, plan(해시 제외) }`를 키 정렬 JSON으로 만든 뒤 sha256. 입력·정책·결과 중 하나라도 바뀌면 달라진다
@@ -170,11 +174,11 @@ R5의 이유: 클라우드에서는 인스턴스가 교체되면 SQLite 파일�
 ### `decisions.jsonl` (한 줄씩 추가만)
 
 ```json
-{"kind":"deploy","time":"2026-09-29T13:40:02.172Z","run_id":"r-004","digest":"sha256:d4e5...","decision":"needs_approval","targets":["local"],"rule_ids":["R3","R4"],"plan_hash":"7ecaf343..."}
-{"kind":"rollback","time":"2026-09-29T14:02:11.004Z","run_id":"r-012","digest":"sha256:3333...","serve_digest":"sha256:0000...","decision":"rollback","targets":["local"],"failover_allowed":false,"rule_ids":["RB3","default"],"plan_hash":"..."}
+{"kind":"deploy","time":"2026-09-29T13:40:02.172Z","run_id":"r-004","digest":"sha256:d4e5...","source_revision":"9f8e7d6c5b4a39281706f5e4d3c2b1a0f9e8d7c6","decision":"needs_approval","targets":["onprem"],"rule_ids":["R3","R4"],"plan_hash":"7ecaf343..."}
+{"kind":"rollback","time":"2026-09-29T14:02:11.004Z","run_id":"r-012","digest":"sha256:3333...","serve_digest":"sha256:0000...","decision":"rollback","targets":["onprem"],"failover_allowed":false,"rule_ids":["RB3","default"],"plan_hash":"..."}
 ```
 
-`kind`로 배포 결정과 롤백 결정을 구분한다. `rule_ids`는 걸린 규칙(`matched`와 `matched_after_block`) 전부를 구분 없이 id만 담으며, 정책 CLI·롤백 CLI·실행기가 같은 함수로 만든다. 시간 값은 CLI에서만 붙이고 엔진(`decide`, `decideRollback`)은 시간을 쓰지 않는다.
+`kind`로 배포 결정과 롤백 결정을 구분한다. `rule_ids`는 걸린 규칙(`matched`와 `matched_after_block`) 전부를 구분 없이 id만 담으며, 정책 CLI·롤백 CLI·실행기가 같은 함수로 만든다. 시간 값은 CLI에서만 붙이고 엔진(`decide`, `decideRollback`)은 시간을 쓰지 않는다. `source_revision`은 결정서(plan, rollback_plan)에 있을 때만 그대로 실린다.
 
 ## 결정 설명 (`src/explainer.ts`, `src/explain.ts`)
 
@@ -195,7 +199,7 @@ npx tsx src/stage.ts --src samples/signup-contact --test fixtures/01-allow/test_
 
 보안 단계 실행기에 `--explain`을 주면 out-dir에 `explain.ko.md`와 `explain.ja.md`를 함께 쓴다.
 
-구성은 결론 한 줄(허용·승인 필요·차단과 배포 위치), failover를 쉬운 말로, 이유(걸린 규칙의 reason, 차단 뒤에 걸린 규칙은 따로), 해결 조건(무엇을, 어디에서), 결정 지문(plan_hash 앞 12자)과 이미지 digest 앞 12자 순이다. 규칙 id는 괄호로만 보조 표시한다. 대상 이름은 `local` → 온프레(사내) / オンプレ（社内）, `cloud_run` → Cloud Run이다. 규칙의 reason과 hint는 결정서의 `reason_i18n` / `hint_i18n`에 해당 언어가 있으면 그것을 쓰고, 없으면 ko로 대체한다. reason이나 hint 안에 sha256 digest 전체가 들어 있어도 앞 12자로 줄인다. 일본어 출력은 단어 사이 공백 없이, 괄호는 전각（）으로 쓴다.
+구성은 결론 한 줄(허용·승인 필요·차단과 배포 위치), failover를 쉬운 말로, 이유(걸린 규칙의 reason, 차단 뒤에 걸린 규칙은 따로), 해결 조건(무엇을, 어디에서), 결정 지문(plan_hash 앞 12자)과 이미지 digest 앞 12자 순이다. 결정서에 `source_revision`이 있으면 맨 아래 줄에 커밋 앞 7자리를 표시한다 (`커밋 \`9f8e7d6\`` / `コミット\`9f8e7d6\``). 규칙 id는 괄호로만 보조 표시한다. 대상 이름은 `onprem` → 온프레(사내) / オンプレ（社内）, `cloud_run` → Cloud Run이다. 규칙의 reason과 hint는 결정서의 `reason_i18n` / `hint_i18n`에 해당 언어가 있으면 그것을 쓰고, 없으면 ko로 대체한다. reason이나 hint 안에 sha256 digest 전체가 들어 있어도 앞 12자로 줄인다. 일본어 출력은 단어 사이 공백 없이, 괄호는 전각（）으로 쓴다.
 
 **예시 (ko)** — fixtures/02-block-test-failed
 
@@ -312,6 +316,7 @@ npx tsx src/stage.ts --src samples/signup-contact --test fixtures/01-allow/test_
 | `--since` | 마이그레이션 판정에서 이 이름보다 뒤의 파일만 검사 |
 | `--log` | 결정 기록 파일. 기본 `./decisions.jsonl` |
 | `--explain` | out-dir에 사람이 읽는 설명 `explain.ko.md`, `explain.ja.md`를 함께 쓴다 |
+| `--source-revision` | 커밋 SHA (소문자 hex 7~40자). `test_result.source_revision`보다 우선한다. 둘 다 있는데 서로 다르면 실행 오류(종료 코드 1). `"unknown"`은 받지 않는다 |
 | `--json` | 사람이 읽는 출력 대신 한 줄 JSON 요약을 stdout에 출력 |
 
 순서는 test_result 검증 → policy 로드 → 마이그레이션 판정 → 개인정보 판정 → 정책 결정 → 파일 저장 → 결정 기록이다. 마이그레이션 판정은 항상 실행기가 직접 계산한다. test_result에 `facts.migration`이 있으면 그 값을 쓰되 `destructive`가 실행기 계산과 다르면 두 값을 보여주며 실행 오류로 멈춘다. `--since`로 준 이름을 마이그레이션 목록에서 찾지 못하면 실행 오류다(잘못된 이름이 검사 범위를 조용히 바꾸지 않게). 앱 폴더 안의 symlink는 따라가지 않고 건너뛰며 그 경로를 알린다. 중간에 실패하면 `오류 [단계: test_result] ...`처럼 어느 단계에서 왜 실패했는지 출력한다. out-dir에는 `pii.json`, `plan.json`과 함께 정책에 실제로 들어간 `test_result.json`이 남고, 마이그레이션을 실행기가 판정했으면 `migration.json`도 남는다. 남은 `test_result.json`으로 `src/cli.ts`를 돌리면 같은 plan_hash가 나온다.
@@ -323,7 +328,7 @@ npx tsx src/stage.ts --src samples/signup-contact --test fixtures/01-allow/test_
 | block | 3 |
 | 실행 오류 (파일 없음, 형식 오류 등) | 1 |
 
-`--json`의 요약은 `{ run_id, decision, targets, failover_allowed, requires, plan_path, pii_path }` 한 줄이다. 따로 실행한 개인정보 CLI와 정책 CLI의 결과와 같은 파일이 나온다 (테스트로 확인).
+`--json`의 요약은 `{ run_id, source_revision?, decision, targets, failover_allowed, requires, plan_path, pii_path }` 한 줄이다 (`source_revision`은 있을 때만). 따로 실행한 개인정보 CLI와 정책 CLI의 결과와 같은 파일이 나온다 (테스트로 확인).
 
 ```bash
 npx tsx src/stage.ts --src samples/ambiguous --test fixtures/01-allow/test_result.json --policy policy.yaml --out-dir out/r-001 --json
@@ -360,8 +365,9 @@ npx tsx src/rollback/cli.ts --request rollback_request.json --policy policy.yaml
   "run_id": "r-010",
   "app": "todo",
   "stage": "after_cutover",
-  "candidate": { "digest": "sha256:...", "targets": ["local"] },
-  "stable":    { "digest": "sha256:...", "targets": ["local", "cloud_run"] },
+  "source_revision": "9f8e7d6c5b4a39281706f5e4d3c2b1a0f9e8d7c6",
+  "candidate": { "digest": "sha256:...", "targets": ["onprem"] },
+  "stable":    { "digest": "sha256:...", "targets": ["onprem", "cloud_run"] },
   "state": {
     "writes_since_cutover": false,
     "pii_written_onprem": false,
@@ -372,6 +378,7 @@ npx tsx src/rollback/cli.ts --request rollback_request.json --policy policy.yaml
 
 - `candidate`: 이번 배포 후보 (문제가 난 버전). `stable`: 이번 배포 전 정상 버전 (되돌아갈 곳)
 - `stage`: `before_cutover`(트래픽을 후보로 넘기기 전 실패) / `after_cutover`(넘긴 뒤 실패)
+- `source_revision`(선택): 배포 후보의 커밋 SHA. test_result와 같은 형식이며 `"unknown"`은 없는 것으로 취급한다. 있으면 `rollback_plan.json`과 결정 기록에 그대로 실리고 `plan_hash`에 반영된다
 
 ### 규칙 (`policy.yaml`의 `rollback` 섹션, 조건 문법은 배포 규칙과 같고 컨텍스트는 `{ request }`)
 
@@ -379,14 +386,14 @@ npx tsx src/rollback/cli.ts --request rollback_request.json --policy policy.yaml
 |---|---|---|
 | RB1 | `stage = before_cutover` | keep_stable (되돌릴 것이 없음, 정상 버전이 계속 받음) |
 | RB2 | DB 마이그레이션이 정상 버전과 비호환 | manual_recovery (자동 롤백 차단). 해결 조건 manual_db_recovery: DB 스키마를 이전 버전과 호환되게 복구한 뒤 롤백 |
-| RB3 | 온프레에 개인정보가 쓰임 | targets [local], failover 금지 (Cloud Run으로 되돌리지 않음) |
+| RB3 | 온프레에 개인정보가 쓰임 | targets [onprem], failover 금지 (Cloud Run으로 되돌리지 않음) |
 | RB4 | 컷오버 후 쓰기 없음 | rollback (정상 버전의 대상 그대로) |
 | default | | rollback, failover 허용 (대상은 좁히기 규칙을 따름) |
 
 **병합** (배포 엔진과 같은 원칙)
-- `decision`은 `rollback < keep_stable < manual_recovery` 순으로 강한 쪽만 남는다. `keep_stable`은 되돌릴 것이 없으므로 즉시 멈춘다. `manual_recovery`는 `halt`가 아니면 끝까지 평가해 `targets` 좁히기와 해결 조건만 모으고, 뒤에 걸린 규칙은 `matched_after_block`으로 기록된다. 그래서 개인정보와 DB 비호환이 동시에 있으면 규칙 순서와 무관하게 `manual_recovery`이고 해결 조건의 `allowed_targets`는 `[local]`이다.
+- `decision`은 `rollback < keep_stable < manual_recovery` 순으로 강한 쪽만 남는다. `keep_stable`은 되돌릴 것이 없으므로 즉시 멈춘다. `manual_recovery`는 `halt`가 아니면 끝까지 평가해 `targets` 좁히기와 해결 조건만 모으고, 뒤에 걸린 규칙은 `matched_after_block`으로 기록된다. 그래서 개인정보와 DB 비호환이 동시에 있으면 규칙 순서와 무관하게 `manual_recovery`이고 해결 조건의 `allowed_targets`는 `[onprem]`이다.
 - `targets`는 `stable.targets`에서 시작해 좁히기만 되고, 교집합이 비면 `manual_recovery`다. 롤백 규칙의 `targets`도 `known_targets` 검증을 받는다.
-- `failover_allowed`는 `false`가 이긴다. 최종 `targets`에 `local`과 `cloud_run`이 둘 다 있을 때만 `true`가 될 수 있고, 아무 규칙도 정하지 않으면 `default.failover_allowed`를 쓴다.
+- `failover_allowed`는 `false`가 이긴다. 최종 `targets`에 `onprem`과 `cloud_run`이 둘 다 있을 때만 `true`가 될 수 있고, 아무 규칙도 정하지 않으면 `default.failover_allowed`를 쓴다.
 - `requires`(해결 조건)는 배포 엔진과 같은 방식이다. `manual_recovery`를 내는 규칙은 해결 조건이 최소 1개 있어야 하고, 엔진이 교집합 공백으로 스스로 `manual_recovery`로 가면 `manual_target_recovery`를 넣는다. `allowed_targets`는 그 조건을 요구한 규칙을 뺀 나머지 걸린 규칙만으로 `stable.targets`에서 좁힌 결과다.
 
 ### 출력 `rollback_plan.json`
@@ -394,9 +401,10 @@ npx tsx src/rollback/cli.ts --request rollback_request.json --policy policy.yaml
 ```json
 {
   "run_id": "r-012", "app": "todo",
+  "source_revision": "9f8e7d6c5b4a39281706f5e4d3c2b1a0f9e8d7c6",
   "decision": "rollback",
   "serve_digest": "sha256:0000...",
-  "targets": ["local"],
+  "targets": ["onprem"],
   "failover_allowed": false,
   "rules": [
     { "id": "RB1", "result": "not_matched" },

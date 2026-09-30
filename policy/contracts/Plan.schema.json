@@ -18,6 +18,11 @@
       "pattern": "^sha256:[0-9a-f]{64}$",
       "description": "컨테이너 이미지 지문. 'sha256:' + 소문자 hex 64자. 테스트한 이미지 = 결정한 이미지 = 서명·배포할 이미지"
     },
+    "source_revision": {
+      "description": "테스트한 소스의 커밋 SHA (test_result 에서 그대로). 입력에 있을 때만",
+      "type": "string",
+      "pattern": "^[0-9a-f]{7,40}$"
+    },
     "decision": {
       "type": "string",
       "enum": [
@@ -36,7 +41,7 @@
     },
     "failover_allowed": {
       "type": "boolean",
-      "description": "온프레 장애 시 Cloud Run 으로 전환해도 되는지. local 과 cloud_run 이 모두 있을 때만 true 가능"
+      "description": "온프레 장애 시 Cloud Run 으로 전환해도 되는지. onprem 과 cloud_run 이 모두 있을 때만 true 가능"
     },
     "requires": {
       "description": "걸린 규칙들의 해결 조건 (id 로 합치고 id 순 정렬). block / needs_approval / manual_recovery 면 최소 1개. 하나도 없으면 필드가 없다",

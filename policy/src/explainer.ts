@@ -5,6 +5,7 @@
  * - 규칙 id(R1 등)는 괄호로만 보조 표시하고 본문은 사람이 읽는 문장으로 쓴다.
  * - lang: ko(기본) | ja. 규칙의 reason/hint 는 결정서의 *_i18n 에 해당 언어가 있으면 그것을, 없으면 ko 를 쓴다.
  * - reason/hint 안의 sha256:<64자> 는 앞 12자로 줄인다 (안전장치).
+ * - 결정서에 source_revision(커밋 SHA)이 있으면 맨 아래 줄에 앞 7자리를 표시한다.
  */
 import type { Plan, PlanRequirement, RollbackPlan, RuleResult } from "./schema.js";
 
@@ -13,9 +14,10 @@ export interface ExplainOptions {
   lang?: Lang;
 }
 
-const LOCAL = "local";
+const ONPREM = "onprem";
 const CLOUD = "cloud_run";
 const SHORT = 12;
+const SHORT_REVISION = 7;
 
 interface Strings {
   targetName: Record<string, string>;
@@ -29,7 +31,7 @@ interface Strings {
     on: string;
     offForbidden: string;
     offNoCloud: string;
-    offNoLocal: string;
+    offNoOnprem: string;
     offBlocked: string;
     offManual: string;
   };
@@ -45,6 +47,7 @@ interface Strings {
   requiresNote: string;
   requirementLine: (what: string, targets: string, ruleId: string, id: string) => string;
   footer: (planHash: string, digestLabel: string, digest: string) => string;
+  revisionLine: (revision: string) => string;
   imageLabel: string;
   serveLabel: string;
   serveNone: string;
@@ -52,7 +55,7 @@ interface Strings {
 
 const STRINGS: Record<Lang, Strings> = {
   ko: {
-    targetName: { [LOCAL]: "온프레(사내)", [CLOUD]: "Cloud Run" },
+    targetName: { [ONPREM]: "온프레(사내)", [CLOUD]: "Cloud Run" },
     and: " 및 ",
     none: "없음 (남은 규칙끼리 충돌)",
     deployTitle: (app, runId) => `# 배포 결정: ${app} (실행 ${runId})`,
@@ -71,7 +74,7 @@ const STRINGS: Record<Lang, Strings> = {
       on: "온프레가 멈추면 Cloud Run으로 트래픽을 넘깁니다.",
       offForbidden: "온프레가 멈춰도 Cloud Run으로 넘기지 않습니다 (정책이 금지).",
       offNoCloud: "온프레가 멈춰도 Cloud Run으로 넘기지 않습니다. Cloud Run에는 배포하지 않기 때문입니다.",
-      offNoLocal: "Cloud Run에만 배포하므로 온프레 장애 시 전환은 해당 없습니다.",
+      offNoOnprem: "Cloud Run에만 배포하므로 온프레 장애 시 전환은 해당 없습니다.",
       offBlocked: "배포하지 않으므로 장애 시 전환도 없습니다.",
       offManual: "수동 복구 전까지 장애 시 전환은 없습니다.",
     },
@@ -87,12 +90,13 @@ const STRINGS: Record<Lang, Strings> = {
     requiresNote: "한 규칙이 해결 조건을 여러 개 요구하면 모두 충족해야 합니다. 수정 후에는 새 버전으로 전체 정책을 다시 평가합니다.",
     requirementLine: (what, t, ruleId, id) => `- **${what}** — 이 위반을 해소하면 나머지 제약상 가능한 배포 위치: ${t} (규칙 ${ruleId}, \`${id}\`)`,
     footer: (hash, label, digest) => `결정 지문 \`${hash}\` · ${label} \`${digest}\``,
+    revisionLine: (revision) => `커밋 \`${revision}\``,
     imageLabel: "이미지",
     serveLabel: "트래픽을 받을 버전",
     serveNone: "미정",
   },
   ja: {
-    targetName: { [LOCAL]: "オンプレ（社内）", [CLOUD]: "Cloud Run" },
+    targetName: { [ONPREM]: "オンプレ（社内）", [CLOUD]: "Cloud Run" },
     and: "と",
     none: "なし（残りのルール同士が衝突）",
     deployTitle: (app, runId) => `# デプロイ判定：${app}（実行${runId}）`,
@@ -111,7 +115,7 @@ const STRINGS: Record<Lang, Strings> = {
       on: "オンプレが停止した場合、Cloud Runにトラフィックを切り替えます。",
       offForbidden: "オンプレが停止してもCloud Runには切り替えません（ポリシーで禁止）。",
       offNoCloud: "オンプレが停止してもCloud Runには切り替えません。Cloud Runにはデプロイしないためです。",
-      offNoLocal: "Cloud Runのみにデプロイするため、オンプレ障害時の切り替えは対象外です。",
+      offNoOnprem: "Cloud Runのみにデプロイするため、オンプレ障害時の切り替えは対象外です。",
       offBlocked: "デプロイしないため、障害時の切り替えもありません。",
       offManual: "手動復旧までは障害時の切り替えはありません。",
     },
@@ -127,6 +131,7 @@ const STRINGS: Record<Lang, Strings> = {
     requiresNote: "1つのルールが複数の解決条件を要求する場合はすべて満たす必要があります。修正後は新しいバージョンでポリシー全体を再評価します。",
     requirementLine: (what, t, ruleId, id) => `- **${what}** — この違反を解消した場合に残りの制約上可能なデプロイ先：${t}（ルール${ruleId}、\`${id}\`）`,
     footer: (hash, label, digest) => `判定ハッシュ\`${hash}\`・${label}\`${digest}\``,
+    revisionLine: (revision) => `コミット\`${revision}\``,
     imageLabel: "イメージ",
     serveLabel: "トラフィックを受けるバージョン",
     serveNone: "未定",
@@ -148,6 +153,13 @@ export function shortDigest(digest: string): string {
   return prefix + hex.slice(0, SHORT);
 }
 export const shortHash = (hash: string): string => hash.slice(0, SHORT);
+/** 커밋 SHA 는 앞 7자 */
+export const shortRevision = (revision: string): string => revision.slice(0, SHORT_REVISION);
+
+/** 맨 아래 줄: 커밋 앞 7자리. source_revision 이 없으면 아무 줄도 넣지 않는다 */
+function revisionLines(revision: string | undefined, s: Strings): string[] {
+  return revision !== undefined ? [s.revisionLine(shortRevision(revision))] : [];
+}
 
 /** 문장 안에 든 긴 digest 를 앞 12자로 줄인다 (규칙 reason 이 digest 를 통째로 넣었을 때의 안전장치) */
 export function shortenDigests(text: string): string {
@@ -164,10 +176,10 @@ function failoverText(decision: string, targets: readonly string[], failoverAllo
   if (decision === "block") return s.failover.offBlocked;
   if (manual) return s.failover.offManual;
   if (failoverAllowed) return s.failover.on;
-  const hasLocal = targets.includes(LOCAL);
+  const hasOnprem = targets.includes(ONPREM);
   const hasCloud = targets.includes(CLOUD);
-  if (hasLocal && !hasCloud) return s.failover.offNoCloud;
-  if (!hasLocal && hasCloud) return s.failover.offNoLocal;
+  if (hasOnprem && !hasCloud) return s.failover.offNoCloud;
+  if (!hasOnprem && hasCloud) return s.failover.offNoOnprem;
   return s.failover.offForbidden;
 }
 
@@ -228,6 +240,7 @@ export function explainPlan(plan: Plan, opts: ExplainOptions = {}): string {
     "---",
     "",
     s.footer(shortHash(plan.plan_hash), s.imageLabel, shortDigest(plan.digest)),
+    ...revisionLines(plan.source_revision, s),
     "",
   ];
   return lines.join("\n");
@@ -253,6 +266,7 @@ export function explainRollbackPlan(plan: RollbackPlan, opts: ExplainOptions = {
     "---",
     "",
     s.footer(shortHash(plan.plan_hash), s.serveLabel, serve),
+    ...revisionLines(plan.source_revision, s),
     "",
   ];
   return lines.join("\n");

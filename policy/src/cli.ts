@@ -43,13 +43,14 @@ runCli(() => {
     kind: "deploy",
     run_id: plan.run_id,
     digest: plan.digest,
+    ...(plan.source_revision !== undefined ? { source_revision: plan.source_revision } : {}),
     decision: plan.decision,
     targets: plan.targets,
     rule_ids: matchedRuleIds(plan.rules),
     plan_hash: plan.plan_hash,
   });
 
-  console.log(`[policy-engine] run_id=${plan.run_id} digest=${plan.digest}`);
+  console.log(`[policy-engine] run_id=${plan.run_id} digest=${plan.digest}${plan.source_revision ? ` source_revision=${plan.source_revision}` : ""}`);
   console.log(`  decision : ${plan.decision}`);
   console.log(`  targets  : ${plan.targets.length ? plan.targets.join(", ") : "(none)"}`);
   console.log(`  failover : ${plan.failover_allowed}`);

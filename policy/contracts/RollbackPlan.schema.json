@@ -13,6 +13,11 @@
       "type": "string",
       "description": "앱 이름 (요청에서 그대로)"
     },
+    "source_revision": {
+      "description": "배포 후보의 커밋 SHA (rollback_request 에서 그대로). 요청에 있을 때만",
+      "type": "string",
+      "pattern": "^[0-9a-f]{7,40}$"
+    },
     "decision": {
       "type": "string",
       "enum": [
@@ -44,7 +49,7 @@
     },
     "failover_allowed": {
       "type": "boolean",
-      "description": "온프레 장애 시 Cloud Run 전환 허용 여부. false 가 이기고, local 과 cloud_run 이 모두 있을 때만 true 가능"
+      "description": "온프레 장애 시 Cloud Run 전환 허용 여부. false 가 이기고, onprem 과 cloud_run 이 모두 있을 때만 true 가능"
     },
     "requires": {
       "description": "걸린 규칙들의 해결 조건 (id 로 합치고 id 순 정렬). block / needs_approval / manual_recovery 면 최소 1개. 하나도 없으면 필드가 없다",

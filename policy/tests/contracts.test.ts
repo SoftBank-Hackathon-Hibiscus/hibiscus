@@ -115,7 +115,10 @@ describe("JSON Schema 의 선택/필수 표시", () => {
 });
 
 describe("contracts/ 폴더가 최신인지", () => {
-  it("npm run contracts 결과와 저장된 파일이 같다", () => {
+  /** 줄바꿈만 다른 것은 같은 내용으로 본다 (core.autocrlf=true 체크아웃이나 git archive 에서 CRLF 로 바뀔 수 있다) */
+  const normalizeEol = (text: string) => text.replace(/\r\n/g, "\n");
+
+  it("npm run contracts 결과와 저장된 파일이 같다 (줄바꿈은 정규화해 비교)", () => {
     for (const c of CONTRACTS) {
       const file = join(ROOT, "contracts", schemaFileName(c));
       expect(existsSync(file), `${file} 없음. npm run contracts 를 실행하세요`).toBe(true);
@@ -123,7 +126,14 @@ describe("contracts/ 폴더가 최신인지", () => {
     }
     const readme = join(ROOT, "contracts", "README.md");
     expect(existsSync(readme), "contracts/README.md 없음. npm run contracts 를 실행하세요").toBe(true);
-    expect(readFileSync(readme, "utf8"), "contracts/README.md 가 오래됨. npm run contracts 를 실행하세요").toBe(renderReadme(CONTRACTS, jsonSchemas));
+    expect(normalizeEol(readFileSync(readme, "utf8")), "contracts/README.md 가 오래됨. npm run contracts 를 실행하세요").toBe(normalizeEol(renderReadme(CONTRACTS, jsonSchemas)));
+  });
+
+  it("저장된 README 가 CRLF 여도 내용이 같으면 통과한다", () => {
+    const rendered = renderReadme(CONTRACTS, jsonSchemas);
+    const crlf = rendered.replace(/\n/g, "\r\n");
+    expect(crlf).not.toBe(rendered);
+    expect(normalizeEol(crlf)).toBe(normalizeEol(rendered));
   });
 
   it("README 에 계약마다 필드 표와 예시가 있다", () => {

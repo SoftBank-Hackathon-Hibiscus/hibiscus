@@ -233,7 +233,7 @@ describe("R7: 파괴적 마이그레이션 → block", () => {
         id: "two_phase_migration",
         hint: "파괴적 변경을 확장→전환→정리 2단계 배포로 나누기 (먼저 새 구조를 추가하고, 옛 구조는 다음 배포에서 제거)",
         rule_id: "R7",
-        allowed_targets: ["local", "cloud_run"],
+        allowed_targets: ["onprem", "cloud_run"],
       },
     ]);
     const r7 = plan.rules.find((r) => r.id === "R7")!;
