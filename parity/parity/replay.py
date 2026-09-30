@@ -13,6 +13,7 @@
 import http.client
 from dataclasses import dataclass
 from http.cookies import CookieError, SimpleCookie
+from urllib.parse import urlsplit
 
 from .record import decode_body, send_request
 from .redact import REDACTED
@@ -48,6 +49,7 @@ class Response:
 class ReplayResult:
     responses: list              # records 와 같은 순서. 실행 못 한 요청은 None
     error: str = None            # 훅이 재생을 중단시켰다면 그 이유
+    cause: Exception = None      # 외부 실행기가 부분 결과와 원래 예외를 함께 처리할 때 사용
 
 
 def update_jar(jar, headers):
@@ -103,8 +105,33 @@ def _send(record, target, jar, timeout, extra_headers, ssl_context, warn):
     return Response(status, resp_headers, resp_body)
 
 
-def replay(records, target, hooks=(), timeout=30, extra_headers=(), ssl_context=None, log=None):
-    """records 를 순서대로 target 에 재생한다. 훅이 HookAbort 를 던지면 거기서 멈춘다."""
+def _validated_target(target):
+    """외부 실행기가 준 주소만 사용한다. 주소 안 인증 정보는 허용하지 않는다."""
+    if not isinstance(target, str) or not target or any(c.isspace() for c in target):
+        raise ValueError("재생 대상은 공백 없는 http/https URL이어야 합니다")
+    try:
+        parts = urlsplit(target)
+        port = parts.port
+    except ValueError:
+        raise ValueError("재생 대상 URL의 호스트 또는 포트가 잘못되었습니다") from None
+    if (parts.scheme not in ("http", "https") or not parts.hostname
+            or parts.username is not None or parts.password is not None
+            or parts.query or parts.fragment or port == 0):
+        raise ValueError("재생 대상은 인증 정보·쿼리·fragment가 없는 http/https URL이어야 합니다")
+    return target
+
+
+def replay(records, target, hooks=(), timeout=30, extra_headers=(), ssl_context=None, log=None,
+           *, target_for_request=None, on_response=None, after_response=None):
+    """순서대로 재생하며 외부 환경 실행기와 연결한다 (컨테이너 조작 없음).
+
+    target_for_request(index): before_request 훅 뒤, 전송 직전에 현재 URL을 받는다.
+    on_response(index, record, response): 응답을 저장한 직후 비교/기록할 수 있다.
+    after_response(index): 비교/기록 뒤, 다음 요청이 있을 때만 실행한다.
+    기존 after_request 훅은 이전과 같이 마지막 요청에도 호출한다.
+    실패하면 응답과 None(미실행)을 보존하며 error/cause를 반환한다.
+    callback은 신뢰하는 실행기가 제공하며, 동일 앱의 교체 대상에만 연결해야 한다.
+    """
     warned = set()
 
     def warn(key, message):
@@ -115,14 +142,23 @@ def replay(records, target, hooks=(), timeout=30, extra_headers=(), ssl_context=
     jar = {}
     responses = [None] * len(records)
     try:
+        if not records:
+            raise ValueError("기록이 비어 있어 재생할 수 없습니다")
         for hook in hooks:
             hook.before_run([r["index"] for r in records])
         for pos, rec in enumerate(records):
             for hook in hooks:
                 hook.before_request(rec["index"])
-            responses[pos] = _send(rec, target, jar, timeout, list(extra_headers), ssl_context, warn)
+            current_target = target_for_request(rec["index"]) if target_for_request else target
+            current_target = _validated_target(current_target)
+            responses[pos] = _send(rec, current_target, jar, timeout, list(extra_headers), ssl_context, warn)
+            if on_response:
+                on_response(rec["index"], rec, responses[pos])
             for hook in hooks:
                 hook.after_request(rec["index"])
-    except HookAbort as e:
-        return ReplayResult(responses, error=str(e))
+            if after_response and pos < len(records) - 1:
+                after_response(rec["index"])
+    except Exception as e:
+        # 외부 실행기 오류도 통과로 보지 않는다. KeyboardInterrupt/SystemExit는 전파한다.
+        return ReplayResult(responses, error=f"{type(e).__name__}: {e}", cause=e)
     return ReplayResult(responses)
