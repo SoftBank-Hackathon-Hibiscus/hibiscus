@@ -15,6 +15,8 @@
 `replace`는 주영님 PR #8에 병합된 구현을 사용합니다. `premortem ConditionRunner`를 호출하는
 별도 어댑터 데모와 구분합니다. 이름·고정 포트가 유지되므로 기본 경로에는 동적 주소 변경이 필요 없습니다.
 바인딩 등 환경 원인 분석은 주영님 영역이며, 이 모듈은 실패 단계와 검사 결과를 전달합니다.
+빌드·최초 실행, AI 수정 후 새 이미지 빌드·실행, digest 기록은 주영님이 맡습니다.
+조건별 재생성은 윤선님의 `docker_ops.recreate`를 사용하고, `run_id`는 파이프라인에서 받습니다.
 
 ## 최초 실행을 맡은 쪽에서 전달할 정보
 
@@ -41,8 +43,9 @@ python -m parity test --record records/session.jsonl --target http://127.0.0.1:8
 로컬 ID를 registry digest나 소스 SHA의 증명으로 사용하지 않습니다.
 
 AI 수정 뒤에도 **동일한 기록·노이즈 파일**을 사용합니다. 이미지 태그만 새로 붙여도 기존 컨테이너는
-이전 이미지를 사용합니다. 새 이미지로 최초 실행할 주체와 컨테이너 전달 시점을 주영님과 맞춰야 합니다.
-새 컨테이너를 제공받는 경우 `--expected-image-id`로 잘못된 버전 검사를 막을 수 있습니다.
+이전 이미지를 사용합니다. **주영님이 새 이미지로 컨테이너를 실행한 뒤 윤선님의 `test`로 재검사**하는
+방식은 합의됐습니다. 새 컨테이너·주소·이미지 ID의 실제 전달과 AI 수정 후 연결 실행은 아직 확인 전입니다.
+`--expected-image-id`로 전달받은 버전과 다른 컨테이너를 검사하는 것을 막을 수 있습니다.
 
 ## 재생성에서 지키는 범위
 
@@ -83,6 +86,9 @@ stage / commit / image / passed / facts / replay / mismatches
 `facts`는 `{kind, path, storage, evidence}` 목록 그대로입니다. `facts.db`, `facts.writes_local_file` 등으로의
 정규화는 류진님 쪽에서 처리합니다. `related_fact`는 원인을 확정하는 값이 아니라 관련 관측 경로의 힌트입니다.
 `commit`은 도구 작업 트리 기준의 기존 필드이며 앱 소스 SHA가 아닙니다.
+류진님이 Policy 앞 변환기에서 윤선님의 `result.json`과 주영님의 `env_report`를 공통 입력으로 연결합니다.
+원본 result·env_report·facts·evidence는 보존합니다. 주영님의 `env_report`·`evidence`·`handoff_bundle`을
+보존하는 방향도 합의됐지만, 현재 이 문서에서 대조한 실제 `env_report` 예시는 아직 없습니다.
 
 자동 생성하는 `result.diagnostics.json`은 로컬 연결용 보조 파일입니다. 공통 계약으로 확정한 스키마가 아닙니다.
 
@@ -100,9 +106,11 @@ stage / commit / image / passed / facts / replay / mismatches
 처음 관찰한 조건의 facts를 유지합니다. 조건별 일치 수와 불일치, 실행 진단은 각각 보존합니다.
 조건별 분모를 합한 값은 같은 요청을 반복한 횟수이며 서로 다른 사용자 행동 수가 아닙니다.
 
-공통 `run_id`, 앱 `source_revision`, registry `digest`는 빌드/조율 담당이 제공해야 합니다.
+공통 식별자는 파이프라인의 `run_id`, 앱 Git SHA인 `source_revision`, registry `digest`를 사용하기로 했습니다.
+주영님이 빌드 결과의 digest를 기록합니다. **레지스트리 위치와 이 값들을 실제 파일로 전달하는 연결은 미완료**입니다.
 별도 `python -m parity.handoff`는 원본과 제공받은 정보를 묶는 **제안 형식**이며,
 정책 CLI에 바로 넣는 최종 공통 입력도, 이미지 출처 증명도 아닙니다.
+공통 JSON Schema를 원본으로 사용하기로 한 합의와, 이 제안 파일이 공통 계약으로 채택됐다는 것은 다릅니다.
 
 ## 사용자가 실행할 검증
 
@@ -130,6 +138,12 @@ replace에서 16번 업로드 목록 조회가 추가로 달라져야 합니다.
 
 윤선이 터미널에서 전체 `python -m unittest`를 실행하고 최종 `OK`를 확인했습니다.
 최신 테스트 개수는 별도로 전달되지 않아 적지 않습니다. 이전의 124개를 이번 실행 개수로 쓰지 않습니다.
+이 표는 조건별 로그 표시·문서 정리 이전의 실행 결과입니다. 조건 표시 수정 후 검증 결과까지
+포함한 것으로 해석하지 않습니다. 표시 수정 확인 명령은 다음과 같습니다.
+
+```text
+python -m unittest tests.test_conditions tests.test_replace_condition -v
+```
 
 `scripts/demo_meeting.py` 실행 ID: `meeting-20260930-173237-f746f560b3`.
 아래 수치는 터미널 출력과 저장된 원본 결과·진단·데모 보고서를 대조한 값입니다.
@@ -162,12 +176,27 @@ JSON 값은 원본 그대로 보존했습니다. 두 파일은 결함을 넣은 
 `records/`는 Git 제외 대상이며, 공유 사본만 `examples/`에 포함합니다.
 실제 AI 수정, 정책·승인·서명, Cloud Run 연결 시험은 이번 실행에 포함되지 않았습니다.
 
-## 팀과 마지막으로 맞출 내용
+## 테스트 → 정책: 회의 안건 8개 현황
 
-- 주영: AI 재빌드 후 새 컨테이너/주소/이미지 ID 전달 시점, 준비 실패 진단의 호출 위치.
-- 류진: 원본 result + 진단 + env_report를 공통 JSON Schema 입력으로 변환하는 최종 연결.
-- 빌드/배포: 레지스트리 위치와 실제 digest, 실행 ID·앱 SHA 전달.
-- 공통: 최종 컨테이너 정리 담당, 실제 통과 앱으로 승인·서명까지 이어지는 첫 E2E.
+아래는 회의 안건 순서대로 합의와 실행 상태를 구분한 표입니다. 합의된 역할을 다시 미정으로 표시하지 않습니다.
 
-이 항목들은 아직 연결 합의 또는 실제 실행 확인이 필요합니다. 테스트 파트 코드 수정만으로
-전체 팀 파이프라인 완료로 표시하지 않습니다.
+| # | 안건 | 합의·현재 구현 | 남은 확인 |
+|---|---|---|---|
+| 1 | `result.json` + `env_report` → Policy 입력 | 류진님이 Policy 앞 변환기를 맡음. 윤선 원본 결과·진단의 실제 예시는 `examples/meeting_result*`에 있음 | 주영님 실제 `env_report` 예시를 받아 변환기와 함께 실행. 예시 공유는 아직 약속 단계 |
+| 2 | 원본 `facts/evidence` 보존 위치 | 원본 result·env_report·evidence 보존에 합의. 윤선 전체 원본은 위 `records/meeting/<run_id>/`, 공유 사본은 `examples/`. 주영님은 `env_report`·`evidence`·`handoff_bundle` 보존 | 파이프라인에서 두 파트의 산출물을 전달·보관하는 최종 경로 연결 |
+| 3 | `facts.db`, `facts.writes_local_file` 정규화 | 류진님 변환기 담당. 윤선 `{kind, path, storage, evidence}` 원본 형식 유지 | 실제 두 파트 출력으로 정규화 결과 대조 |
+| 4 | `none/restart/replace` 결과 형식 | 윤선 `replay[]`의 조건명·전체 수·일치 수와 `mismatches[]`를 그대로 보존. 세 조건의 실제 결과 확보 | 주영 `env_report`와 함께 공통 입력으로 변환한 예시 확인 |
+| 5 | 전체 실패와 환경 제약 사실 구분 | 윤선 원본 판정은 불일치 시 `passed=false` 유지. 실행 오류도 통과로 바꾸지 않음 | 어떤 조건 실패를 환경 제약으로 해석할지 세부 재분류 규칙은 미합의 |
+| 6 | replace 유실과 저장 사실로 Policy 판단 | 원본 불일치 + 저장 방식 사실을 함께 전달하고, 배포 대상·해결 조건은 Policy가 판단하는 방향에 합의. 16번 업로드 유실 원본 확보 | 해당 결과를 넣었을 때 실제 target·requires가 기대대로 나오는지 확인 |
+| 7 | `run_id/source_revision/digest` 전달 | 파이프라인 run_id·앱 Git SHA·레지스트리 digest 사용에 합의. 주영님이 빌드·digest 기록. 외부 값을 원본과 묶는 `parity.handoff`는 구현된 제안 도구 | 레지스트리 위치 미정. 실제 값 전달·이미지와의 연결 미검증. 기존 result 키에 임의 필드를 추가하지 않음 |
+| 8 | `Policy.requires`를 AI 수정 목표로 사용 | MVP 자동화 범위는 목요일 오후 논의 예정 | AI 수정 → 같은 기준 재검증 → Policy 재평가를 어디까지 자동화할지 결정 |
+
+## 합의 후 함께 실행할 것
+
+- 주영·윤선: 준비 실패 시 바인딩 진단 호출과, AI 수정 후 새 이미지·컨테이너 전달 → 같은 기록 재검사.
+- 류진·주영·윤선: 실제 result + 진단 + env_report를 변환기로 연결하고 원본 근거가 유지되는지 확인.
+- 빌드·배포: 레지스트리 위치 결정 후 run_id·앱 SHA·실제 digest 전달과 동일 이미지 사용 확인.
+- 공통: 최종 컨테이너 정리 담당 확정, 실제 통과 앱으로 승인·서명까지 첫 E2E, 배포 후 `verify` 실행.
+
+담당과 방향이 합의된 것, 코드가 있는 것, 실제로 함께 실행한 것은 각각 구분합니다.
+현재 3조건 데모 성공만으로 전체 팀 파이프라인이 완료됐다고 표시하지 않습니다.
