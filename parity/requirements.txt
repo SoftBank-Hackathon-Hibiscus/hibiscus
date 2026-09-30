@@ -1,0 +1,2 @@
+# premortem AI 출력 검사에 필요 (parity 기록·재생 자체는 표준 라이브러리만 사용)
+jsonschema>=4.0
