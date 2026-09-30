@@ -10,7 +10,7 @@
 
 ## 설치·실행
 
-필요한 것: **Python 3.9 이상**, **Docker**(데몬 실행 중. `verify`만 쓸 때는 필요 없음). 파이썬 외부 패키지는 쓰지 않으므로 `pip install`이 필요 없습니다.
+필요한 것: **Python 3.9 이상**, **Docker**(데몬 실행 중. `verify`만 쓸 때는 필요 없음). parity 기록·재생은 파이썬 외부 패키지를 쓰지 않습니다. `premortem`의 AI 수정 기능은 AI 출력 형식 검사에 jsonschema가 필요하므로 `pip install -r requirements.txt`로 설치합니다(없으면 AI 출력을 거부합니다).
 
 ```bash
 # 데모 한 번에 실행 (빌드 → 실행 → 기록 → 노이즈 탐지 → test → 요약)
