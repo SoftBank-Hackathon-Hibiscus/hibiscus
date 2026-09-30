@@ -1,0 +1,154 @@
+{
+  "$id": "Plan.schema.json",
+  "title": "Plan",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]{1,64}$",
+      "description": "파이프라인 실행 id. 영문·숫자·._- 만, 1~64자. 모든 파일이 같은 값을 가져야 한다"
+    },
+    "app": {
+      "type": "string",
+      "description": "앱 이름 (test_result 에서 그대로)"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "컨테이너 이미지 지문. 'sha256:' + 소문자 hex 64자. 테스트한 이미지 = 결정한 이미지 = 서명·배포할 이미지"
+    },
+    "decision": {
+      "type": "string",
+      "enum": [
+        "allow",
+        "block",
+        "needs_approval"
+      ],
+      "description": "allow=배포 진행, block=배포 안 함, needs_approval=사람 승인 후 진행"
+    },
+    "targets": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "배포할 대상 (known_targets 의 부분집합). block 이면 빈 배열"
+    },
+    "failover_allowed": {
+      "type": "boolean",
+      "description": "온프레 장애 시 Cloud Run 으로 전환해도 되는지. local 과 cloud_run 이 모두 있을 때만 true 가능"
+    },
+    "requires": {
+      "description": "걸린 규칙들의 해결 조건 (id 로 합치고 id 순 정렬). block / needs_approval / manual_recovery 면 최소 1개. 하나도 없으면 필드가 없다",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "해결 조건 id (예: managed_db, fix_tests)"
+          },
+          "hint": {
+            "description": "사람이 읽는 설명 (ko). 정책에 적혀 있을 때만",
+            "type": "string"
+          },
+          "hint_i18n": {
+            "description": "hint 의 다른 언어 문구. 정책에 ja 가 적혀 있을 때만",
+            "type": "object",
+            "properties": {
+              "ja": {
+                "type": "string",
+                "description": "일본어 문구"
+              }
+            },
+            "required": [
+              "ja"
+            ],
+            "additionalProperties": false
+          },
+          "rule_id": {
+            "type": "string",
+            "description": "이 조건을 처음 요구한 규칙 id"
+          },
+          "allowed_targets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "이 해결 조건과 연결된 정책 위반이 해소됐다고 가정했을 때, 나머지 정책 제약상 가능한 배포 위치. 한 규칙이 해결 조건을 여러 개 요구하면 모두 충족해야 한다. 수정 후에는 새 버전으로 전체 정책을 다시 평가한다. 나머지 제약끼리 충돌하면 빈 배열"
+          }
+        },
+        "required": [
+          "id",
+          "rule_id",
+          "allowed_targets"
+        ],
+        "additionalProperties": false,
+        "description": "해결 조건 하나"
+      }
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "policy.yaml 의 규칙 id. 'default' 는 기본 정책이 쓰였다는 뜻"
+          },
+          "result": {
+            "type": "string",
+            "enum": [
+              "matched",
+              "not_matched",
+              "matched_after_block"
+            ],
+            "description": "규칙이 걸렸는지. matched_after_block = 이미 block(롤백은 manual_recovery)이 정해진 뒤 걸림: decision 은 못 바꾸고 targets 좁히기와 해결 조건만 반영됨"
+          },
+          "reason": {
+            "description": "걸린 규칙의 사람이 읽는 근거 (ko). matched / matched_after_block 일 때만 있다",
+            "type": "string"
+          },
+          "reason_i18n": {
+            "description": "reason 의 다른 언어 문구. 정책에 ja 가 적혀 있을 때만",
+            "type": "object",
+            "properties": {
+              "ja": {
+                "type": "string",
+                "description": "일본어 문구"
+              }
+            },
+            "required": [
+              "ja"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "id",
+          "result"
+        ],
+        "additionalProperties": false,
+        "description": "평가된 규칙 하나의 결과"
+      },
+      "description": "평가된 모든 규칙과 결과. block 이후에도 해결 조건과 대상 제한을 모으기 위해 끝까지 평가하며, 그때 걸린 규칙은 matched_after_block 으로 기록 (halt 규칙이 걸리면 즉시 멈춤)"
+    },
+    "plan_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "입력과 정책과 결과를 정규화해 sha256 한 값. 같은 입력이면 항상 같다"
+    }
+  },
+  "required": [
+    "run_id",
+    "app",
+    "digest",
+    "decision",
+    "targets",
+    "failover_allowed",
+    "rules",
+    "plan_hash"
+  ],
+  "additionalProperties": false,
+  "description": "정책 엔진이 만드는 배포 계획. 서명 파트와 배포 파트가 읽는다"
+}

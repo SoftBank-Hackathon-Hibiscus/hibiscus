@@ -1,0 +1,19 @@
+{
+  "run_id": "r-004",
+  "pii": [
+    {
+      "table": "users",
+      "column": "contact",
+      "kind": "phone",
+      "evidence": "src/routes/signup.js:24",
+      "confident": true
+    },
+    {
+      "table": "todos",
+      "column": "note",
+      "kind": "free_text_maybe_address",
+      "evidence": "src/routes/todos.js:41",
+      "confident": false
+    }
+  ]
+}

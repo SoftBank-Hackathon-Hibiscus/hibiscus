@@ -1,0 +1,13 @@
+{
+  "run_id": "r-002",
+  "app": "todo",
+  "digest": "sha256:b2c3d4e5f60718293a4b5c6d7e8f9001122334455667788990aabbccddeeff00",
+  "passed": false,
+  "match": { "total": 20, "matched": 17 },
+  "failures": [
+    { "request": "GET /todos", "expected_status": 200, "actual_status": 500, "note": "restart 후 sqlite 파일 유실" },
+    { "request": "POST /todos", "expected_status": 201, "actual_status": 500 },
+    { "request": "DELETE /todos/1", "expected_status": 204, "actual_status": 404 }
+  ],
+  "facts": { "writes_local_file": ["/app/data.db"], "db": "sqlite" }
+}

@@ -1,0 +1,240 @@
+# 정책 파일. 규칙은 위에서부터 차례로 검사한다.
+#
+#   id      : 규칙 식별자 (plan.json 의 rules[].id 와 decisions.jsonl 의 rule_ids 에 그대로 실린다)
+#   if      : 조건. 컨텍스트는 { test: test_result.json, pii: pii.json }
+#   then    : 걸렸을 때 효과. decision / targets / failover_allowed / requires 중 필요한 것만 적는다
+#             requires 는 "해결 조건": 이 규칙에 걸린 이유를 없애려면 무엇이 필요한가.
+#               - { id: managed_db, hint: "SQLite를 PostgreSQL로 전환" }  처럼 설명과 함께, 또는
+#               - { id: managed_db, hint: { ko: "...", ja: "..." } }  처럼 다국어로, 또는
+#               - managed_db  처럼 id 만 (문자열)
+#             hint 에는 위치를 적지 않는다 (allowed_targets 가 정하고 설명 함수가 붙인다).
+#             plan.json 의 requires 에 [{ id, hint, rule_id, allowed_targets }] 로 모여서 다음 단계(AI 수정 파트)가 읽는다.
+#             allowed_targets 는 이 해결 조건과 연결된 정책 위반이 해소됐다고 가정했을 때 나머지 정책 제약상
+#             가능한 배포 위치 (그 조건을 요구한 규칙들을 뺀 나머지 걸린 규칙만으로 default.targets 에서 좁힌 결과).
+#             한 규칙이 해결 조건을 여러 개 요구하면 모두 충족해야 하고, 수정 후에는 새 버전으로 전체 정책을
+#             다시 평가한다. hint 는 위치를 정하지 않게 쓴다.
+#             block / needs_approval 을 내는 규칙은 requires 가 최소 1개 있어야 한다 (없으면 로드 에러).
+#   reason  : 사람이 읽는 근거. {경로} 로 값을 넣을 수 있다.
+#             문자열(한국어) 또는 { ko: "...", ja: "..." }. ja 가 있으면 결정서의 reason_i18n.ja 에 실린다.
+#             digest 나 내부 이름(cloud_run 등)은 넣지 않는다. 설명 함수가 위치를 따로 붙인다.
+#
+# 조건 문법 (엔진은 이 문법만 안다. 규칙 내용은 회사마다 자유롭게 바꿀 수 있다):
+#   { path, eq | ne | in | gt | lt | exists }   값 비교
+#   { path, starts_with }                       문자열 접두어
+#   { path, matches, flags? }                   정규식 (flags 는 i m s 등 JS 정규식 플래그, 선택)
+#   { path, eq_path | ne_path }                 두 필드 비교
+#   { some: <배열 경로>, where: <조건> }         배열 원소 중 조건을 만족하는 것이 있으면 참
+#                                               where 안에서는 원소가 기준이고 $. 로 루트 접근.
+#                                               원소가 문자열이면 path "@" 가 원소 자체.
+#                                               reason 의 {경로} 는 원소 -> 루트 순으로 찾는다 ({@} 는 원소)
+#   { all: [...] } / { any: [...] } / { not: ... }
+#
+# 병합 방식 (안전한 쪽으로만 움직인다):
+#   decision         : allow < needs_approval < block 순으로 강한 쪽만 남는다.
+#                      block 이 나와도 끝까지 평가한다. 뒤 규칙은 decision 을 못 바꾸고 targets 좁히기와
+#                      requires 수집만 반영되며 plan.rules 에 matched_after_block 으로 기록된다.
+#                      (차단 사유를 한 번에 다 알려주기 위해)
+#   halt             : 규칙에 halt: true 를 붙이면 그 규칙이 걸렸을 때 즉시 멈춘다.
+#                      입력이 섞인 경우(R2)처럼 뒤 판단이 의미 없을 때만 쓴다.
+#   targets          : default.targets 에서 시작해 좁히기만 된다. 규칙이 targets 를 정하면
+#                      지금까지의 targets 와 교집합만 남긴다 (첫 규칙도 default 와의 교집합).
+#                      그래서 default 에 없는 대상은 어떤 규칙으로도 추가할 수 없고,
+#                      한 번 제외된 대상은 뒤 규칙이 다시 넣을 수 없다. 교집합이 비면 block.
+#                      어떤 규칙도 targets 를 정하지 않으면 default 가 그대로 쓰이고 rules 에 기록된다.
+#   known_targets    : 이 정책이 아는 배포 대상 전체. 규칙과 default 의 targets 에 여기 없는
+#                      값(오타 등)이 있으면 정책을 불러올 때 에러로 멈춘다.
+#   failover_allowed : false 가 이긴다. 한 번 false 면 뒤 규칙이 true 로 되돌릴 수 없다.
+#                      최종 targets 에 local 과 cloud_run 이 모두 없으면 항상 false.
+#
+# 아래 규칙은 가상의 플랫폼팀 정책 예시다.
+
+version: 1
+
+# 배포 파트가 실제로 다룰 수 있는 대상. 여기 없는 이름은 정책 로드 단계에서 거부된다.
+known_targets: [local, cloud_run]
+
+rules:
+  - id: R1
+    description: 테스트가 실패한 이미지는 배포하지 않는다
+    if: { path: test.passed, eq: false }
+    then:
+      decision: block
+      requires:
+        - id: fix_tests
+          hint:
+            ko: "재생 불일치 요청을 고친 뒤 다시 테스트"
+            ja: "再生結果が一致しないリクエストを修正してから再テスト"
+    reason:
+      ko: "테스트 실패 ({test.match.matched}/{test.match.total} 일치)"
+      ja: "テスト失敗（{test.match.matched}/{test.match.total}一致）"
+
+  - id: R2
+    description: 테스트 결과와 개인정보 후보가 서로 다른 실행(run_id)이면 입력 불일치로 차단. 입력이 섞였으면 뒤 규칙의 판단이 의미 없으므로 즉시 멈춘다
+    if: { path: test.run_id, ne_path: pii.run_id }
+    halt: true
+    then:
+      decision: block
+      requires:
+        - id: rerun_same_run
+          hint:
+            ko: "같은 run_id로 테스트와 개인정보 판정을 다시 실행"
+            ja: "同じrun_idでテストと個人情報判定を再実行"
+    reason:
+      ko: "입력 불일치: test_result.run_id={test.run_id} != pii.run_id={pii.run_id}"
+      ja: "入力不一致：test_result.run_id={test.run_id}≠pii.run_id={pii.run_id}"
+
+  - id: R3
+    description: 확신 없는 개인정보 후보가 있으면 사람 승인이 필요하다
+    if:
+      some: pii.pii
+      where: { path: confident, eq: false }
+    then:
+      decision: needs_approval
+      requires:
+        - id: human_review_pii
+          hint:
+            ko: "해당 칼럼이 개인정보인지 사람이 확인"
+            ja: "該当カラムが個人情報かどうかを人が確認"
+    reason:
+      ko: "확신 없는 개인정보 후보({table}.{column}, {kind}): {evidence}"
+      ja: "確信のない個人情報候補（{table}.{column}、{kind}）：{evidence}"
+
+  - id: R4
+    description: 개인정보 후보가 하나라도 있으면 온프레(local)에만 배포하고 클라우드 failover 를 막는다
+    if: { some: pii.pii }
+    then:
+      targets: [local]
+      failover_allowed: false
+    reason:
+      ko: "개인정보({column}, {kind}) 발견: {evidence}"
+      ja: "個人情報（{column}、{kind}）を検出：{evidence}"
+
+  - id: R5
+    description: SQLite 는 로컬 파일이라 클라우드에서 인스턴스가 교체되면 데이터가 사라진다. 관리형 DB 로 바꾸기 전까지 온프레만
+    if: { path: test.facts.db, eq: sqlite }
+    then:
+      targets: [local]
+      requires:
+        - id: managed_db
+          hint:
+            ko: "SQLite를 PostgreSQL로 전환"
+            ja: "SQLiteをPostgreSQLへ移行"
+    reason:
+      ko: "SQLite 사용 ({test.facts.db}): 관리형 DB로 전환하기 전까지 클라우드 배포 제외"
+      ja: "SQLiteを使用（{test.facts.db}）：マネージドDBへ移行するまでクラウドデプロイを除外"
+
+  - id: R6
+    description: >-
+      로컬 폴더에 파일을 쓰면 클라우드에서는 인스턴스 교체·스케일아웃 시 파일이 사라지거나 갈라진다.
+      /tmp 와 로그 파일은 무시. DB 파일(.db/.sqlite/.sqlite3)은 R5(managed_db)가 담당하므로 여기서는 제외
+    if:
+      some: test.facts.writes_local_file
+      where:
+        not:
+          any:
+            - { path: "@", starts_with: "/tmp/" }
+            - { path: "@", matches: "\\.log$" }
+            - { path: "@", matches: "\\.(db|sqlite|sqlite3)$", flags: i }
+    then:
+      targets: [local]
+      requires:
+        - id: object_storage
+          hint:
+            ko: "로컬 폴더에 쓰는 파일을 오브젝트 스토리지로 이전"
+            ja: "ローカルフォルダに書き込むファイルをオブジェクトストレージへ移行"
+    reason:
+      ko: "로컬 파일 쓰기: {@}"
+      ja: "ローカルファイルへの書き込み：{@}"
+
+  - id: R7
+    description: >-
+      파괴적 DB 마이그레이션(DROP/RENAME/타입 변경/DEFAULT 없는 NOT NULL 추가/기존 칼럼에 NOT NULL 걸기/TRUNCATE)은
+      옛 버전과 새 버전이 같은 DB 를 동시에 쓰는 무중단 배포와 롤백을 깨뜨린다.
+      facts.migration 은 테스트 파트가 주거나, 없으면 실행기(src/stage.ts)가 마이그레이션 파일에서 판정한다
+    if:
+      all:
+        - { path: test.facts.migration.destructive, eq: true }
+        - { some: test.facts.migration.findings }
+    then:
+      decision: block
+      requires:
+        - id: two_phase_migration
+          hint:
+            ko: "파괴적 변경을 확장→전환→정리 2단계 배포로 나누기 (먼저 새 구조를 추가하고, 옛 구조는 다음 배포에서 제거)"
+            ja: "破壊的変更を拡張→切替→整理の2段階デプロイに分割（先に新構造を追加し、旧構造は次のデプロイで削除）"
+    reason:
+      ko: "파괴적 마이그레이션 {kind}: {statement} ({evidence})"
+      ja: "破壊的マイグレーション{kind}：{statement}（{evidence}）"
+
+default:
+  targets: [local, cloud_run]
+  failover_allowed: true
+  reason:
+    ko: "개인정보 없음, 테스트 통과: 하이브리드 배포 허용"
+    ja: "個人情報なし、テスト合格：ハイブリッドデプロイを許可"
+
+# ---------------------------------------------------------------------------
+# 정책 인식 롤백. 배포 후 문제가 생겼을 때 "되돌려도 되는가, 어디로" 를 판단한다.
+# 실제 롤백 실행은 배포 파트가 한다.
+#
+# 용어: candidate = 이번 배포 후보(문제가 난 버전), stable = 이번 배포 전 정상 버전(되돌아갈 곳)
+# 컨텍스트는 { request: rollback_request.json }. 조건 문법은 위와 같다.
+# then 은 decision (keep_stable | rollback | manual_recovery), targets (좁히기), failover_allowed, requires 를 받는다.
+# manual_recovery 를 내는 규칙은 requires(해결 조건)가 최소 1개 있어야 한다.
+#
+# 병합 방식:
+#   decision         : rollback < keep_stable < manual_recovery 순으로 강한 쪽만 남는다.
+#                      keep_stable 은 되돌릴 것이 없으므로 그 즉시 멈춘다.
+#                      manual_recovery 는 끝까지 평가한다 (뒤 규칙은 targets 좁히기와 requires 만 반영,
+#                      matched_after_block 으로 기록). halt: true 인 규칙이 걸리면 즉시 멈춘다.
+#   targets          : stable.targets 에서 시작해 좁히기만 된다. 교집합이 비면 manual_recovery.
+#   failover_allowed : false 가 이긴다. 최종 targets 에 local 과 cloud_run 이 모두 있을 때만 true 가능.
+#   어떤 규칙도 decision 을 정하지 않으면 default 를 쓴다.
+# 결과의 serve_digest 는 결정 후 트래픽을 받을 버전: keep_stable / rollback → stable, manual_recovery → null
+# ---------------------------------------------------------------------------
+rollback:
+  rules:
+    - id: RB1
+      description: 컷오버 전 실패는 아직 트래픽이 후보로 가지 않았으므로 되돌릴 것이 없다. 정상 버전이 계속 받는다
+      if: { path: request.stage, eq: before_cutover }
+      then: { decision: keep_stable }
+      reason:
+        ko: "컷오버 전 실패: 정상 버전 유지, 롤백 불필요"
+        ja: "カットオーバー前の失敗：正常稼働中のバージョンを維持、ロールバック不要"
+
+    - id: RB2
+      description: DB 스키마가 이전 버전과 호환되지 않으면 자동으로 되돌릴 수 없다
+      if: { path: request.state.db_migration_backward_compatible, eq: false }
+      then:
+        decision: manual_recovery
+        requires:
+          - id: manual_db_recovery
+            hint:
+              ko: "DB 스키마를 이전 버전과 호환되게 복구한 뒤 롤백"
+              ja: "DBスキーマを以前のバージョンと互換性のある状態に復旧してからロールバック"
+      reason:
+        ko: "DB 마이그레이션이 이전 버전과 호환되지 않음: 자동 롤백 차단, 수동 복구 필요"
+        ja: "DBマイグレーションが以前のバージョンと互換性なし：自動ロールバック不可、手動復旧が必要"
+
+    - id: RB3
+      description: 온프레에 개인정보가 쓰였으면 클라우드로 되돌리지 않는다 (데이터가 클라우드로 흘러가면 안 됨)
+      if: { path: request.state.pii_written_onprem, eq: true }
+      then: { targets: [local], failover_allowed: false }
+      reason:
+        ko: "온프레에 개인정보가 쓰임: Cloud Run으로 되돌리지 않고 온프레 안에서만 정상 버전으로 복구"
+        ja: "オンプレに個人情報が書き込まれた：Cloud Runには戻さず、オンプレ内でのみ正常稼働中のバージョンへ復旧"
+
+    - id: RB4
+      description: 컷오버 후 쓰기가 없었으면 데이터 손실 없이 정상 버전으로 돌아갈 수 있다
+      if: { path: request.state.writes_since_cutover, eq: false }
+      then: { decision: rollback }
+      reason:
+        ko: "컷오버 후 쓰기 없음: 정상 버전의 대상 그대로 복귀"
+        ja: "カットオーバー後の書き込みなし：正常稼働中のバージョンのデプロイ先へそのまま復帰"
+
+  default:
+    decision: rollback
+    failover_allowed: true
+    reason:
+      ko: "정상 버전으로 복귀. 대상은 좁히기 규칙을 따름"
+      ja: "正常稼働中のバージョンへ復帰。デプロイ先は絞り込みルールに従う"

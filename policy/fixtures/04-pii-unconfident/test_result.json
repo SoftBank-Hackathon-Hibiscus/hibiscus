@@ -1,0 +1,9 @@
+{
+  "run_id": "r-004",
+  "app": "todo",
+  "digest": "sha256:d4e5f60718293a4b5c6d7e8f9001122334455667788990aabbccddeeff001122",
+  "passed": true,
+  "match": { "total": 24, "matched": 24 },
+  "failures": [],
+  "facts": { "db": "postgres" }
+}

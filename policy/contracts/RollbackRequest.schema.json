@@ -1,0 +1,105 @@
+{
+  "$id": "RollbackRequest.schema.json",
+  "title": "RollbackRequest",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]{1,64}$",
+      "description": "파이프라인 실행 id. 영문·숫자·._- 만, 1~64자. 모든 파일이 같은 값을 가져야 한다"
+    },
+    "app": {
+      "type": "string",
+      "minLength": 1,
+      "description": "앱 이름"
+    },
+    "stage": {
+      "type": "string",
+      "enum": [
+        "before_cutover",
+        "after_cutover"
+      ],
+      "description": "before_cutover=후보로 트래픽을 넘기기 전 실패, after_cutover=넘긴 뒤 실패"
+    },
+    "candidate": {
+      "type": "object",
+      "properties": {
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "컨테이너 이미지 지문. 'sha256:' + 소문자 hex 64자. 테스트한 이미지 = 결정한 이미지 = 서명·배포할 이미지"
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "후보가 배포된 대상"
+        }
+      },
+      "required": [
+        "digest",
+        "targets"
+      ],
+      "description": "이번 배포 후보 (문제가 난 버전)"
+    },
+    "stable": {
+      "type": "object",
+      "properties": {
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "컨테이너 이미지 지문. 'sha256:' + 소문자 hex 64자. 테스트한 이미지 = 결정한 이미지 = 서명·배포할 이미지"
+        },
+        "targets": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "정상 버전이 배포돼 있는 대상 (되돌아갈 곳의 출발점)"
+        }
+      },
+      "required": [
+        "digest",
+        "targets"
+      ],
+      "description": "이번 배포 전 정상 버전 (되돌아갈 곳)"
+    },
+    "state": {
+      "type": "object",
+      "properties": {
+        "writes_since_cutover": {
+          "type": "boolean",
+          "description": "컷오버 후 데이터 쓰기가 있었는지"
+        },
+        "pii_written_onprem": {
+          "type": "boolean",
+          "description": "컷오버 후 온프레에 개인정보가 쓰였는지"
+        },
+        "db_migration_backward_compatible": {
+          "type": "boolean",
+          "description": "DB 마이그레이션이 정상 버전과 호환되는지. false 면 자동 롤백 차단"
+        }
+      },
+      "required": [
+        "writes_since_cutover",
+        "pii_written_onprem",
+        "db_migration_backward_compatible"
+      ],
+      "description": "배포 파트가 관찰한 상태"
+    }
+  },
+  "required": [
+    "run_id",
+    "app",
+    "stage",
+    "candidate",
+    "stable",
+    "state"
+  ],
+  "description": "배포 파트가 만드는 롤백 판단 요청"
+}

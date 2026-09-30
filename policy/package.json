@@ -1,0 +1,33 @@
+{
+  "name": "policy-engine",
+  "version": "0.1.0",
+  "private": true,
+  "description": "증명 기반 하이브리드 배포 서비스 - 정책 엔진 (test_result + pii -> plan.json)",
+  "type": "module",
+  "scripts": {
+    "decide": "tsx src/cli.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "demo": "node scripts/demo.mjs",
+    "pii": "tsx src/pii/cli.ts",
+    "rollback": "tsx src/rollback/cli.ts",
+    "contracts": "tsx scripts/contracts.ts",
+    "validate": "tsx src/validate.ts",
+    "stage": "tsx src/stage.ts",
+    "migration": "tsx src/migration/cli.ts",
+    "explain": "tsx src/explain.ts"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.129.0",
+    "yaml": "^2.9.1",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "ajv": "^8.20.0",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.2"
+  }
+}
