@@ -1,0 +1,2 @@
+# Windows(core.autocrlf=true)에서 받아도 bash 스크립트가 깨지지 않게 LF 로 고정
+*.sh text eol=lf
