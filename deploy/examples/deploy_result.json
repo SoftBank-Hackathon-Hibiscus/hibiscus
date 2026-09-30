@@ -1,0 +1,48 @@
+{
+  "run_id": "run-09301649-ok",
+  "digest": "sha256:fa5174222cfb8d06574fdd6d4e9b27d5f5402662d131bab2bfb5386a63a96745",
+  "decision": "activated",
+  "targets": [
+    {
+      "target": "cloud_run",
+      "phase": "candidate",
+      "result": "ok",
+      "revision": "hello-dfa5174222cfb",
+      "image": "asia-northeast3-docker.pkg.dev/hib-hackathon-1004/hib/hello@sha256:fa5174222cfb8d06574fdd6d4e9b27d5f5402662d131bab2bfb5386a63a96745",
+      "candidate_url": "https://cand---hello-k6pucunkwq-du.a.run.app"
+    },
+    {
+      "target": "onprem",
+      "phase": "candidate",
+      "result": "skipped",
+      "reason": "ONPREM_AGENT_URL not set"
+    },
+    {
+      "target": "cloud_run",
+      "phase": "activate",
+      "result": "ok",
+      "previous": "hello-v1",
+      "serving": "hello-dfa5174222cfb"
+    }
+  ],
+  "checks": [
+    {
+      "target": "cloud_run",
+      "mode": "candidate",
+      "pass": true,
+      "url": "https://cand---hello-k6pucunkwq-du.a.run.app",
+      "checker": "temporary-http-200",
+      "checks": [
+        {
+          "name": "http_200",
+          "pass": true,
+          "status": 200,
+          "ms": 658,
+          "error": null
+        }
+      ]
+    }
+  ],
+  "started_at": "2026-10-01T01:49:57+09:00",
+  "finished_at": "2026-10-01T01:50:13+09:00"
+}

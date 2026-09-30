@@ -1,0 +1,11 @@
+{
+  "run_id": "run-20261001-001",
+  "digest": "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+  "plan_hash": "sha256:2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",
+  "targets": ["cloud_run", "onprem"],
+  "failover_allowed": true,
+  "requester": "ryurujxx",
+  "approver": "Seungpyo1007",
+  "signature_ref": "projects/hib-hackathon-1004/occurrences/example",
+  "signed_at": "2026-10-01T10:00:00+09:00"
+}
