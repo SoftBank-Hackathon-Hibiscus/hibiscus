@@ -52,9 +52,24 @@ export function escalateRollback(current: RollbackDecision, next: RollbackDecisi
   return RANK[next] > RANK[current] ? next : current;
 }
 
+/** 요청의 candidate·stable targets 가 정책의 known_targets 안에 있는지. 아니면 Error */
+export function assertKnownTargets(request: RollbackRequest, policy: Policy): void {
+  const known = new Set(policy.known_targets);
+  for (const [where, targets] of [
+    ["candidate", request.candidate.targets],
+    ["stable", request.stable.targets],
+  ] as const) {
+    const unknown = targets.filter((t) => !known.has(t));
+    if (unknown.length > 0) {
+      throw new Error(`알 수 없는 배포 대상: ${unknown.join(", ")} (rollback_request.${where}.targets). known_targets: ${policy.known_targets.join(", ")}`);
+    }
+  }
+}
+
 export function decideRollback(request: RollbackRequest, policy: Policy): RollbackPlan {
   const section = policy.rollback;
   if (!section) throw new Error("policy.yaml 에 rollback 섹션이 없습니다");
+  assertKnownTargets(request, policy);
 
   const root: RollbackContext = { request };
   let decision: RollbackDecision | undefined;

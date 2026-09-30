@@ -7,28 +7,35 @@
  * --since <이름> 이 있으면 그 이름보다 뒤(문자열 순)인 파일만 남긴다.
  * 마이그레이션 이름은 보통 번호나 타임스탬프로 시작하므로 문자열 순서가 적용 순서다.
  */
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import type { MigrationFile } from "./analyzer.js";
 
 const posix = (p: string) => p.split("\\").join("/");
+type OnSkip = ((path: string) => void) | undefined;
 
-function walkSql(dir: string): string[] {
+/** symlink(정션 포함)는 따라가지 않고 건너뛴다. 건너뛴 경로는 onSkip 으로 알린다 */
+function walkSql(dir: string, appDir: string, onSkip: OnSkip): string[] {
   const out: string[] = [];
   for (const name of readdirSync(dir)) {
     const full = join(dir, name);
-    if (statSync(full).isDirectory()) out.push(...walkSql(full));
+    const st = lstatSync(full);
+    if (st.isSymbolicLink()) {
+      onSkip?.(posix(relative(appDir, full)));
+      continue;
+    }
+    if (st.isDirectory()) out.push(...walkSql(full, appDir, onSkip));
     else if (name.toLowerCase().endsWith(".sql")) out.push(full);
   }
   return out;
 }
 
-export function loadMigrationFiles(appDir: string): MigrationFile[] {
+export function loadMigrationFiles(appDir: string, onSkip?: (path: string) => void): MigrationFile[] {
   const files: MigrationFile[] = [];
 
   const plain = join(appDir, "migrations");
   if (existsSync(plain) && statSync(plain).isDirectory()) {
-    for (const full of walkSql(plain)) {
+    for (const full of walkSql(plain, appDir, onSkip)) {
       const rel = posix(relative(plain, full));
       files.push({ name: rel.replace(/\.sql$/i, ""), path: posix(relative(appDir, full)), content: readFileSync(full, "utf8") });
     }
@@ -37,8 +44,14 @@ export function loadMigrationFiles(appDir: string): MigrationFile[] {
   const prisma = join(appDir, "prisma", "migrations");
   if (existsSync(prisma) && statSync(prisma).isDirectory()) {
     for (const name of readdirSync(prisma)) {
-      const full = join(prisma, name, "migration.sql");
-      if (statSync(join(prisma, name)).isDirectory() && existsSync(full)) {
+      const entry = join(prisma, name);
+      const st = lstatSync(entry);
+      if (st.isSymbolicLink()) {
+        onSkip?.(posix(relative(appDir, entry)));
+        continue;
+      }
+      const full = join(entry, "migration.sql");
+      if (st.isDirectory() && existsSync(full)) {
         files.push({ name, path: posix(relative(appDir, full)), content: readFileSync(full, "utf8") });
       }
     }

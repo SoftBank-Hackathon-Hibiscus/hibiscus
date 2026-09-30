@@ -40,13 +40,15 @@ npm run typecheck
 {
   "run_id": "r-001",
   "app": "todo",
-  "digest": "sha256:abc",
+  "digest": "sha256:a1b2c3d4e5f60718293a4b5c6d7e8f9001122334455667788990aabbccddeeff",
   "passed": true,
   "match": { "total": 20, "matched": 20 },
   "failures": [],
   "facts": { "writes_local_file": ["/app/data.db"], "db": "sqlite" }
 }
 ```
+
+`digest`는 `sha256:` 뒤에 소문자 hex 64자, `run_id`는 영문·숫자·`._-`만 1~64자다. 결정 기록의 digest와 plan_hash도 같은 형식으로 검증된다.
 
 `facts`는 정책이 읽는 키만 타입이 정해져 있다. `db`는 `sqlite` | `postgres` | `mysql` | `none`(소문자), `writes_local_file`은 문자열 배열, `migration`은 파괴적 마이그레이션 판정 `{ destructive, backward_compatible, findings }`이다 (없으면 보안 단계 실행기가 채운다). 그 밖의 키는 자유롭게 넣을 수 있고 그대로 보존된다. 규칙이 정의되지 않은 facts 키를 읽으면 정책을 불러올 때 경고가 난다. 규칙이 실제로 읽는 경로 목록은 [contracts/README.md](contracts/README.md)의 "정책이 읽는 필드"에 자동 생성된다.
 
@@ -167,7 +169,7 @@ R5의 이유: 클라우드에서는 인스턴스가 교체되면 SQLite 파일�
 {"kind":"rollback","time":"2026-09-29T14:02:11.004Z","run_id":"r-012","digest":"sha256:3333...","serve_digest":"sha256:0000...","decision":"rollback","targets":["local"],"failover_allowed":false,"rule_ids":["RB3","default"],"plan_hash":"..."}
 ```
 
-`kind`로 배포 결정과 롤백 결정을 구분한다. `rule_ids`는 걸린 규칙만. 시간 값은 CLI에서만 붙이고 엔진(`decide`, `decideRollback`)은 시간을 쓰지 않는다.
+`kind`로 배포 결정과 롤백 결정을 구분한다. `rule_ids`는 걸린 규칙(`matched`와 `matched_after_block`) 전부를 구분 없이 id만 담으며, 정책 CLI·롤백 CLI·실행기가 같은 함수로 만든다. 시간 값은 CLI에서만 붙이고 엔진(`decide`, `decideRollback`)은 시간을 쓰지 않는다.
 
 ## 결정 설명 (`src/explainer.ts`, `src/explain.ts`)
 
@@ -305,7 +307,7 @@ npx tsx src/stage.ts --src samples/signup-contact --test fixtures/01-allow/test_
 | `--explain` | out-dir에 사람이 읽는 설명 `explain.ko.md`, `explain.ja.md`를 함께 쓴다 |
 | `--json` | 사람이 읽는 출력 대신 한 줄 JSON 요약을 stdout에 출력 |
 
-순서는 test_result 검증 → policy 로드 → 마이그레이션 판정(`facts.migration`이 없을 때만) → 개인정보 판정 → 정책 결정 → 파일 저장 → 결정 기록이다. 중간에 실패하면 `오류 [단계: test_result] ...`처럼 어느 단계에서 왜 실패했는지 출력한다. out-dir에는 `pii.json`, `plan.json`과 함께 정책에 실제로 들어간 `test_result.json`이 남고, 마이그레이션을 실행기가 판정했으면 `migration.json`도 남는다. 남은 `test_result.json`으로 `src/cli.ts`를 돌리면 같은 plan_hash가 나온다.
+순서는 test_result 검증 → policy 로드 → 마이그레이션 판정 → 개인정보 판정 → 정책 결정 → 파일 저장 → 결정 기록이다. 마이그레이션 판정은 항상 실행기가 직접 계산한다. test_result에 `facts.migration`이 있으면 그 값을 쓰되 `destructive`가 실행기 계산과 다르면 두 값을 보여주며 실행 오류로 멈춘다. `--since`로 준 이름을 마이그레이션 목록에서 찾지 못하면 실행 오류다(잘못된 이름이 검사 범위를 조용히 바꾸지 않게). 앱 폴더 안의 symlink는 따라가지 않고 건너뛰며 그 경로를 알린다. 중간에 실패하면 `오류 [단계: test_result] ...`처럼 어느 단계에서 왜 실패했는지 출력한다. out-dir에는 `pii.json`, `plan.json`과 함께 정책에 실제로 들어간 `test_result.json`이 남고, 마이그레이션을 실행기가 판정했으면 `migration.json`도 남는다. 남은 `test_result.json`으로 `src/cli.ts`를 돌리면 같은 plan_hash가 나온다.
 
 | 결과 | 종료 코드 |
 |---|---|
@@ -444,7 +446,7 @@ PII_LLM_MODEL=claude-opus-5-5 npx tsx src/pii/cli.ts --src samples/ambiguous --r
 |---|---|---|---|
 | 1. 추출 | `extractor.ts` | SQL `CREATE TABLE` / Prisma `model`에서 칼럼을 찾고, 칼럼마다 정의 위치와 이름이 등장하는 줄(앞뒤 1줄)을 근거 조각으로 모은다. 비밀처럼 보이는 값은 `[REDACTED]` | 없음 |
 | 2. 규칙 | `heuristic.ts` | 이름 신호(phone, email, 연락처 ...)와 쓰임새 신호(`type="tel"`, 전화번호 정규식, SMS 발송 호출 ...)를 센다. 이름+쓰임새 또는 쓰임새 2종 → `confident=true`, 신호 1개 → `confident=false`, 없음 → 제외 | 없음 |
-| 3. AI | `llm.ts` | 2층이 `confident=false`로 남긴 칼럼**만** 근거 조각과 함께 보낸다. 응답은 zod 스키마로 고정. 프롬프트는 `prompt.md` | 선택 |
+| 3. AI | `llm.ts` | 2층이 `confident=false`로 남긴 칼럼**만** 근거 조각과 함께 보낸다. 응답은 zod 스키마로 고정(`kind`는 phone/email/address/birthdate/national_id/name/other). `is_pii=false`이고 `confident=true`일 때만 후보를 빼고, 확신 없이 아니라고 하면 후보를 남겨 사람이 본다. 프롬프트는 `prompt.md` | 선택 |
 
 왜 이렇게 나누나:
 - **결정적인 부분을 최대한 넓힌다.** 1·2층은 같은 입력이면 같은 결과다. 확신이 서는 칼럼은 AI를 거치지 않으므로 비용이 없고 결과가 흔들리지 않는다.

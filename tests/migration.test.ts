@@ -288,17 +288,20 @@ describe("runStage 와 마이그레이션", () => {
     expect(result.plan.rules.find((r) => r.id === "R7")?.result).toBe("matched");
   });
 
-  it("test_result 에 facts.migration 이 이미 있으면 테스트 파트 값을 존중한다", async () => {
+  it("test_result 에 facts.migration 이 이미 있고 실행기 계산과 destructive 가 같으면 테스트 파트 값을 존중한다", async () => {
     const out = tmp();
     const testPath = join(out, "test_result.json");
-    const given = { destructive: false, backward_compatible: true, findings: [] };
+    // 안전한 샘플에 테스트 파트가 준 값(파괴적 아님, 메모만 다름). destructive 가 같으므로 그대로 쓴다
+    const given = { destructive: false, backward_compatible: true, findings: [], note: "테스트 파트가 직접 판정" };
     const fs = await import("node:fs");
     fs.writeFileSync(testPath, JSON.stringify({ ...baseTest, facts: { db: "postgres", migration: given } }));
-    const result = await runStage({ src: sample("migration-destructive"), testPath, policyPath: POLICY, outDir: out, logPath: join(out, "d.jsonl") });
+    const result = await runStage({ src: sample("migration-safe"), testPath, policyPath: POLICY, outDir: out, logPath: join(out, "d.jsonl") });
     expect(result.migrationComputed).toBe(false);
-    expect(result.migration).toEqual(given);
+    expect(result.migration).toMatchObject({ destructive: false, backward_compatible: true, findings: [] });
     expect(result.plan.rules.find((r) => r.id === "R7")).toEqual({ id: "R7", result: "not_matched" });
     expect(existsSync(join(out, "migration.json"))).toBe(false);
+    // 값이 다르면 멈춘다 (자세한 검증은 tests/safety.test.ts)
+    await expect(runStage({ src: sample("migration-destructive"), testPath, policyPath: POLICY, outDir: out, logPath: join(out, "d.jsonl") })).rejects.toMatchObject({ stage: "migration" });
   });
 
   it("--since 로 이미 적용된 마이그레이션은 건너뛴다", async () => {

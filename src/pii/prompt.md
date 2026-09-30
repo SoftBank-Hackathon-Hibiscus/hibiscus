@@ -6,7 +6,8 @@
 각 후보에 대해 다음을 판정하라.
 
 - is_pii: 이 칼럼의 값이 개인을 식별하거나 연락할 수 있는 정보인가 (전화번호, 이메일, 주소, 생년월일, 주민등록번호·여권번호 등)
-- kind: 종류. phone | email | address | birthdate | national_id | name | other 중 하나. is_pii 가 false 면 "none"
+- kind: 종류. phone | email | address | birthdate | national_id | name | other 중 하나. is_pii 가 false 면 "other"
+- is_pii 가 false 여도 confident 가 false 면 후보는 유지되고 사람이 확인한다. 확신이 있을 때만 confident = true 로 두어라.
 - confident: 근거만으로 확신할 수 있으면 true. 정황만 있고 확신할 수 없으면 false
 - rationale: 근거 조각의 파일:줄 을 들어 한두 문장으로 이유를 적어라
 

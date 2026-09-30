@@ -42,7 +42,7 @@ runCli(async () => {
 
   let files;
   try {
-    files = loadSources(src);
+    files = loadSources(src, (p) => console.error(`경고: symlink 를 건너뜀: ${p}`));
   } catch (e) {
     throw new CliError(`앱 폴더를 읽을 수 없습니다: ${src} (${(e as Error).message})`);
   }

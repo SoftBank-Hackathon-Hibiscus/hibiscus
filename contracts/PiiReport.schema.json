@@ -6,8 +6,8 @@
   "properties": {
     "run_id": {
       "type": "string",
-      "minLength": 1,
-      "description": "파이프라인 실행 id. 모든 파일이 같은 값을 가져야 한다"
+      "pattern": "^[A-Za-z0-9._-]{1,64}$",
+      "description": "파이프라인 실행 id. 영문·숫자·._- 만, 1~64자. 모든 파일이 같은 값을 가져야 한다"
     },
     "pii": {
       "default": [],

@@ -8,7 +8,7 @@
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { decide } from "./engine.js";
+import { decide, matchedRuleIds } from "./engine.js";
 import { LANGS, explainPlan } from "./explainer.js";
 import { appendDecisionLog, loadJson, loadPolicy, validate, writeJson } from "./io.js";
 import { analyzeMigrations } from "./migration/analyzer.js";
@@ -102,20 +102,37 @@ export async function runStage(opts: StageOptions): Promise<StageResult> {
   const loaded = await step("test_result", () => validate(TestResultSchema, loadJson(opts.testPath, "test_result"), "test_result", opts.testPath));
   const policy = await step("policy", () => loadPolicy(opts.policyPath));
 
-  // 마이그레이션 판정: 테스트 파트가 facts.migration 을 이미 넣었으면 그 값을 존중한다
+  const notes: string[] = [];
+  const onSkip = (path: string) => notes.push(`symlink 를 건너뜀: ${path}`);
+
+  // 마이그레이션 판정: 실행기가 항상 직접 계산한다. 테스트 파트가 facts.migration 을 줬으면
+  // 그 값을 쓰되, destructive 가 우리 계산과 다르면 멈춘다 (어느 쪽이 맞는지 사람이 봐야 한다).
   const existing = loaded.facts.migration;
   const migrationComputed = existing === undefined;
-  const migration = migrationComputed
-    ? await step("migration", () => analyzeMigrations(filterSince(loadMigrationFiles(opts.src), opts.since).files))
-    : existing;
+  const computed = await step("migration", () => {
+    const { files, sinceFound } = filterSince(loadMigrationFiles(opts.src, onSkip), opts.since);
+    if (!sinceFound) {
+      throw new Error(`--since 로 준 마이그레이션 이름을 찾을 수 없습니다: ${opts.since} (이름을 확인하세요. 잘못된 이름은 검사 범위를 조용히 바꿉니다)`);
+    }
+    return analyzeMigrations(files);
+  });
+  if (existing !== undefined && existing.destructive !== computed.destructive) {
+    throw new StageError(
+      "migration",
+      `test_result.facts.migration.destructive=${existing.destructive} 인데 실행기가 계산한 값은 ${computed.destructive} 입니다. ` +
+        `테스트 파트 값: ${JSON.stringify(existing)} / 실행기 값: ${JSON.stringify(computed)}`,
+    );
+  }
+  const migration = existing ?? computed;
   const test: TestResult = migrationComputed ? { ...loaded, facts: { ...loaded.facts, migration } } : loaded;
 
-  const { pii, notes } = await step("pii", async () => {
-    const files = loadSources(opts.src);
+  const { pii } = await step("pii", async () => {
+    const files = loadSources(opts.src, onSkip);
     const candidates = extract(files);
-    const { classifier, notes } = selectClassifier({ mode: opts.classifier, runId: test.run_id, recording: opts.recording });
+    const { classifier, notes: classifierNotes } = selectClassifier({ mode: opts.classifier, runId: test.run_id, recording: opts.recording });
     const results = await classifier.classify(candidates);
-    return { pii: PiiReportSchema.parse({ run_id: test.run_id, pii: results }), notes };
+    notes.push(...classifierNotes);
+    return { pii: PiiReportSchema.parse({ run_id: test.run_id, pii: results }) };
   });
 
   const plan = await step("decide", () => decide(test, pii, policy));
@@ -150,7 +167,7 @@ export async function runStage(opts: StageOptions): Promise<StageResult> {
       digest: plan.digest,
       decision: plan.decision,
       targets: plan.targets,
-      rule_ids: plan.rules.filter((r) => r.result !== "not_matched").map((r) => r.id),
+      rule_ids: matchedRuleIds(plan.rules),
       plan_hash: plan.plan_hash,
     }),
   );

@@ -117,7 +117,7 @@ describe("결정성 (plan_hash)", () => {
   it("입력이 하나라도 다르면 plan_hash 가 달라진다", () => {
     const { test, pii } = loadFixture("01-allow");
     const base = decide(test, pii, policy).plan_hash;
-    expect(decide({ ...test, digest: "sha256:ffff" }, pii, policy).plan_hash).not.toBe(base);
+    expect(decide({ ...test, digest: `sha256:${"f".repeat(64)}` }, pii, policy).plan_hash).not.toBe(base);
     expect(decide(test, { ...pii, pii: [{ table: "u", column: "c", kind: "k", evidence: "e", confident: true }] }, policy).plan_hash).not.toBe(base);
     const otherPolicy = { ...policy, default: { ...policy.default, failover_allowed: false } };
     expect(decide(test, pii, otherPolicy).plan_hash).not.toBe(base);

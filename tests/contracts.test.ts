@@ -66,7 +66,7 @@ describe("JSON Schema 로 fixtures 검증", () => {
     const rb = decideRollback(RollbackRequestSchema.parse(readJson("fixtures/rollback/03-pii-onprem.json")), policy);
     expectValid(
       "DecisionLog",
-      { kind: "rollback", time: "2026-09-30T00:00:00.000Z", run_id: rb.run_id, digest: "sha256:3333", serve_digest: rb.serve_digest, decision: rb.decision, targets: rb.targets, failover_allowed: rb.failover_allowed, rule_ids: ["RB3", "default"], plan_hash: rb.plan_hash },
+      { kind: "rollback", time: "2026-09-30T00:00:00.000Z", run_id: rb.run_id, digest: `sha256:${"3".repeat(64)}`, serve_digest: rb.serve_digest, decision: rb.decision, targets: rb.targets, failover_allowed: rb.failover_allowed, rule_ids: ["RB3", "default"], plan_hash: rb.plan_hash },
       "rollback log",
     );
   });

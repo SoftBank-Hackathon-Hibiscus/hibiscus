@@ -263,6 +263,14 @@ export function sha256Hex(text: string): string {
  */
 export const FAILOVER_REQUIRED_TARGETS = ["local", "cloud_run"] as const;
 
+/**
+ * 결정 기록(decisions.jsonl)의 rule_ids: 걸린 규칙 전부 (matched 와 matched_after_block), 구분 없이 id 만.
+ * 정책 CLI, 롤백 CLI, 실행기가 모두 이 함수를 쓴다.
+ */
+export function matchedRuleIds(rules: readonly RuleResult[]): string[] {
+  return rules.filter((r) => r.result !== "not_matched").map((r) => r.id);
+}
+
 /** 앞 목록의 순서를 유지한 채 교집합을 구한다. */
 export function intersect(current: readonly string[], next: readonly string[]): string[] {
   const allowed = new Set(next);

@@ -4,8 +4,9 @@
  *   npx tsx src/rollback/cli.ts --request rollback_request.json --policy policy.yaml --out rollback_plan.json [--log decisions.jsonl]
  */
 import { CliError, appendDecisionLog, loadJson, loadPolicy, parseArgs, requireArgs, runCli, validate, writeJson } from "../io.js";
+import { matchedRuleIds } from "../engine.js";
 import { RollbackRequestSchema } from "../schema.js";
-import { decideRollback } from "./engine.js";
+import { assertKnownTargets, decideRollback } from "./engine.js";
 
 const USAGE = `사용법:
   npx tsx src/rollback/cli.ts --request <rollback_request.json> --policy <policy.yaml> --out <rollback_plan.json> [--log <decisions.jsonl>]
@@ -32,6 +33,11 @@ runCli(() => {
   const request = validate(RollbackRequestSchema, loadJson(requestPath, "rollback_request"), "rollback_request", requestPath);
   const policy = loadPolicy(policyPath);
   if (!policy.rollback) throw new CliError(`policy 에 rollback 섹션이 없습니다: ${policyPath}`);
+  try {
+    assertKnownTargets(request, policy);
+  } catch (e) {
+    throw new CliError(`rollback_request 형식 오류: ${requestPath}\n  - ${(e as Error).message}`);
+  }
 
   const plan = decideRollback(request, policy);
   writeJson(outPath, plan);
@@ -43,7 +49,7 @@ runCli(() => {
     decision: plan.decision,
     targets: plan.targets,
     failover_allowed: plan.failover_allowed,
-    rule_ids: plan.rules.filter((r) => r.result === "matched").map((r) => r.id),
+    rule_ids: matchedRuleIds(plan.rules),
     plan_hash: plan.plan_hash,
   });
 

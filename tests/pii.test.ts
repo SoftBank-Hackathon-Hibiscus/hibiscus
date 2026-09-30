@@ -158,9 +158,23 @@ describe("LlmClassifier (가짜 호출 함수)", () => {
   it("LLM 이 개인정보가 아니라고 하면 결과에서 뺀다. 답하지 않은 칼럼은 휴리스틱 결과를 유지한다", async () => {
     const dropped = await new LlmClassifier({
       base: new HeuristicClassifier(),
-      call: fakeCall({ results: [{ table: "User", column: "emergency_no", is_pii: false, kind: "none", confident: true, rationale: "내부 코드" }] }).call,
+      call: fakeCall({ results: [{ table: "User", column: "emergency_no", is_pii: false, kind: "other", confident: true, rationale: "내부 코드" }] }).call,
     }).classify(ambiguousCands());
     expect(dropped).toEqual([]);
+
+    // is_pii=false 인데 확신이 없으면 후보를 남기고 confident=false 로 둔다 (사람 확인). kind 는 휴리스틱 값 유지
+    const unsure = await new LlmClassifier({
+      base: new HeuristicClassifier(),
+      call: fakeCall({ results: [{ table: "User", column: "emergency_no", is_pii: false, kind: "other", confident: false, rationale: "잘 모르겠음" }] }).call,
+    }).classify(ambiguousCands());
+    expect(unsure.map(brief)).toEqual([{ table: "User", column: "emergency_no", kind: "phone", confident: false, source: "llm" }]);
+
+    // kind 는 enum 밖이면 에러
+    const badKind = new LlmClassifier({
+      base: new HeuristicClassifier(),
+      call: fakeCall({ results: [{ table: "User", column: "emergency_no", is_pii: false, kind: "none", confident: true, rationale: "x" }] }).call,
+    });
+    await expect(badKind.classify(ambiguousCands())).rejects.toThrow();
 
     const silent = await new LlmClassifier({ base: new HeuristicClassifier(), call: fakeCall({ results: [] }).call }).classify(ambiguousCands());
     expect(silent.map(brief)).toEqual([{ table: "User", column: "emergency_no", kind: "phone", confident: false, source: "heuristic" }]);

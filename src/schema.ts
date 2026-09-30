@@ -9,10 +9,13 @@ import { z } from "zod";
 // ---------------------------------------------------------------------------
 export const DigestSchema = z
   .string()
-  .regex(/^sha256:[A-Za-z0-9]+$/, "digest 는 'sha256:<hex>' 형식이어야 합니다")
-  .describe("컨테이너 이미지 지문. 'sha256:<hex>'. 테스트한 이미지 = 결정한 이미지 = 서명·배포할 이미지");
+  .regex(/^sha256:[0-9a-f]{64}$/, "digest 는 'sha256:' 뒤에 소문자 hex 64자여야 합니다")
+  .describe("컨테이너 이미지 지문. 'sha256:' + 소문자 hex 64자. 테스트한 이미지 = 결정한 이미지 = 서명·배포할 이미지");
 
-const RunIdSchema = z.string().min(1).describe("파이프라인 실행 id. 모든 파일이 같은 값을 가져야 한다");
+const RunIdSchema = z
+  .string()
+  .regex(/^[A-Za-z0-9._-]{1,64}$/, "run_id 는 영문·숫자·._- 만, 1~64자여야 합니다")
+  .describe("파이프라인 실행 id. 영문·숫자·._- 만, 1~64자. 모든 파일이 같은 값을 가져야 한다");
 
 // ---------------------------------------------------------------------------
 // 파괴적 DB 마이그레이션 판정 결과 (src/migration/ 이 만든다. test_result.facts.migration 에 실린다)
@@ -415,7 +418,7 @@ export const RollbackPlanSchema = z
     run_id: RunIdSchema,
     app: z.string().describe("앱 이름 (요청에서 그대로)"),
     decision: RollbackDecisionSchema,
-    serve_digest: z.string().nullable().describe("결정 후 트래픽을 받아야 할 버전. keep_stable / rollback → stable.digest, manual_recovery → null"),
+    serve_digest: DigestSchema.nullable().describe("결정 후 트래픽을 받아야 할 버전. keep_stable / rollback → stable.digest, manual_recovery → null"),
     targets: z.array(z.string()).describe("keep_stable / rollback → stable.targets 에서 좁힌 결과, manual_recovery → []"),
     failover_allowed: z.boolean().describe("온프레 장애 시 Cloud Run 전환 허용 여부. false 가 이기고, local 과 cloud_run 이 모두 있을 때만 true 가능"),
     requires: PlanRequiresSchema,
@@ -429,18 +432,18 @@ export type RollbackPlan = z.infer<typeof RollbackPlanSchema>;
 // 결정 기록: decisions.jsonl 의 한 줄. kind 로 배포/롤백을 구분한다
 // ---------------------------------------------------------------------------
 const LogTimeSchema = z.string().describe("결정 시각 (ISO 8601). CLI 가 붙인다. 엔진은 시간을 쓰지 않는다");
-const RuleIdsSchema = z.array(z.string()).describe("걸린 규칙 id 만 (plan 의 rules 중 matched)");
+const RuleIdsSchema = z.array(z.string()).describe("걸린 규칙 id (plan 의 rules 중 matched 와 matched_after_block, 구분 없이 id 만)");
 
 export const DeployDecisionLogSchema = z
   .object({
     kind: z.literal("deploy").describe("배포 결정"),
     time: LogTimeSchema,
     run_id: RunIdSchema,
-    digest: z.string().describe("결정한 이미지의 digest (plan.digest)"),
+    digest: DigestSchema.describe("결정한 이미지의 digest (plan.digest)"),
     decision: DecisionSchema,
     targets: z.array(z.string()).describe("plan.targets"),
     rule_ids: RuleIdsSchema,
-    plan_hash: z.string().describe("plan.plan_hash"),
+    plan_hash: PlanHashSchema.describe("plan.plan_hash"),
   })
   .describe("배포 결정 한 건");
 export const RollbackDecisionLogSchema = z
@@ -448,13 +451,13 @@ export const RollbackDecisionLogSchema = z
     kind: z.literal("rollback").describe("롤백 결정"),
     time: LogTimeSchema,
     run_id: RunIdSchema,
-    digest: z.string().describe("문제가 난 배포 후보(candidate)의 digest"),
-    serve_digest: z.string().nullable().describe("결정 후 트래픽을 받을 버전. manual_recovery 면 null"),
+    digest: DigestSchema.describe("문제가 난 배포 후보(candidate)의 digest"),
+    serve_digest: DigestSchema.nullable().describe("결정 후 트래픽을 받을 버전. manual_recovery 면 null"),
     decision: RollbackDecisionSchema,
     targets: z.array(z.string()).describe("rollback_plan.targets"),
     failover_allowed: z.boolean().describe("rollback_plan.failover_allowed"),
     rule_ids: RuleIdsSchema,
-    plan_hash: z.string().describe("rollback_plan.plan_hash"),
+    plan_hash: PlanHashSchema.describe("rollback_plan.plan_hash"),
   })
   .describe("롤백 결정 한 건");
 export const DecisionLogSchema = z

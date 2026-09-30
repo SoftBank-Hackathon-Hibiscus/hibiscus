@@ -6,7 +6,7 @@
  *
  * 지원: SQL CREATE TABLE, Prisma model. 나머지 파일(.js/.ts/.html)은 근거 조각 수집에만 쓴다.
  */
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { redact } from "./redact.js";
 
@@ -43,22 +43,34 @@ const MAX_USAGES_PER_COLUMN = 40;
 // 파일 읽기 (유일하게 fs 를 쓰는 부분)
 // ---------------------------------------------------------------------------
 
-export function loadSources(dir: string): SourceFile[] {
+/**
+ * symlink(정션 포함)는 따라가지 않고 건너뛴다: 앱 폴더 밖으로 나가거나 순환할 수 있다.
+ * 건너뛴 경로는 onSkip 으로 알린다 (CLI 는 경고로 출력).
+ */
+export function loadSources(dir: string, onSkip?: (path: string) => void): SourceFile[] {
   const files: SourceFile[] = [];
   const walk = (current: string) => {
     for (const name of readdirSync(current)) {
       const full = join(current, name);
-      const st = statSync(full);
+      const st = lstatSync(full);
+      if (st.isSymbolicLink()) {
+        onSkip?.(posixRelative(dir, full));
+        continue;
+      }
       if (st.isDirectory()) {
         if (!SKIP_DIRS.has(name)) walk(full);
         continue;
       }
       if (!SOURCE_EXTENSIONS.some((ext) => name.endsWith(ext))) continue;
-      files.push({ path: relative(dir, full).split("\\").join("/"), content: readFileSync(full, "utf8") });
+      files.push({ path: posixRelative(dir, full), content: readFileSync(full, "utf8") });
     }
   };
   walk(dir);
   return sortFiles(files);
+}
+
+function posixRelative(dir: string, full: string): string {
+  return relative(dir, full).split("\\").join("/");
 }
 
 function sortFiles(files: SourceFile[]): SourceFile[] {

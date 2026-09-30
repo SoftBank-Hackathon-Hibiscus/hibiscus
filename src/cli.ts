@@ -4,7 +4,7 @@
  *   npx tsx src/cli.ts --test test_result.json --pii pii.json --policy policy.yaml --out plan.json
  *   옵션: --log decisions.jsonl (기본값: ./decisions.jsonl)
  */
-import { decide } from "./engine.js";
+import { decide, matchedRuleIds } from "./engine.js";
 import { appendDecisionLog, loadJson, loadPolicy, parseArgs, requireArgs, runCli, validate, writeJson } from "./io.js";
 import { PiiReportSchema, TestResultSchema } from "./schema.js";
 
@@ -45,7 +45,7 @@ runCli(() => {
     digest: plan.digest,
     decision: plan.decision,
     targets: plan.targets,
-    rule_ids: plan.rules.filter((r) => r.result === "matched").map((r) => r.id),
+    rule_ids: matchedRuleIds(plan.rules),
     plan_hash: plan.plan_hash,
   });
 

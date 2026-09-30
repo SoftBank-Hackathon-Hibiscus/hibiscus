@@ -82,7 +82,7 @@ flowchart LR
 
 ## 팀과 합의가 필요한 점
 
-1. **run_id 와 digest 는 끝까지 그대로 전달한다.** 테스트 파트가 정한 `run_id` 와 이미지 `digest` 가 test_result → pii → plan → 서명 → 배포 → rollback_request 까지 바뀌지 않아야 한다. 정책 엔진은 test_result 와 pii 의 `run_id` 가 다르면 차단한다(R2). digest 는 `sha256:<hex>` 형식만 받는다.
+1. **run_id 와 digest 는 끝까지 그대로 전달한다.** 테스트 파트가 정한 `run_id` 와 이미지 `digest` 가 test_result → pii → plan → 서명 → 배포 → rollback_request 까지 바뀌지 않아야 한다. 정책 엔진은 test_result 와 pii 의 `run_id` 가 다르면 차단한다(R2). `digest` 는 `sha256:` + 소문자 hex 64자만 받고(결정 기록의 digest 와 plan_hash 도 같은 형식), `run_id` 는 영문·숫자·`._-` 만 1~64자다. rollback_request 의 `candidate.targets` 와 `stable.targets` 는 `known_targets` 안에 있어야 한다.
 2. **비밀값은 어떤 파일에도 넣지 않는다.** API 키, 토큰, 접속 문자열을 `facts`, `failures`, `evidence` 등에 넣지 말 것. 개인정보 판정 모듈은 근거 조각의 비밀처럼 보이는 값을 `[REDACTED]` 로 가리지만, 다른 파트의 파일은 각자 책임진다.
 3. **선택 필드는 "없을 수 있다" 는 뜻이지 "null 을 넣어도 된다" 는 뜻이 아니다.** 예: `plan.requires` 는 없거나 객체 배열이다. `pii[].source` 도 마찬가지.
 4. **최근 추가된 필드**
@@ -112,9 +112,9 @@ flowchart LR
 
 | 필드 | 타입 | 필수 | 설명 |
 |---|---|---|---|
-| `run_id` | string | 필수 | 파이프라인 실행 id. 모든 파일이 같은 값을 가져야 한다 |
+| `run_id` | string | 필수 | 파이프라인 실행 id. 영문·숫자·._- 만, 1~64자. 모든 파일이 같은 값을 가져야 한다 |
 | `app` | string | 필수 | 앱 이름 |
-| `digest` | string | 필수 | 컨테이너 이미지 지문. 'sha256:<hex>'. 테스트한 이미지 = 결정한 이미지 = 서명·배포할 이미지 |
+| `digest` | string | 필수 | 컨테이너 이미지 지문. 'sha256:' + 소문자 hex 64자. 테스트한 이미지 = 결정한 이미지 = 서명·배포할 이미지 |
 | `passed` | boolean | 필수 | 재생 테스트 통과 여부. false 면 정책 엔진이 차단한다 |
 | `match` | object | 필수 | 재생 결과 요약 |
 | `match.total` | integer | 필수 | 재생한 요청 수 |
@@ -163,7 +163,7 @@ flowchart LR
 
 | 필드 | 타입 | 필수 | 설명 |
 |---|---|---|---|
-| `run_id` | string | 필수 | 파이프라인 실행 id. 모든 파일이 같은 값을 가져야 한다 |
+| `run_id` | string | 필수 | 파이프라인 실행 id. 영문·숫자·._- 만, 1~64자. 모든 파일이 같은 값을 가져야 한다 |
 | `pii` | object[] | 선택 (기본값 `[]`) | 개인정보 후보 목록. 없으면 빈 배열 |
 | `pii[].table` | string | 필수 | 테이블 또는 모델 이름 |
 | `pii[].column` | string | 필수 | 칼럼 이름 |
@@ -201,9 +201,9 @@ flowchart LR
 
 | 필드 | 타입 | 필수 | 설명 |
 |---|---|---|---|
-| `run_id` | string | 필수 | 파이프라인 실행 id. 모든 파일이 같은 값을 가져야 한다 |
+| `run_id` | string | 필수 | 파이프라인 실행 id. 영문·숫자·._- 만, 1~64자. 모든 파일이 같은 값을 가져야 한다 |
 | `app` | string | 필수 | 앱 이름 (test_result 에서 그대로) |
-| `digest` | string | 필수 | 컨테이너 이미지 지문. 'sha256:<hex>'. 테스트한 이미지 = 결정한 이미지 = 서명·배포할 이미지 |
+| `digest` | string | 필수 | 컨테이너 이미지 지문. 'sha256:' + 소문자 hex 64자. 테스트한 이미지 = 결정한 이미지 = 서명·배포할 이미지 |
 | `decision` | "allow" \| "block" \| "needs_approval" | 필수 | allow=배포 진행, block=배포 안 함, needs_approval=사람 승인 후 진행 |
 | `targets` | string[] | 필수 | 배포할 대상 (known_targets 의 부분집합). block 이면 빈 배열 |
 | `failover_allowed` | boolean | 필수 | 온프레 장애 시 Cloud Run 으로 전환해도 되는지. local 과 cloud_run 이 모두 있을 때만 true 가능 |
@@ -284,14 +284,14 @@ flowchart LR
 
 | 필드 | 타입 | 필수 | 설명 |
 |---|---|---|---|
-| `run_id` | string | 필수 | 파이프라인 실행 id. 모든 파일이 같은 값을 가져야 한다 |
+| `run_id` | string | 필수 | 파이프라인 실행 id. 영문·숫자·._- 만, 1~64자. 모든 파일이 같은 값을 가져야 한다 |
 | `app` | string | 필수 | 앱 이름 |
 | `stage` | "before_cutover" \| "after_cutover" | 필수 | before_cutover=후보로 트래픽을 넘기기 전 실패, after_cutover=넘긴 뒤 실패 |
 | `candidate` | object | 필수 | 이번 배포 후보 (문제가 난 버전) |
-| `candidate.digest` | string | 필수 | 컨테이너 이미지 지문. 'sha256:<hex>'. 테스트한 이미지 = 결정한 이미지 = 서명·배포할 이미지 |
+| `candidate.digest` | string | 필수 | 컨테이너 이미지 지문. 'sha256:' + 소문자 hex 64자. 테스트한 이미지 = 결정한 이미지 = 서명·배포할 이미지 |
 | `candidate.targets` | string[] | 필수 | 후보가 배포된 대상 |
 | `stable` | object | 필수 | 이번 배포 전 정상 버전 (되돌아갈 곳) |
-| `stable.digest` | string | 필수 | 컨테이너 이미지 지문. 'sha256:<hex>'. 테스트한 이미지 = 결정한 이미지 = 서명·배포할 이미지 |
+| `stable.digest` | string | 필수 | 컨테이너 이미지 지문. 'sha256:' + 소문자 hex 64자. 테스트한 이미지 = 결정한 이미지 = 서명·배포할 이미지 |
 | `stable.targets` | string[] | 필수 | 정상 버전이 배포돼 있는 대상 (되돌아갈 곳의 출발점) |
 | `state` | object | 필수 | 배포 파트가 관찰한 상태 |
 | `state.writes_since_cutover` | boolean | 필수 | 컷오버 후 데이터 쓰기가 있었는지 |
@@ -338,10 +338,10 @@ flowchart LR
 
 | 필드 | 타입 | 필수 | 설명 |
 |---|---|---|---|
-| `run_id` | string | 필수 | 파이프라인 실행 id. 모든 파일이 같은 값을 가져야 한다 |
+| `run_id` | string | 필수 | 파이프라인 실행 id. 영문·숫자·._- 만, 1~64자. 모든 파일이 같은 값을 가져야 한다 |
 | `app` | string | 필수 | 앱 이름 (요청에서 그대로) |
 | `decision` | "keep_stable" \| "rollback" \| "manual_recovery" | 필수 | keep_stable=정상 버전이 계속 트래픽을 받음, rollback=정상 버전으로 되돌림, manual_recovery=자동으로 못 되돌림 (사람이 복구) |
-| `serve_digest` | string \| null | 필수 | 결정 후 트래픽을 받아야 할 버전. keep_stable / rollback → stable.digest, manual_recovery → null |
+| `serve_digest` | union | 필수 | 결정 후 트래픽을 받아야 할 버전. keep_stable / rollback → stable.digest, manual_recovery → null |
 | `targets` | string[] | 필수 | keep_stable / rollback → stable.targets 에서 좁힌 결과, manual_recovery → [] |
 | `failover_allowed` | boolean | 필수 | 온프레 장애 시 Cloud Run 전환 허용 여부. false 가 이기고, local 과 cloud_run 이 모두 있을 때만 true 가능 |
 | `requires` | object[] | 선택 | 걸린 규칙들의 해결 조건 (id 로 합치고 id 순 정렬). block / needs_approval / manual_recovery 면 최소 1개. 하나도 없으면 필드가 없다 |
@@ -421,11 +421,11 @@ flowchart LR
 |---|---|---|---|
 | `kind` | "deploy" | 필수 | 배포 결정 |
 | `time` | string | 필수 | 결정 시각 (ISO 8601). CLI 가 붙인다. 엔진은 시간을 쓰지 않는다 |
-| `run_id` | string | 필수 | 파이프라인 실행 id. 모든 파일이 같은 값을 가져야 한다 |
+| `run_id` | string | 필수 | 파이프라인 실행 id. 영문·숫자·._- 만, 1~64자. 모든 파일이 같은 값을 가져야 한다 |
 | `digest` | string | 필수 | 결정한 이미지의 digest (plan.digest) |
 | `decision` | "allow" \| "block" \| "needs_approval" | 필수 | allow=배포 진행, block=배포 안 함, needs_approval=사람 승인 후 진행 |
 | `targets` | string[] | 필수 | plan.targets |
-| `rule_ids` | string[] | 필수 | 걸린 규칙 id 만 (plan 의 rules 중 matched) |
+| `rule_ids` | string[] | 필수 | 걸린 규칙 id (plan 의 rules 중 matched 와 matched_after_block, 구분 없이 id 만) |
 | `plan_hash` | string | 필수 | plan.plan_hash |
 
 **kind = "rollback"** — 롤백 결정 한 건
@@ -434,13 +434,13 @@ flowchart LR
 |---|---|---|---|
 | `kind` | "rollback" | 필수 | 롤백 결정 |
 | `time` | string | 필수 | 결정 시각 (ISO 8601). CLI 가 붙인다. 엔진은 시간을 쓰지 않는다 |
-| `run_id` | string | 필수 | 파이프라인 실행 id. 모든 파일이 같은 값을 가져야 한다 |
+| `run_id` | string | 필수 | 파이프라인 실행 id. 영문·숫자·._- 만, 1~64자. 모든 파일이 같은 값을 가져야 한다 |
 | `digest` | string | 필수 | 문제가 난 배포 후보(candidate)의 digest |
-| `serve_digest` | string \| null | 필수 | 결정 후 트래픽을 받을 버전. manual_recovery 면 null |
+| `serve_digest` | union | 필수 | 결정 후 트래픽을 받을 버전. manual_recovery 면 null |
 | `decision` | "keep_stable" \| "rollback" \| "manual_recovery" | 필수 | keep_stable=정상 버전이 계속 트래픽을 받음, rollback=정상 버전으로 되돌림, manual_recovery=자동으로 못 되돌림 (사람이 복구) |
 | `targets` | string[] | 필수 | rollback_plan.targets |
 | `failover_allowed` | boolean | 필수 | rollback_plan.failover_allowed |
-| `rule_ids` | string[] | 필수 | 걸린 규칙 id 만 (plan 의 rules 중 matched) |
+| `rule_ids` | string[] | 필수 | 걸린 규칙 id (plan 의 rules 중 matched 와 matched_after_block, 구분 없이 id 만) |
 | `plan_hash` | string | 필수 | rollback_plan.plan_hash |
 
 ### 예시 (Plan 예시로 만든 배포 결정 한 줄 (시간은 고정값))

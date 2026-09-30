@@ -31,7 +31,8 @@ export const LlmResultSchema = z.strictObject({
   table: z.string().min(1),
   column: z.string().min(1),
   is_pii: z.boolean(),
-  kind: z.string().min(1),
+  /** 개인정보 종류. is_pii 가 false 면 other 로 둔다 */
+  kind: z.enum(["phone", "email", "address", "birthdate", "national_id", "name", "other"]),
   confident: z.boolean(),
   rationale: z.string(),
 });
@@ -134,7 +135,12 @@ export class LlmClassifier implements Classifier {
         merged.push(r); // LLM 이 답하지 않은 칼럼은 휴리스틱 결과를 유지
         continue;
       }
-      if (!verdict.is_pii) continue; // LLM 이 개인정보가 아니라고 판단 → 제외
+      if (!verdict.is_pii) {
+        // 확신을 갖고 "개인정보 아님" 이라고 했을 때만 뺀다. 확신이 없으면 후보를 남겨 사람이 본다.
+        if (verdict.confident) continue;
+        merged.push({ ...r, confident: false, source: this.source });
+        continue;
+      }
       merged.push({ ...r, kind: verdict.kind, confident: verdict.confident, source: this.source });
     }
     return merged;
