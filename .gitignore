@@ -1,0 +1,42 @@
+# dependencies / build
+node_modules/
+dist/
+build/
+coverage/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# env / secrets (절대 커밋 금지)
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+cosign.key
+credentials*.json
+service-account*.json
+*-sa.json
+
+# 실행하면 생기는 결과 파일
+plan.json
+pii.json
+rollback_plan.json
+decisions.jsonl
+result.json
+session.jsonl
+noise.json
+sign_result.json
+
+# 예시·테스트용 파일은 올림
+!**/fixtures/**
+!**/examples/**
+!contracts/**
+
+# os / editor
+.DS_Store
+.idea/
+.vscode/
+*.log
