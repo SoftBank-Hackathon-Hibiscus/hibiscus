@@ -1,0 +1,365 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PremortemEnvironmentReportV1",
+  "description": "김주영 모듈 내부 계약 구현안 v1. 팀 공통 test_result 계약이 아니다.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^(?!\\.{1,2}$)[A-Za-z0-9._-]{1,64}$"
+    },
+    "parent_run_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^(?!\\.{1,2}$)[A-Za-z0-9._-]{1,64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "stage": {
+      "enum": [
+        "pretest",
+        "retest"
+      ],
+      "type": "string"
+    },
+    "execution_mode": {
+      "enum": [
+        "fixture",
+        "real"
+      ],
+      "type": "string"
+    },
+    "replay_backend": {
+      "enum": [
+        "reference",
+        "parity"
+      ],
+      "type": "string"
+    },
+    "team_parity_integrated": {
+      "type": "boolean"
+    },
+    "team_contract_validated": {
+      "type": "boolean"
+    },
+    "baseline_integrity_verified": {
+      "type": "boolean"
+    },
+    "source": {
+      "type": "object",
+      "properties": {
+        "commit": {
+          "type": "string"
+        },
+        "tree_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "excludes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "commit",
+        "tree_sha256",
+        "excludes"
+      ],
+      "additionalProperties": false
+    },
+    "baseline": {
+      "type": "object",
+      "properties": {
+        "session_path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "출력 또는 앱 root 기준 상대 경로. 실제 구현에서 절대 경로·..·역슬래시·드라이브·symlink·root 이탈을 추가 검증한다."
+        },
+        "session_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "noise_path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "출력 또는 앱 root 기준 상대 경로. 실제 구현에서 절대 경로·..·역슬래시·드라이브·symlink·root 이탈을 추가 검증한다."
+        },
+        "noise_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "session_path",
+        "session_sha256",
+        "noise_path",
+        "noise_sha256"
+      ],
+      "additionalProperties": false
+    },
+    "image": {
+      "type": "object",
+      "properties": {
+        "reference": {
+          "type": "string"
+        },
+        "local_image_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "registry_digest": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "registry_link_verified": {
+          "type": "boolean"
+        },
+        "source_build_link_verified": {
+          "type": "boolean"
+        },
+        "platform": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "reference",
+        "local_image_id",
+        "registry_digest",
+        "registry_link_verified",
+        "source_build_link_verified",
+        "platform"
+      ],
+      "additionalProperties": false
+    },
+    "required_conditions": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "none",
+          "restart",
+          "replace",
+          "replicas",
+          "remote_verify"
+        ],
+        "type": "string"
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "conditions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "enum": [
+              "none",
+              "restart",
+              "replace",
+              "replicas",
+              "remote_verify"
+            ],
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "passed",
+              "failed",
+              "inconclusive",
+              "skipped",
+              "error"
+            ],
+            "type": "string"
+          },
+          "expected_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "executed_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "matched_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "mismatches": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "request_index": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "kind": {
+                  "enum": [
+                    "status",
+                    "body",
+                    "header",
+                    "transport",
+                    "readiness"
+                  ],
+                  "type": "string"
+                },
+                "summary": {
+                  "type": "string"
+                },
+                "evidence_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "minItems": 1
+                }
+              },
+              "required": [
+                "request_index",
+                "kind",
+                "summary",
+                "evidence_ids"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "evidence_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "status",
+          "expected_count",
+          "executed_count",
+          "matched_count",
+          "mismatches",
+          "evidence_ids",
+          "reason"
+        ],
+        "additionalProperties": false
+      },
+      "minItems": 1
+    },
+    "overall_status": {
+      "enum": [
+        "passed",
+        "failed",
+        "inconclusive",
+        "error"
+      ],
+      "type": "string"
+    },
+    "gate": {
+      "type": "object",
+      "properties": {
+        "test_passed": {
+          "type": "boolean"
+        },
+        "handoff_ready": {
+          "type": "boolean"
+        },
+        "handoff_blockers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "test_passed",
+        "handoff_ready",
+        "handoff_blockers"
+      ],
+      "additionalProperties": false
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "출력 또는 앱 root 기준 상대 경로. 실제 구현에서 절대 경로·..·역슬래시·드라이브·symlink·root 이탈을 추가 검증한다."
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "required": [
+          "role",
+          "path",
+          "sha256"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "note": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "run_id",
+    "parent_run_id",
+    "stage",
+    "execution_mode",
+    "replay_backend",
+    "team_parity_integrated",
+    "team_contract_validated",
+    "baseline_integrity_verified",
+    "source",
+    "baseline",
+    "image",
+    "required_conditions",
+    "conditions",
+    "overall_status",
+    "gate",
+    "artifacts",
+    "note"
+  ],
+  "additionalProperties": false
+}

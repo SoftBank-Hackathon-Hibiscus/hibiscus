@@ -1,0 +1,265 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PremortemRunManifestV1",
+  "description": "김주영 모듈 내부 계약 구현안 v1. 팀 공통 test_result 계약이 아니다.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^(?!\\.{1,2}$)[A-Za-z0-9._-]{1,64}$"
+    },
+    "parent_run_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^(?!\\.{1,2}$)[A-Za-z0-9._-]{1,64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "stage": {
+      "enum": [
+        "pretest",
+        "retest"
+      ],
+      "type": "string"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "execution_mode": {
+      "enum": [
+        "fixture",
+        "real"
+      ],
+      "type": "string"
+    },
+    "replay_backend": {
+      "enum": [
+        "reference",
+        "parity"
+      ],
+      "type": "string"
+    },
+    "source": {
+      "type": "object",
+      "properties": {
+        "commit": {
+          "type": "string"
+        },
+        "tree_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "excludes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "commit",
+        "tree_sha256",
+        "excludes"
+      ],
+      "additionalProperties": false
+    },
+    "baseline": {
+      "type": "object",
+      "properties": {
+        "session_path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "출력 또는 앱 root 기준 상대 경로. 실제 구현에서 절대 경로·..·역슬래시·드라이브·symlink·root 이탈을 추가 검증한다."
+        },
+        "session_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "noise_path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "출력 또는 앱 root 기준 상대 경로. 실제 구현에서 절대 경로·..·역슬래시·드라이브·symlink·root 이탈을 추가 검증한다."
+        },
+        "noise_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "session_path",
+        "session_sha256",
+        "noise_path",
+        "noise_sha256"
+      ],
+      "additionalProperties": false
+    },
+    "image": {
+      "type": "object",
+      "properties": {
+        "reference": {
+          "type": "string"
+        },
+        "local_image_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "registry_digest": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "registry_link_verified": {
+          "type": "boolean"
+        },
+        "source_build_link_verified": {
+          "type": "boolean"
+        },
+        "platform": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "reference",
+        "local_image_id",
+        "registry_digest",
+        "registry_link_verified",
+        "source_build_link_verified",
+        "platform"
+      ],
+      "additionalProperties": false
+    },
+    "settings": {
+      "type": "object",
+      "properties": {
+        "profile": {
+          "enum": [
+            "core",
+            "extended"
+          ],
+          "type": "string"
+        },
+        "required_conditions": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "none",
+              "restart",
+              "replace",
+              "replicas",
+              "remote_verify"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "fault_after": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "uniqueItems": true
+        },
+        "storage_mode": {
+          "enum": [
+            "ephemeral",
+            "persistent_mount",
+            "external_db"
+          ],
+          "type": "string"
+        },
+        "baseline_integrity_verified": {
+          "type": "boolean"
+        },
+        "seed_descriptor": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "empty",
+                "demo_fixture",
+                "external_test_fixture"
+              ]
+            },
+            "reference": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "비밀값이 아닌 fixture 식별자 또는 안전한 상대 경로"
+            },
+            "sha256": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "mode",
+            "reference",
+            "sha256"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "profile",
+        "required_conditions",
+        "fault_after",
+        "storage_mode",
+        "baseline_integrity_verified",
+        "seed_descriptor"
+      ],
+      "additionalProperties": false
+    },
+    "note": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "run_id",
+    "parent_run_id",
+    "stage",
+    "created_at",
+    "execution_mode",
+    "replay_backend",
+    "source",
+    "baseline",
+    "image",
+    "settings",
+    "note"
+  ],
+  "additionalProperties": false
+}

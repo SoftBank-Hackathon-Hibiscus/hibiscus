@@ -1,0 +1,397 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PremortemAnalysisRecordV1",
+  "description": "김주영 모듈 내부 계약 구현안 v1. 팀 공통 test_result 계약이 아니다.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^(?!\\.{1,2}$)[A-Za-z0-9._-]{1,64}$"
+    },
+    "provider": {
+      "enum": [
+        "fixture",
+        "supplied_json",
+        "recorded_live",
+        "anthropic_messages",
+        "openai_responses",
+        "team"
+      ],
+      "type": "string"
+    },
+    "model": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "status": {
+      "enum": [
+        "succeeded",
+        "refused",
+        "incomplete",
+        "invalid",
+        "error"
+      ],
+      "type": "string"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "duration_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "input_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "source_tree_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "usage": {
+      "type": "object",
+      "properties": {
+        "input_tokens": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "output_tokens": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cost": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "currency": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "input_tokens",
+        "output_tokens",
+        "cost",
+        "currency"
+      ],
+      "additionalProperties": false
+    },
+    "output": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/analysis_output"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "error_code": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "request_id": {
+      "description": "provider가 준 요청 식별값. 없거나 호출하지 않았으면 null.",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "stop_category": {
+      "description": "거절(refusal)일 때 provider가 준 분류. 그 밖에는 null.",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "recorded_from": {
+      "description": "provider가 recorded_live일 때만 채운다. 이번 실행에서 재생한 원래 live 호출 기록. 이번 실행에서는 AI를 호출하지 않았다.",
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "run_id": {
+              "type": "string",
+              "pattern": "^(?!\\.{1,2}$)[A-Za-z0-9._-]{1,64}$"
+            },
+            "analysis_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "provider": {
+              "enum": [
+                "anthropic_messages",
+                "openai_responses",
+                "team"
+              ],
+              "type": "string"
+            },
+            "model": {
+              "type": "string",
+              "minLength": 1
+            },
+            "created_at": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          "required": [
+            "run_id",
+            "analysis_sha256",
+            "provider",
+            "model",
+            "created_at"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "run_id",
+    "provider",
+    "model",
+    "status",
+    "created_at",
+    "duration_ms",
+    "input_sha256",
+    "source_tree_sha256",
+    "usage",
+    "output",
+    "error_code"
+  ],
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "provider": {
+            "const": "recorded_live"
+          }
+        },
+        "required": [
+          "provider"
+        ]
+      },
+      "then": {
+        "required": [
+          "recorded_from"
+        ],
+        "properties": {
+          "recorded_from": {
+            "type": "object"
+          },
+          "usage": {
+            "properties": {
+              "input_tokens": {
+                "type": "null"
+              },
+              "output_tokens": {
+                "type": "null"
+              },
+              "cost": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "recorded_from": {
+            "type": "null"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "analysis_output": {
+      "type": "object",
+      "properties": {
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "finding_id": {
+                "type": "string",
+                "pattern": "^(?!\\.{1,2}$)[A-Za-z0-9._-]{1,64}$"
+              },
+              "category": {
+                "enum": [
+                  "state_loss",
+                  "session_loss",
+                  "binding",
+                  "env_config",
+                  "application_logic",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              "observed_fact": {
+                "type": "string"
+              },
+              "root_cause_hypothesis": {
+                "type": "string"
+              },
+              "confidence": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "evidence_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1
+              },
+              "source_locations": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 500,
+                      "description": "출력 또는 앱 root 기준 상대 경로. 실제 구현에서 절대 경로·..·역슬래시·드라이브·symlink·root 이탈을 추가 검증한다."
+                    },
+                    "line_start": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "line_end": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "line_start",
+                    "line_end"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "finding_id",
+              "category",
+              "observed_fact",
+              "root_cause_hypothesis",
+              "confidence",
+              "evidence_ids",
+              "source_locations"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "edits": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500,
+                "description": "출력 또는 앱 root 기준 상대 경로. 실제 구현에서 절대 경로·..·역슬래시·드라이브·symlink·root 이탈을 추가 검증한다."
+              },
+              "before": {
+                "type": "string",
+                "minLength": 1
+              },
+              "after": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path",
+              "before",
+              "after"
+            ],
+            "additionalProperties": false
+          },
+          "maxItems": 5
+        },
+        "requirement_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "manual_actions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "findings",
+        "edits",
+        "requirement_ids",
+        "manual_actions"
+      ],
+      "additionalProperties": false
+    }
+  }
+}
