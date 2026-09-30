@@ -6,8 +6,9 @@
 2. 컨테이너를 새로 만들어 같은 요청을 **재생**한다. 이때 "요청 10번 뒤 `docker restart`" 같은 **조건**을 끼워 넣고, 응답이 기록과 같은지 비교한다.
 3. 결과를 JSON 한 파일로 낸다: 조건별 일치 수, 불일치 목록, 그리고 원인 후보가 되는 **사실**(컨테이너 안의 sqlite 파일, 업로드 폴더 등).
 
-환경 실행기 연결, 컨테이너 교체 시험, 정책 담당자에게 원본 결과를 전달하는 방법은
-[INTEGRATION.md](INTEGRATION.md)에 있습니다. 기존 `test`/`verify` 명령과 결과 JSON 형식은 그대로입니다.
+회의에서 정한 기본 연결, 오류 처리, 교체 시험은 [MEETING.md](MEETING.md)에 있습니다.
+이전 어댑터 실험 및 원본 인계 파일 제안은 [INTEGRATION.md](INTEGRATION.md)에 보존합니다.
+기본 결과 JSON의 최상위 키와 타입은 유지하며, 실행 상태·해시는 별도 진단 파일에 저장합니다.
 
 ---
 
@@ -238,3 +239,6 @@ examples/demo_result.json    데모 실제 결과 (sample-app, none + restart)
 scripts/                     simulate_usage.py, demo.sh, demo.ps1
 tests/                       python -m unittest
 ```
+
+## 결과를 읽는 방법
+일치 수가 전체 요청 수보다 적으면 기록과 다른 응답이 있다는 뜻입니다. 의도적으로 결함을 넣은 샘플에서는 실패 판정이 정상적인 검출 결과일 수 있습니다.

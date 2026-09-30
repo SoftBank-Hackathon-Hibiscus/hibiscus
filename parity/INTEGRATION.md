@@ -1,5 +1,11 @@
 # 기록·재생 모듈 연결 안내
 
+> **현재 기본 연결은 [MEETING.md](MEETING.md)를 따릅니다.** 회의 합의 및 PR #8에 따라
+> 주영님이 빌드·최초 실행한 컨테이너를 윤선님의 `test`가 검사하고,
+> `conditions.py`의 `replace`가 `docker_ops.recreate`를 호출합니다.
+> 아래 1~3절은 PR #6에서 수행한 **별도 어댑터 실험 기록**입니다.
+> 주소를 바꾸는 어댑터나 외부 `ConditionRunner`는 현재 기본 CLI 연결의 필수 조건이 아닙니다.
+
 이 문서는 2026-10-01 연결 작업의 구현 범위와 실제 실행 결과를 설명합니다.
 기존 원본 결과는 [examples/demo_result.json](examples/demo_result.json)입니다.
 그 파일의 `passed: false`는 결함을 넣은 방명록을 차단한 정상 판정입니다.
@@ -127,7 +133,8 @@ python -m parity.handoff --result result.json --run-id <실행ID> --app guestboo
 
 ## 5. 아직 팀과 확인할 부분
 
-- 환경 모듈의 기본 loader에 `ParityReplayPort` 연결, 실제 AI 수정 후 같은 기준 파일로 재실행.
+- 기본 CLI 경로: 새 이미지로 실행한 컨테이너 전달 방식을 주영님과 확인하고 같은 기준으로 재검사.
+- 별도 어댑터 경로를 사용할 경우에만 `ParityReplayPort` loader 연결이 필요함.
 - 정책 측 normalizer와 입력 파일 연결. 실패 데모는 차단 경로부터 확인하고, 서명 경로는 실제 통과 샘플로 별도 확인.
 - 빌드·레지스트리 담당자가 `run_id`, 앱 SHA, 레지스트리 digest를 전달하고 실제 이미지와 결속하는 방식.
 - 루트 `contracts/`에 최종 공통 JSON Schema 반영. 현재 main의 실제 정책 스키마는 `policy/contracts/`에 있음.
