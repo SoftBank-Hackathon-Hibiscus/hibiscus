@@ -75,7 +75,7 @@
             "items": {
               "type": "string"
             },
-            "description": "이 해결 조건을 충족하면 배포 가능한 위치. 이 조건을 요구한 규칙들을 뺀 나머지 걸린 규칙만으로 좁힌 targets. 나머지 규칙끼리 충돌하면 빈 배열"
+            "description": "이 해결 조건과 연결된 정책 위반이 해소됐다고 가정했을 때, 나머지 정책 제약상 가능한 배포 위치. 한 규칙이 해결 조건을 여러 개 요구하면 모두 충족해야 한다. 수정 후에는 새 버전으로 전체 정책을 다시 평가한다. 나머지 제약끼리 충돌하면 빈 배열"
           }
         },
         "required": [
@@ -131,7 +131,7 @@
         "additionalProperties": false,
         "description": "평가된 규칙 하나의 결과"
       },
-      "description": "평가된 모든 규칙과 결과 (block 이후 규칙은 없음)"
+      "description": "평가된 모든 규칙과 결과. block 이후에도 해결 조건과 대상 제한을 모으기 위해 끝까지 평가하며, 그때 걸린 규칙은 matched_after_block 으로 기록 (halt 규칙이 걸리면 즉시 멈춤)"
     },
     "plan_hash": {
       "type": "string",

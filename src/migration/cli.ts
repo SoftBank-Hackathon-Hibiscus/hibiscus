@@ -37,11 +37,14 @@ runCli(() => {
     throw new CliError(`앱 폴더를 읽을 수 없습니다: ${src} (${(e as Error).message})`);
   }
   const { files, sinceFound } = filterSince(all, args.since);
+  if (!sinceFound) {
+    // 잘못된 이름은 검사 범위를 조용히 바꾸므로 실행기와 똑같이 오류로 멈춘다
+    throw new CliError(`--since 로 준 마이그레이션 이름을 찾을 수 없습니다: ${args.since} (목록: ${all.map((f) => f.name).join(", ") || "없음"})`);
+  }
   const report = MigrationReportSchema.parse(analyzeMigrations(files));
   writeJson(outPath, report);
 
   console.log(`[migration] src=${src}${args.since ? ` since=${args.since}` : ""}`);
-  if (!sinceFound) console.log(`  ! --since 이름을 마이그레이션 목록에서 찾지 못했습니다: ${args.since} (이름보다 뒤인 파일만 검사함)`);
   console.log(`  files    : ${files.length}${all.length !== files.length ? ` (전체 ${all.length})` : ""}`);
   console.log(`  destructive: ${report.destructive}  backward_compatible: ${report.backward_compatible}`);
   for (const f of report.findings) console.log(`  - ${f.kind} ${f.evidence}: ${f.statement}`);

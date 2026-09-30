@@ -100,7 +100,7 @@ default:
 
 **효과(`then`)**: `decision: block | needs_approval`, `targets: [...]`, `failover_allowed: bool`, `requires: [...]`. 적지 않은 키는 바꾸지 않는다.
 
-**해결 조건(`requires`)**: "이 규칙에 걸린 이유를 없애려면 무엇이 필요한가". `{ id: managed_db, hint: "SQLite를 PostgreSQL로 전환" }`처럼 설명과 함께 적거나, `managed_db`처럼 id만 적는다. 걸린 규칙들의 해결 조건이 `plan.json`의 `requires`에 `[{ id, hint?, rule_id, allowed_targets }]`로 모여(id로 합치고 정렬) 다음 단계(AI 수정 파트)가 무엇을 고쳐야 하는지 읽는다. `allowed_targets`는 "이 해결 조건을 충족하면 배포 가능한 위치"다. 그 조건을 요구한 규칙들을 뺀 나머지 걸린 규칙만으로 `default.targets`에서 다시 좁힌 결과라 조건마다 다를 수 있다 (엔진이 규칙 평가를 한 번 더 도는 방식이며 decision에는 영향이 없다). 예를 들어 SQLite만 걸린 앱의 managed_db는 [local, cloud_run]이고, SQLite와 개인정보가 함께 걸린 앱의 managed_db는 개인정보 규칙이 남으므로 [local]이다. hint에는 위치를 적지 않는다 (결정 설명이 위치를 따로 붙인다).
+**해결 조건(`requires`)**: "이 규칙에 걸린 이유를 없애려면 무엇이 필요한가". `{ id: managed_db, hint: "SQLite를 PostgreSQL로 전환" }`처럼 설명과 함께 적거나, `managed_db`처럼 id만 적는다. 걸린 규칙들의 해결 조건이 `plan.json`의 `requires`에 `[{ id, hint?, rule_id, allowed_targets }]`로 모여(id로 합치고 정렬) 다음 단계(AI 수정 파트)가 무엇을 고쳐야 하는지 읽는다. `allowed_targets`는 이 해결 조건과 연결된 정책 위반이 해소됐다고 가정했을 때 나머지 정책 제약상 가능한 배포 위치다. 한 규칙이 해결 조건을 여러 개 요구하면 모두 충족해야 하고, 수정 후에는 새 버전으로 전체 정책을 다시 평가한다. 계산은 그 조건을 요구한 규칙들을 뺀 나머지 걸린 규칙만으로 `default.targets`에서 다시 좁힌 결과라 조건마다 다를 수 있다 (엔진이 규칙 평가를 한 번 더 도는 방식이며 decision에는 영향이 없다). 예를 들어 SQLite만 걸린 앱의 managed_db는 [local, cloud_run]이고, SQLite와 개인정보가 함께 걸린 앱의 managed_db는 개인정보 규칙이 남으므로 [local]이다. hint에는 위치를 적지 않는다 (결정 설명이 위치를 따로 붙인다).
 
 **규정집 문구의 다국어**: `reason`과 `requires[].hint`는 문자열(한국어) 또는 `{ ko: "...", ja: "..." }`로 적는다. 결정서의 `reason`/`hint`는 ko 문자열 그대로이고, ja가 있으면 선택 필드 `reason_i18n` / `hint_i18n`에 `{ ja }`가 함께 실린다. 결정 설명은 lang에 맞는 문구를 쓰고 없으면 ko로 대체한다. 기본 규칙(R1~R7, RB1~RB4, default)에는 일본어 문구가 채워져 있다. reason과 hint에는 digest 전체나 `cloud_run` 같은 내부 이름을 넣지 않는다 (설명이 위치와 버전을 따로 붙이고, 혹시 들어 있어도 digest는 앞 12자로 줄인다). `block`이나 `needs_approval`을 내는 규칙은 해결 조건이 최소 1개 있어야 하며 없으면 정책 로드 에러다. 엔진이 교집합 공백으로 스스로 차단할 때는 `resolve_target_conflict`를 넣는다.
 
@@ -156,8 +156,9 @@ R5의 이유: 클라우드에서는 인스턴스가 교체되면 SQLite 파일�
 
 - `decision`: `allow` | `block` | `needs_approval`
 - `targets`: `block`이면 빈 배열
-- `rules`: 평가된 모든 규칙과 결과. `result`는 `matched` / `not_matched` / `matched_after_block`(차단이 정해진 뒤 걸림)
-- `requires`: 해결 조건 `[{ id, hint?, hint_i18n?, rule_id, allowed_targets }]`. 걸린 규칙들의 것을 id로 합치고 정렬. `allowed_targets`는 이 조건을 충족하면 배포 가능한 위치(그 조건을 요구한 규칙을 뺀 나머지 규칙으로 좁힌 결과). `block`/`needs_approval`이면 항상 1개 이상. 하나도 없으면 필드가 없다. 예: `[{ "id": "managed_db", "hint": "SQLite를 PostgreSQL로 전환", "hint_i18n": { "ja": "SQLiteをPostgreSQLへ移行" }, "rule_id": "R5", "allowed_targets": ["local", "cloud_run"] }]`
+- `rules`: 평가된 모든 규칙과 결과. block 이후에도 해결 조건과 대상 제한을 모으기 위해 끝까지 평가하며, 그때 걸린 규칙은 `matched_after_block`으로 기록한다 (halt 규칙이 걸리면 즉시 멈춤). `result`는 `matched` / `not_matched` / `matched_after_block`
+- 출력 파일(plan, rollback_plan, decisions.jsonl)의 객체는 모두 strict라 추가 필드가 있으면 zod와 JSON Schema 모두 거부한다. 입력 파일은 모르는 필드를 허용한다.
+- `requires`: 해결 조건 `[{ id, hint?, hint_i18n?, rule_id, allowed_targets }]`. 걸린 규칙들의 것을 id로 합치고 정렬. `allowed_targets`는 이 조건과 연결된 위반이 해소됐다고 가정했을 때 나머지 제약상 가능한 배포 위치(그 조건을 요구한 규칙을 뺀 나머지 규칙으로 좁힌 결과). 수정 후에는 새 버전으로 전체 정책을 다시 평가한다. `block`/`needs_approval`이면 항상 1개 이상. 하나도 없으면 필드가 없다. 예: `[{ "id": "managed_db", "hint": "SQLite를 PostgreSQL로 전환", "hint_i18n": { "ja": "SQLiteをPostgreSQLへ移行" }, "rule_id": "R5", "allowed_targets": ["local", "cloud_run"] }]`
 - `rules[].reason_i18n`: 정책에 ja 문구가 있을 때만 `{ ja }`가 함께 실린다
 - `rules[].reason`은 `matched`와 `matched_after_block`일 때만 있다
 - `plan_hash`: `{ inputs: {test, pii}, policy, plan(해시 제외) }`를 키 정렬 JSON으로 만든 뒤 sha256. 입력·정책·결과 중 하나라도 바뀌면 달라진다
@@ -213,8 +214,10 @@ npx tsx src/stage.ts --src samples/signup-contact --test fixtures/01-allow/test_
 
 ## 해결 조건
 
-- **재생 불일치 요청을 고친 뒤 다시 테스트** — 충족하면 배포 가능: 온프레(사내) (규칙 R1, `fix_tests`)
-- **SQLite를 PostgreSQL로 전환** — 충족하면 배포 가능: 온프레(사내) 및 Cloud Run (규칙 R5, `managed_db`)
+- **재생 불일치 요청을 고친 뒤 다시 테스트** — 이 위반을 해소하면 나머지 제약상 가능한 배포 위치: 온프레(사내) (규칙 R1, `fix_tests`)
+- **SQLite를 PostgreSQL로 전환** — 이 위반을 해소하면 나머지 제약상 가능한 배포 위치: 온프레(사내) 및 Cloud Run (규칙 R5, `managed_db`)
+
+한 규칙이 해결 조건을 여러 개 요구하면 모두 충족해야 합니다. 수정 후에는 새 버전으로 전체 정책을 다시 평가합니다.
 
 ---
 

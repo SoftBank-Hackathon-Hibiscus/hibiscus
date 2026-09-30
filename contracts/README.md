@@ -37,7 +37,7 @@ flowchart LR
 | [`rollback_plan.json`](#rollback_planjson--rollbackplan) | 롤백 판단 모듈 (`src/rollback/cli.ts`, 이 저장소) | 배포 파트 (실제 롤백 실행) |
 | [`decisions.jsonl`](#decisionsjsonl--decisionlog) | 정책 엔진과 롤백 판단 모듈 (이 저장소) | 발표·감사·디버깅 (사람), 필요하면 대시보드 |
 
-입력 파일(test_result, pii, rollback_request)은 모르는 필드가 있어도 받는다(무시). 출력 파일(plan, rollback_plan, decisions.jsonl)은 적힌 필드만 있다.
+입력 파일(test_result, pii, rollback_request)은 모르는 필드가 있어도 받는다(무시). 출력 파일(plan, rollback_plan, decisions.jsonl)은 적힌 필드만 있고, 추가 필드가 있으면 zod 와 JSON Schema 모두 거부한다.
 
 ## 정책이 읽는 필드
 
@@ -89,7 +89,7 @@ flowchart LR
    - `plan.requires` / `rollback_plan.requires` (선택, `[{ id, hint?, rule_id, allowed_targets }]`): 해결 조건. 걸린 규칙들이 "이 규칙을 피하려면 무엇이 필요한가" 를 적은 것을 id 로 합치고 id 순으로 정렬한 것 (예: `[{ "id": "managed_db", "hint": "SQLite를 PostgreSQL로 전환", "rule_id": "R5", "allowed_targets": ["local", "cloud_run"] }]`). AI 수정 파트가 `id` 로 분기하고 `hint` 를 사람에게 보여준다. `decision` 이 `block` / `needs_approval` / `manual_recovery` 면 항상 1개 이상 있다. 없으면 필드 자체가 없다. 엔진이 스스로 차단할 때(허용 대상 교집합 공백)는 `resolve_target_conflict` / `manual_target_recovery` 가 들어간다.
    - `rules[].result` 는 `matched` / `not_matched` / `matched_after_block` 세 가지다. `block`(롤백은 `manual_recovery`)이 나와도 엔진은 끝까지 평가해 targets 좁히기와 해결 조건을 모두 모으므로, 차단 뒤에 걸린 규칙은 `matched_after_block` 으로 온다. 이 규칙들은 decision 을 바꾸지 않았다. 유일한 예외는 `halt: true` 인 규칙(현재 R2 입력 불일치)과 롤백의 `keep_stable`: 그 자리에서 멈추고 뒤 규칙은 목록에 없다.
    - `rules[].reason_i18n` / `requires[].hint_i18n` (선택, `{ ja }`): 규정집(policy.yaml)의 reason 과 hint 를 `{ ko, ja }` 로 적으면 결정서의 `reason` / `hint` 는 ko 문자열 그대로이고, 일본어 문구가 이 필드에 함께 실린다. 정책에 ja 가 없으면 필드 자체가 없다. 결정 설명(`src/explain.ts --lang ja`)은 이 필드를 쓰고, 없으면 ko 로 대체한다. 결정 로직에는 영향이 없다.
-   - **`allowed_targets` 는 "이 해결 조건을 충족하면 배포 가능한 위치" 다.** 그 조건을 요구한 규칙들을 뺀 나머지 걸린 규칙만으로 `default.targets`(롤백은 `stable.targets`)에서 좁힌 결과이며, 해결 조건마다 다를 수 있다. 예: SQLite 만 걸린 앱의 `managed_db` 는 `["local", "cloud_run"]`(고치면 클라우드도 가능), SQLite + 개인정보 앱의 `managed_db` 는 `["local"]`(개인정보 규칙이 남으므로 관리형 DB 도 온프레여야 하며 Cloud SQL 로 옮기면 안 된다). 나머지 규칙끼리 충돌하면 빈 배열이다. decision 에는 영향이 없다.
+   - **`allowed_targets` 는 이 해결 조건과 연결된 정책 위반이 해소됐다고 가정했을 때, 나머지 정책 제약상 가능한 배포 위치다.** 한 규칙이 해결 조건을 여러 개 요구하면 모두 충족해야 하고, 수정 후에는 새 버전으로 전체 정책을 다시 평가한다 (이 값은 예고이지 보증이 아니다). 계산은 그 조건을 요구한 규칙들을 뺀 나머지 걸린 규칙만으로 `default.targets`(롤백은 `stable.targets`)에서 좁힌 결과이며, 해결 조건마다 다를 수 있다. 예: SQLite 만 걸린 앱의 `managed_db` 는 `["local", "cloud_run"]`(고치면 클라우드도 가능), SQLite + 개인정보 앱의 `managed_db` 는 `["local"]`(개인정보 규칙이 남으므로 관리형 DB 도 온프레여야 하며 Cloud SQL 로 옮기면 안 된다). 나머지 규칙끼리 충돌하면 빈 배열이다. decision 에는 영향이 없다.
    - `decisions.jsonl` 의 `kind` (`deploy` | `rollback`): 같은 파일에 두 종류의 결정이 섞이므로 반드시 `kind` 로 구분해서 읽을 것. 두 종류는 필드 구성이 다르다.
    - `rollback_plan.serve_digest` (string | null): 결정 후 트래픽을 받아야 할 버전. `keep_stable`/`rollback` 이면 `stable.digest`, `manual_recovery` 면 null. 배포 파트는 `decision` 이 아니라 이 값으로 라우팅 대상을 정하면 된다.
    - `rollback_request.candidate` / `stable`: 예전 이름 `current` / `previous` 는 받지 않는다. candidate = 이번 배포 후보(문제가 난 버전), stable = 이번 배포 전 정상 버전.
@@ -213,8 +213,8 @@ flowchart LR
 | `requires[].hint_i18n` | object | 선택 | hint 의 다른 언어 문구. 정책에 ja 가 적혀 있을 때만 |
 | `requires[].hint_i18n.ja` | string | 필수 | 일본어 문구 |
 | `requires[].rule_id` | string | 필수 | 이 조건을 처음 요구한 규칙 id |
-| `requires[].allowed_targets` | string[] | 필수 | 이 해결 조건을 충족하면 배포 가능한 위치. 이 조건을 요구한 규칙들을 뺀 나머지 걸린 규칙만으로 좁힌 targets. 나머지 규칙끼리 충돌하면 빈 배열 |
-| `rules` | object[] | 필수 | 평가된 모든 규칙과 결과 (block 이후 규칙은 없음) |
+| `requires[].allowed_targets` | string[] | 필수 | 이 해결 조건과 연결된 정책 위반이 해소됐다고 가정했을 때, 나머지 정책 제약상 가능한 배포 위치. 한 규칙이 해결 조건을 여러 개 요구하면 모두 충족해야 한다. 수정 후에는 새 버전으로 전체 정책을 다시 평가한다. 나머지 제약끼리 충돌하면 빈 배열 |
+| `rules` | object[] | 필수 | 평가된 모든 규칙과 결과. block 이후에도 해결 조건과 대상 제한을 모으기 위해 끝까지 평가하며, 그때 걸린 규칙은 matched_after_block 으로 기록 (halt 규칙이 걸리면 즉시 멈춤) |
 | `rules[].id` | string | 필수 | policy.yaml 의 규칙 id. 'default' 는 기본 정책이 쓰였다는 뜻 |
 | `rules[].result` | "matched" \| "not_matched" \| "matched_after_block" | 필수 | 규칙이 걸렸는지. matched_after_block = 이미 block(롤백은 manual_recovery)이 정해진 뒤 걸림: decision 은 못 바꾸고 targets 좁히기와 해결 조건만 반영됨 |
 | `rules[].reason` | string | 선택 | 걸린 규칙의 사람이 읽는 근거 (ko). matched / matched_after_block 일 때만 있다 |
@@ -350,8 +350,8 @@ flowchart LR
 | `requires[].hint_i18n` | object | 선택 | hint 의 다른 언어 문구. 정책에 ja 가 적혀 있을 때만 |
 | `requires[].hint_i18n.ja` | string | 필수 | 일본어 문구 |
 | `requires[].rule_id` | string | 필수 | 이 조건을 처음 요구한 규칙 id |
-| `requires[].allowed_targets` | string[] | 필수 | 이 해결 조건을 충족하면 배포 가능한 위치. 이 조건을 요구한 규칙들을 뺀 나머지 걸린 규칙만으로 좁힌 targets. 나머지 규칙끼리 충돌하면 빈 배열 |
-| `rules` | object[] | 필수 | 평가된 롤백 규칙과 결과 |
+| `requires[].allowed_targets` | string[] | 필수 | 이 해결 조건과 연결된 정책 위반이 해소됐다고 가정했을 때, 나머지 정책 제약상 가능한 배포 위치. 한 규칙이 해결 조건을 여러 개 요구하면 모두 충족해야 한다. 수정 후에는 새 버전으로 전체 정책을 다시 평가한다. 나머지 제약끼리 충돌하면 빈 배열 |
+| `rules` | object[] | 필수 | 평가된 모든 롤백 규칙과 결과. manual_recovery 이후에도 해결 조건과 대상 제한을 모으기 위해 끝까지 평가하며, 그때 걸린 규칙은 matched_after_block 으로 기록 (keep_stable 과 halt 규칙은 즉시 멈춤) |
 | `rules[].id` | string | 필수 | policy.yaml 의 규칙 id. 'default' 는 기본 정책이 쓰였다는 뜻 |
 | `rules[].result` | "matched" \| "not_matched" \| "matched_after_block" | 필수 | 규칙이 걸렸는지. matched_after_block = 이미 block(롤백은 manual_recovery)이 정해진 뒤 걸림: decision 은 못 바꾸고 targets 좁히기와 해결 조건만 반영됨 |
 | `rules[].reason` | string | 선택 | 걸린 규칙의 사람이 읽는 근거 (ko). matched / matched_after_block 일 때만 있다 |

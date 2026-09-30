@@ -42,6 +42,7 @@ interface Strings {
   afterNote: string;
   requiresHeading: string;
   requiresNone: string;
+  requiresNote: string;
   requirementLine: (what: string, targets: string, ruleId: string, id: string) => string;
   footer: (planHash: string, digestLabel: string, digest: string) => string;
   imageLabel: string;
@@ -83,7 +84,8 @@ const STRINGS: Record<Lang, Strings> = {
     afterNote: "결정은 바꾸지 않았고, 배포 위치와 해결 조건에만 반영됐습니다.",
     requiresHeading: "## 해결 조건",
     requiresNone: "해결할 것이 없습니다.",
-    requirementLine: (what, t, ruleId, id) => `- **${what}** — 충족하면 배포 가능: ${t} (규칙 ${ruleId}, \`${id}\`)`,
+    requiresNote: "한 규칙이 해결 조건을 여러 개 요구하면 모두 충족해야 합니다. 수정 후에는 새 버전으로 전체 정책을 다시 평가합니다.",
+    requirementLine: (what, t, ruleId, id) => `- **${what}** — 이 위반을 해소하면 나머지 제약상 가능한 배포 위치: ${t} (규칙 ${ruleId}, \`${id}\`)`,
     footer: (hash, label, digest) => `결정 지문 \`${hash}\` · ${label} \`${digest}\``,
     imageLabel: "이미지",
     serveLabel: "트래픽을 받을 버전",
@@ -122,7 +124,8 @@ const STRINGS: Record<Lang, Strings> = {
     afterNote: "判定は変えず、デプロイ先と解決条件にのみ反映されました。",
     requiresHeading: "## 解決条件",
     requiresNone: "対応が必要な事項はありません。",
-    requirementLine: (what, t, ruleId, id) => `- **${what}** — 対応後のデプロイ先：${t}（ルール${ruleId}、\`${id}\`）`,
+    requiresNote: "1つのルールが複数の解決条件を要求する場合はすべて満たす必要があります。修正後は新しいバージョンでポリシー全体を再評価します。",
+    requirementLine: (what, t, ruleId, id) => `- **${what}** — この違反を解消した場合に残りの制約上可能なデプロイ先：${t}（ルール${ruleId}、\`${id}\`）`,
     footer: (hash, label, digest) => `判定ハッシュ\`${hash}\`・${label}\`${digest}\``,
     imageLabel: "イメージ",
     serveLabel: "トラフィックを受けるバージョン",
@@ -199,6 +202,7 @@ function requiresSection(requires: readonly PlanRequirement[] | undefined, s: St
     const what = shortenDigests(pick(r.hint, r.hint_i18n, lang) || r.id);
     lines.push(s.requirementLine(what, targetsText(r.allowed_targets, s), r.rule_id, r.id));
   }
+  lines.push("", s.requiresNote);
   return lines;
 }
 

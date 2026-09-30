@@ -342,7 +342,7 @@ export type Policy = z.infer<typeof PolicySchema>;
 // 출력: plan.json
 // ---------------------------------------------------------------------------
 export const RuleResultSchema = z
-  .object({
+  .strictObject({
     id: z.string().describe("policy.yaml 의 규칙 id. 'default' 는 기본 정책이 쓰였다는 뜻"),
     result: z
       .enum(["matched", "not_matched", "matched_after_block"])
@@ -364,7 +364,9 @@ export const PlanRequirementSchema = z
     rule_id: z.string().describe("이 조건을 처음 요구한 규칙 id"),
     allowed_targets: z
       .array(z.string())
-      .describe("이 해결 조건을 충족하면 배포 가능한 위치. 이 조건을 요구한 규칙들을 뺀 나머지 걸린 규칙만으로 좁힌 targets. 나머지 규칙끼리 충돌하면 빈 배열"),
+      .describe(
+        "이 해결 조건과 연결된 정책 위반이 해소됐다고 가정했을 때, 나머지 정책 제약상 가능한 배포 위치. 한 규칙이 해결 조건을 여러 개 요구하면 모두 충족해야 한다. 수정 후에는 새 버전으로 전체 정책을 다시 평가한다. 나머지 제약끼리 충돌하면 빈 배열",
+      ),
   })
   .describe("해결 조건 하나");
 export type PlanRequirement = z.infer<typeof PlanRequirementSchema>;
@@ -374,7 +376,7 @@ const PlanRequiresSchema = z
   .describe("걸린 규칙들의 해결 조건 (id 로 합치고 id 순 정렬). block / needs_approval / manual_recovery 면 최소 1개. 하나도 없으면 필드가 없다");
 
 export const PlanSchema = z
-  .object({
+  .strictObject({
     run_id: RunIdSchema,
     app: z.string().describe("앱 이름 (test_result 에서 그대로)"),
     digest: DigestSchema,
@@ -382,7 +384,7 @@ export const PlanSchema = z
     targets: z.array(z.string()).describe("배포할 대상 (known_targets 의 부분집합). block 이면 빈 배열"),
     failover_allowed: z.boolean().describe("온프레 장애 시 Cloud Run 으로 전환해도 되는지. local 과 cloud_run 이 모두 있을 때만 true 가능"),
     requires: PlanRequiresSchema,
-    rules: z.array(RuleResultSchema).describe("평가된 모든 규칙과 결과 (block 이후 규칙은 없음)"),
+    rules: z.array(RuleResultSchema).describe("평가된 모든 규칙과 결과. block 이후에도 해결 조건과 대상 제한을 모으기 위해 끝까지 평가하며, 그때 걸린 규칙은 matched_after_block 으로 기록 (halt 규칙이 걸리면 즉시 멈춤)"),
     plan_hash: PlanHashSchema,
   })
   .describe("정책 엔진이 만드는 배포 계획. 서명 파트와 배포 파트가 읽는다");
@@ -414,7 +416,7 @@ export const RollbackRequestSchema = z
 export type RollbackRequest = z.infer<typeof RollbackRequestSchema>;
 
 export const RollbackPlanSchema = z
-  .object({
+  .strictObject({
     run_id: RunIdSchema,
     app: z.string().describe("앱 이름 (요청에서 그대로)"),
     decision: RollbackDecisionSchema,
@@ -422,7 +424,7 @@ export const RollbackPlanSchema = z
     targets: z.array(z.string()).describe("keep_stable / rollback → stable.targets 에서 좁힌 결과, manual_recovery → []"),
     failover_allowed: z.boolean().describe("온프레 장애 시 Cloud Run 전환 허용 여부. false 가 이기고, local 과 cloud_run 이 모두 있을 때만 true 가능"),
     requires: PlanRequiresSchema,
-    rules: z.array(RuleResultSchema).describe("평가된 롤백 규칙과 결과"),
+    rules: z.array(RuleResultSchema).describe("평가된 모든 롤백 규칙과 결과. manual_recovery 이후에도 해결 조건과 대상 제한을 모으기 위해 끝까지 평가하며, 그때 걸린 규칙은 matched_after_block 으로 기록 (keep_stable 과 halt 규칙은 즉시 멈춤)"),
     plan_hash: PlanHashSchema,
   })
   .describe("롤백 판단 모듈이 만드는 롤백 계획. 배포 파트가 실행한다");
@@ -435,7 +437,7 @@ const LogTimeSchema = z.string().describe("결정 시각 (ISO 8601). CLI 가 붙
 const RuleIdsSchema = z.array(z.string()).describe("걸린 규칙 id (plan 의 rules 중 matched 와 matched_after_block, 구분 없이 id 만)");
 
 export const DeployDecisionLogSchema = z
-  .object({
+  .strictObject({
     kind: z.literal("deploy").describe("배포 결정"),
     time: LogTimeSchema,
     run_id: RunIdSchema,
@@ -447,7 +449,7 @@ export const DeployDecisionLogSchema = z
   })
   .describe("배포 결정 한 건");
 export const RollbackDecisionLogSchema = z
-  .object({
+  .strictObject({
     kind: z.literal("rollback").describe("롤백 결정"),
     time: LogTimeSchema,
     run_id: RunIdSchema,

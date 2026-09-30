@@ -201,11 +201,16 @@ describe("migration CLI", () => {
     expect(report.findings).toHaveLength(3);
   });
 
-  it("--since 와 없는 이름 안내", () => {
+  it("--since 이름을 못 찾으면 실행기와 똑같이 오류 종료 (종료 코드 1, 파일 안 씀)", () => {
     const out = join(tmp(), "m.json");
     const r = runCli(["--src", sample("migration-prisma"), "--since", "20240115000000_typo", "--out", out]);
-    expect(r.code).toBe(0);
-    expect(r.stdout).toContain("찾지 못했습니다");
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("20240115000000_typo");
+    expect(r.stderr).toContain("20240101000000_init"); // 실제 목록을 보여준다
+    expect(existsSync(out)).toBe(false);
+
+    const ok = runCli(["--src", sample("migration-prisma"), "--since", "20240101000000_init", "--out", out]);
+    expect(ok.code, ok.stderr).toBe(0);
     expect(JSON.parse(readFileSync(out, "utf8")).findings).toHaveLength(1);
   });
 

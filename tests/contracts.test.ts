@@ -137,7 +137,8 @@ describe("contracts/ 폴더가 최신인지", () => {
     expect(readme).toContain("| `requires[].hint` | string | 선택 |");
     expect(readme).toContain("| `requires[].rule_id` | string | 필수 |");
     expect(readme).toContain("| `requires[].allowed_targets` | string[] | 필수 |");
-    expect(readme).toContain("`allowed_targets` 는 \"이 해결 조건을 충족하면 배포 가능한 위치\" 다");
+    expect(readme).toContain("`allowed_targets` 는 이 해결 조건과 연결된 정책 위반이 해소됐다고 가정했을 때, 나머지 정책 제약상 가능한 배포 위치다");
+    expect(readme).toContain("추가 필드가 있으면 zod 와 JSON Schema 모두 거부한다");
     expect(readme).toContain("**kind = \"rollback\"**");
     expect(readme).toContain("팀과 합의가 필요한 점");
     expect(readme).toContain("```mermaid");
