@@ -1,0 +1,37 @@
+{
+  "fixture": true,
+  "note": "합성 예시 응답이다. 실제 AI 호출 결과가 아니다. binding 샘플을 실행했을 때 나오는 증거 ID와 소스 줄에 맞춰 손으로 썼다.",
+  "output": {
+    "findings": [
+      {
+        "finding_id": "binding-1",
+        "category": "binding",
+        "observed_fact": "게시 포트로는 health 응답이 없고 컨테이너 안 루프백 health는 성공했다. 컨테이너 안에서 8080 포트는 127.0.0.1에서만 LISTEN 중이다.",
+        "root_cause_hypothesis": "HOST 기본값이 127.0.0.1이라 컨테이너 밖에서 들어온 요청을 받지 못하는 것으로 보인다. 0.0.0.0으로 바꾼 뒤 같은 기록으로 다시 확인해야 한다.",
+        "confidence": 0.9,
+        "evidence_ids": [
+          "none-readiness-na",
+          "none-listen_socket-na"
+        ],
+        "source_locations": [
+          {
+            "path": "app.py",
+            "line_start": 7,
+            "line_end": 7
+          }
+        ]
+      }
+    ],
+    "edits": [
+      {
+        "path": "app.py",
+        "before": "HOST = \"127.0.0.1\"",
+        "after": "HOST = \"0.0.0.0\""
+      }
+    ],
+    "requirement_ids": [],
+    "manual_actions": [
+      "사람이 patch.diff를 보고 원본에 반영할지 정한다."
+    ]
+  }
+}
