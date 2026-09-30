@@ -15,7 +15,7 @@
  *                        targets 좁히기와 해결 조건만 반영되며 "matched_after_block" 으로 기록된다.
  *                        halt: true 인 규칙이 걸리면 그 즉시 멈춘다.
  *   - targets          : stable.targets 에서 시작해 좁히기만 된다. 교집합이 비면 manual_recovery.
- *   - failover_allowed : false 가 이긴다. 최종 targets 에 local 과 cloud_run 이 모두 있을 때만 true 가능.
+ *   - failover_allowed : false 가 이긴다. 최종 targets 에 onprem 과 cloud_run 이 모두 있을 때만 true 가능.
  *   - 아무 규칙도 decision 을 정하지 않으면 rollback 섹션의 default 를 쓴다 (rules 에 "default" 로 기록).
  *   - requires(해결 조건) 는 배포 엔진과 같이 id 로 합치고 정렬한다. manual_recovery 면 최소 1개 (규칙이 적거나 엔진이 넣음).
  *     allowed_targets 는 그 조건을 요구한 규칙을 뺀 나머지 걸린 규칙만으로 stable.targets 에서 좁힌 결과.

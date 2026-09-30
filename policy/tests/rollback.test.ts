@@ -46,24 +46,24 @@ describe("decideRollback: 판단 규칙 5가지", () => {
     ]);
   });
 
-  it("온프레에 개인정보 쓰임 (RB3) → rollback, targets [local], failover false", () => {
+  it("온프레에 개인정보 쓰임 (RB3) → rollback, targets [onprem], failover false", () => {
     const plan = decideRollback(loadRequest("03-pii-onprem"), policy);
 
     expect(plan.decision).toBe("rollback");
     expect(plan.serve_digest).toBe(STABLE);
-    expect(plan.targets).toEqual(["local"]);
+    expect(plan.targets).toEqual(["onprem"]);
     expect(plan.failover_allowed).toBe(false);
     expect(matchedIds(plan)).toEqual(["RB3", "default"]);
     expect(plan.rules.find((r) => r.id === "RB3")?.reason).toContain("온프레 안에서만");
   });
 
-  it("컷오버 후 쓰기 없음 (RB4) → stable 의 대상 그대로 [local, cloud_run], failover true", () => {
+  it("컷오버 후 쓰기 없음 (RB4) → stable 의 대상 그대로 [onprem, cloud_run], failover true", () => {
     const req = loadRequest("04-no-writes");
     const plan = decideRollback(req, policy);
 
     expect(plan.decision).toBe("rollback");
     expect(plan.serve_digest).toBe(STABLE);
-    expect(plan.targets).toEqual(["local", "cloud_run"]);
+    expect(plan.targets).toEqual(["onprem", "cloud_run"]);
     expect(plan.failover_allowed).toBe(true);
     expect(matchedIds(plan)).toEqual(["RB4"]);
     expect(plan.rules.find((r) => r.id === "RB4")?.reason).toBe("컷오버 후 쓰기 없음: 정상 버전의 대상 그대로 복귀");
@@ -83,7 +83,7 @@ describe("decideRollback: 판단 규칙 5가지", () => {
 });
 
 describe("decideRollback: 병합", () => {
-  it("개인정보 + DB 비호환이 동시에 있으면 manual_recovery 가 이기고, RB3 는 뒤에서 좁혀 allowed_targets = [local]", () => {
+  it("개인정보 + DB 비호환이 동시에 있으면 manual_recovery 가 이기고, RB3 는 뒤에서 좁혀 allowed_targets = [onprem]", () => {
     const plan = decideRollback(loadRequest("06-pii-and-db-incompatible"), policy);
     expect(plan.decision).toBe("manual_recovery");
     expect(plan.serve_digest).toBeNull();
@@ -91,7 +91,7 @@ describe("decideRollback: 병합", () => {
     expect(plan.failover_allowed).toBe(false);
     expect(matchedIds(plan)).toEqual(["RB2"]);
     expect(plan.rules.find((r) => r.id === "RB3")?.result).toBe("matched_after_block");
-    expect(plan.requires).toMatchObject([{ id: "manual_db_recovery", hint: "DB 스키마를 이전 버전과 호환되게 복구한 뒤 롤백", rule_id: "RB2", allowed_targets: ["local"] }]);
+    expect(plan.requires).toMatchObject([{ id: "manual_db_recovery", hint: "DB 스키마를 이전 버전과 호환되게 복구한 뒤 롤백", rule_id: "RB2", allowed_targets: ["onprem"] }]);
   });
 
   it("keep_stable 은 halt 와 무관하게 즉시 멈추고, manual_recovery 규칙에 halt 를 붙이면 그 자리에서 멈춘다", () => {
@@ -102,7 +102,7 @@ describe("decideRollback: 병합", () => {
     });
     const plan = decideRollback(loadRequest("06-pii-and-db-incompatible"), halted);
     expect(plan.rules.map((r) => r.id)).toEqual(["RB1", "RB2"]);
-    expect(plan.requires?.[0]?.allowed_targets).toEqual(["local", "cloud_run"]); // RB3 가 평가되지 않아 좁혀지지 않음
+    expect(plan.requires?.[0]?.allowed_targets).toEqual(["onprem", "cloud_run"]); // RB3 가 평가되지 않아 좁혀지지 않음
 
     const before = decideRollback(loadRequest("01-before-cutover"), policy);
     expect(before.rules.map((r) => r.id)).toEqual(["RB1"]);
@@ -120,11 +120,11 @@ describe("decideRollback: 병합", () => {
     expect(matchedIds(plan)).toEqual(["RB3", "RB2"]);
   });
 
-  it("개인정보 + 쓰기 없음 → rollback 이되 대상은 좁혀진 [local], failover false (RB4 가 되돌리지 못함)", () => {
+  it("개인정보 + 쓰기 없음 → rollback 이되 대상은 좁혀진 [onprem], failover false (RB4 가 되돌리지 못함)", () => {
     const req = { ...loadRequest("03-pii-onprem"), state: { writes_since_cutover: false, pii_written_onprem: true, db_migration_backward_compatible: true } };
     const plan = decideRollback(req, policy);
     expect(plan.decision).toBe("rollback");
-    expect(plan.targets).toEqual(["local"]);
+    expect(plan.targets).toEqual(["onprem"]);
     expect(plan.failover_allowed).toBe(false);
     expect(matchedIds(plan)).toEqual(["RB3", "RB4"]);
   });
@@ -139,16 +139,16 @@ describe("decideRollback: 병합", () => {
   });
 
   it("좁히기는 stable 의 대상에서 시작한다 (규칙이 그 밖의 대상을 넣을 수 없다)", () => {
-    const req = { ...loadRequest("05-default"), stable: { digest: STABLE, targets: ["local"] } };
+    const req = { ...loadRequest("05-default"), stable: { digest: STABLE, targets: ["onprem"] } };
     const custom = PolicySchema.parse({
       ...policy,
       rollback: {
-        rules: [{ id: "X", if: { path: "request.stage", eq: "after_cutover" }, then: { targets: ["local", "cloud_run"] }, reason: "x" }],
+        rules: [{ id: "X", if: { path: "request.stage", eq: "after_cutover" }, then: { targets: ["onprem", "cloud_run"] }, reason: "x" }],
         default: { decision: "rollback", failover_allowed: true, reason: "d" },
       },
     });
     const plan = decideRollback(req, custom);
-    expect(plan.targets).toEqual(["local"]);
+    expect(plan.targets).toEqual(["onprem"]);
     expect(plan.failover_allowed).toBe(false); // cloud_run 이 없으므로
   });
 
@@ -164,14 +164,14 @@ describe("decideRollback: 병합", () => {
       },
     });
     const plan = decideRollback(loadRequest("05-default"), custom);
-    expect(plan.targets).toEqual(["local", "cloud_run"]);
+    expect(plan.targets).toEqual(["onprem", "cloud_run"]);
     expect(plan.failover_allowed).toBe(false);
   });
 
   it("default.failover_allowed 가 false 면 대상이 둘 다 있어도 false", () => {
     const custom = PolicySchema.parse({ ...policy, rollback: { ...policy.rollback!, default: { ...policy.rollback!.default, failover_allowed: false } } });
     const plan = decideRollback(loadRequest("04-no-writes"), custom);
-    expect(plan.targets).toEqual(["local", "cloud_run"]);
+    expect(plan.targets).toEqual(["onprem", "cloud_run"]);
     expect(plan.failover_allowed).toBe(false);
   });
 });
@@ -181,7 +181,7 @@ describe("decideRollback: 해결 조건 (requires)", () => {
     const plan = decideRollback(loadRequest("02-db-incompatible"), policy);
     expect(plan.decision).toBe("manual_recovery");
     // manual_recovery 라 targets 는 비지만, 해결 조건은 정상 버전의 대상(stable.targets) 안에서 충족해야 한다
-    expect(plan.requires).toMatchObject([{ id: "manual_db_recovery", hint: "DB 스키마를 이전 버전과 호환되게 복구한 뒤 롤백", rule_id: "RB2", allowed_targets: ["local", "cloud_run"] }]);
+    expect(plan.requires).toMatchObject([{ id: "manual_db_recovery", hint: "DB 스키마를 이전 버전과 호환되게 복구한 뒤 롤백", rule_id: "RB2", allowed_targets: ["onprem", "cloud_run"] }]);
   });
 
   it("rollback / keep_stable 이면 해결 조건이 없다", () => {
@@ -253,12 +253,20 @@ describe("decideRollback: 결정성과 스키마", () => {
     const result = PolicySchema.safeParse({
       ...policy,
       rollback: {
-        rules: [{ id: "RB9", if: { path: "request.stage", eq: "after_cutover" }, then: { targets: ["onprem"] }, reason: "x" }],
+        rules: [{ id: "RB9", if: { path: "request.stage", eq: "after_cutover" }, then: { targets: ["local"] }, reason: "x" }],
         default: { decision: "rollback", failover_allowed: true },
       },
     });
     expect(result.success).toBe(false);
-    if (!result.success) expect(result.error.issues.map((i) => i.message)).toContain("알 수 없는 배포 대상: onprem (롤백 규칙 RB9)");
+    if (!result.success) expect(result.error.issues.map((i) => i.message)).toContain("알 수 없는 배포 대상: local (롤백 규칙 RB9)");
+  });
+
+  it("옛 이름 local 이 든 롤백 요청은 알 수 없는 배포 대상으로 거부된다", () => {
+    const req = loadRequest("05-default");
+    const oldStable = { ...req, stable: { ...req.stable, targets: ["local", "cloud_run"] } };
+    expect(() => decideRollback(oldStable, policy)).toThrow("알 수 없는 배포 대상: local (rollback_request.stable.targets)");
+    const oldCandidate = { ...req, candidate: { ...req.candidate, targets: ["local"] } };
+    expect(() => decideRollback(oldCandidate, policy)).toThrow("알 수 없는 배포 대상: local (rollback_request.candidate.targets)");
   });
 
   it("결정 기록은 kind 로 배포/롤백을 구분한다", () => {

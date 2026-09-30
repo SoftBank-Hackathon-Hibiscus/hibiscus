@@ -2,7 +2,7 @@
   "run_id": "r-013",
   "app": "todo",
   "stage": "after_cutover",
-  "candidate": { "digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444", "targets": ["local", "cloud_run"] },
-  "stable": { "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000", "targets": ["local", "cloud_run"] },
+  "candidate": { "digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444", "targets": ["onprem", "cloud_run"] },
+  "stable": { "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000", "targets": ["onprem", "cloud_run"] },
   "state": { "writes_since_cutover": false, "pii_written_onprem": false, "db_migration_backward_compatible": true }
 }

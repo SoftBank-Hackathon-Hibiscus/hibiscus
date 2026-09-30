@@ -44,14 +44,16 @@
 #   known_targets    : 이 정책이 아는 배포 대상 전체. 규칙과 default 의 targets 에 여기 없는
 #                      값(오타 등)이 있으면 정책을 불러올 때 에러로 멈춘다.
 #   failover_allowed : false 가 이긴다. 한 번 false 면 뒤 규칙이 true 로 되돌릴 수 없다.
-#                      최종 targets 에 local 과 cloud_run 이 모두 없으면 항상 false.
+#                      최종 targets 에 onprem 과 cloud_run 이 모두 없으면 항상 false.
 #
 # 아래 규칙은 가상의 플랫폼팀 정책 예시다.
 
 version: 1
 
 # 배포 파트가 실제로 다룰 수 있는 대상. 여기 없는 이름은 정책 로드 단계에서 거부된다.
-known_targets: [local, cloud_run]
+#   onprem    = 자체 서버(온프레). 옛 이름 local 은 받지 않는다 (local 은 개발자 기기를 뜻하며 배포 대상이 아니다)
+#   cloud_run = Cloud Run
+known_targets: [onprem, cloud_run]
 
 rules:
   - id: R1
@@ -100,10 +102,10 @@ rules:
       ja: "確信のない個人情報候補（{table}.{column}、{kind}）：{evidence}"
 
   - id: R4
-    description: 개인정보 후보가 하나라도 있으면 온프레(local)에만 배포하고 클라우드 failover 를 막는다
+    description: 개인정보 후보가 하나라도 있으면 온프레(onprem)에만 배포하고 클라우드 failover 를 막는다
     if: { some: pii.pii }
     then:
-      targets: [local]
+      targets: [onprem]
       failover_allowed: false
     reason:
       ko: "개인정보({column}, {kind}) 발견: {evidence}"
@@ -113,7 +115,7 @@ rules:
     description: SQLite 는 로컬 파일이라 클라우드에서 인스턴스가 교체되면 데이터가 사라진다. 관리형 DB 로 바꾸기 전까지 온프레만
     if: { path: test.facts.db, eq: sqlite }
     then:
-      targets: [local]
+      targets: [onprem]
       requires:
         - id: managed_db
           hint:
@@ -136,7 +138,7 @@ rules:
             - { path: "@", matches: "\\.log$" }
             - { path: "@", matches: "\\.(db|sqlite|sqlite3)$", flags: i }
     then:
-      targets: [local]
+      targets: [onprem]
       requires:
         - id: object_storage
           hint:
@@ -167,7 +169,7 @@ rules:
       ja: "破壊的マイグレーション{kind}：{statement}（{evidence}）"
 
 default:
-  targets: [local, cloud_run]
+  targets: [onprem, cloud_run]
   failover_allowed: true
   reason:
     ko: "개인정보 없음, 테스트 통과: 하이브리드 배포 허용"
@@ -188,7 +190,7 @@ default:
 #                      manual_recovery 는 끝까지 평가한다 (뒤 규칙은 targets 좁히기와 requires 만 반영,
 #                      matched_after_block 으로 기록). halt: true 인 규칙이 걸리면 즉시 멈춘다.
 #   targets          : stable.targets 에서 시작해 좁히기만 된다. 교집합이 비면 manual_recovery.
-#   failover_allowed : false 가 이긴다. 최종 targets 에 local 과 cloud_run 이 모두 있을 때만 true 가능.
+#   failover_allowed : false 가 이긴다. 최종 targets 에 onprem 과 cloud_run 이 모두 있을 때만 true 가능.
 #   어떤 규칙도 decision 을 정하지 않으면 default 를 쓴다.
 # 결과의 serve_digest 는 결정 후 트래픽을 받을 버전: keep_stable / rollback → stable, manual_recovery → null
 # ---------------------------------------------------------------------------
@@ -219,7 +221,7 @@ rollback:
     - id: RB3
       description: 온프레에 개인정보가 쓰였으면 클라우드로 되돌리지 않는다 (데이터가 클라우드로 흘러가면 안 됨)
       if: { path: request.state.pii_written_onprem, eq: true }
-      then: { targets: [local], failover_allowed: false }
+      then: { targets: [onprem], failover_allowed: false }
       reason:
         ko: "온프레에 개인정보가 쓰임: Cloud Run으로 되돌리지 않고 온프레 안에서만 정상 버전으로 복구"
         ja: "オンプレに個人情報が書き込まれた：Cloud Runには戻さず、オンプレ内でのみ正常稼働中のバージョンへ復旧"

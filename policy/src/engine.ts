@@ -285,7 +285,7 @@ export function sha256Hex(text: string): string {
  * failover 는 "온프레 장애 시 Cloud Run 으로 전환" 을 뜻하므로
  * 이 두 대상이 모두 배포 대상일 때만 의미가 있다.
  */
-export const FAILOVER_REQUIRED_TARGETS = ["local", "cloud_run"] as const;
+export const FAILOVER_REQUIRED_TARGETS = ["onprem", "cloud_run"] as const;
 
 /**
  * 결정 기록(decisions.jsonl)의 rule_ids: 걸린 규칙 전부 (matched 와 matched_after_block), 구분 없이 id 만.
@@ -308,7 +308,7 @@ export function intersect(current: readonly string[], next: readonly string[]): 
  *   지금까지의 targets 와 교집합만 남긴다. 그래서 default 에 없는 대상은 어떤 규칙으로도
  *   추가할 수 없고, 한 번 제외된 대상은 뒤 규칙이 다시 넣을 수 없다. 교집합이 비면 block.
  * - failover_allowed 는 false 가 이긴다: 한 번 false 면 뒤에서 true 로 못 돌린다.
- *   최종 targets 에 local 과 cloud_run 이 모두 없으면 항상 false.
+ *   최종 targets 에 onprem 과 cloud_run 이 모두 없으면 항상 false.
  * - block 이 나와도 끝까지 평가한다. 뒤 규칙은 decision 을 바꾸지 못하고 targets 좁히기와
  *   해결 조건 수집만 반영되며 rules 에 "matched_after_block" 으로 기록된다.
  *   halt: true 인 규칙이 걸리면 그 즉시 멈춘다 (이후 규칙은 rules 에 실리지 않는다).

@@ -30,13 +30,13 @@ function runCli(script: string, args: string[]) {
 const stageCli = (args: string[]) => runCli("src/stage.ts", args);
 
 describe("보안 단계 실행기 CLI", () => {
-  it("samples/signup-contact + 통과한 test_result → 종료 코드 0, targets [local], pii.json 과 plan.json 생성", () => {
+  it("samples/signup-contact + 통과한 test_result → 종료 코드 0, targets [onprem], pii.json 과 plan.json 생성", () => {
     const out = tmp();
     const r = stageCli(["--src", sample("signup-contact"), "--test", fixtureTest("01-allow"), "--policy", POLICY, "--out-dir", out, "--log", join(out, "decisions.jsonl")]);
 
     expect(r.code, r.stderr).toBe(0);
     expect(r.stdout).toContain("decision : allow");
-    expect(r.stdout).toContain("targets  : local");
+    expect(r.stdout).toContain("targets  : onprem");
 
     const pii = PiiReportSchema.parse(JSON.parse(readFileSync(join(out, "pii.json"), "utf8")));
     const plan = PlanSchema.parse(JSON.parse(readFileSync(join(out, "plan.json"), "utf8")));
@@ -44,7 +44,7 @@ describe("보안 단계 실행기 CLI", () => {
     expect(pii.pii.map((p) => `${p.table}.${p.column}`)).toEqual(["users.contact"]);
     expect(plan.run_id).toBe("r-001");
     expect(plan.decision).toBe("allow");
-    expect(plan.targets).toEqual(["local"]);
+    expect(plan.targets).toEqual(["onprem"]);
     expect(plan.failover_allowed).toBe(false);
 
     const log = readFileSync(join(out, "decisions.jsonl"), "utf8").trim().split("\n");
@@ -102,7 +102,7 @@ describe("보안 단계 실행기 CLI", () => {
     expect(lines).toHaveLength(1);
     const summary = JSON.parse(lines[0]!);
     expect(Object.keys(summary).sort()).toEqual(["decision", "failover_allowed", "pii_path", "plan_path", "requires", "run_id", "targets"]);
-    expect(summary).toMatchObject({ run_id: "r-001", decision: "allow", targets: ["local"], failover_allowed: false, requires: [] });
+    expect(summary).toMatchObject({ run_id: "r-001", decision: "allow", targets: ["onprem"], failover_allowed: false, requires: [] });
     expect(existsSync(summary.plan_path)).toBe(true);
     expect(existsSync(summary.pii_path)).toBe(true);
   });

@@ -36,7 +36,7 @@
     },
     "failover_allowed": {
       "type": "boolean",
-      "description": "온프레 장애 시 Cloud Run 으로 전환해도 되는지. local 과 cloud_run 이 모두 있을 때만 true 가능"
+      "description": "온프레 장애 시 Cloud Run 으로 전환해도 되는지. onprem 과 cloud_run 이 모두 있을 때만 true 가능"
     },
     "requires": {
       "description": "걸린 규칙들의 해결 조건 (id 로 합치고 id 순 정렬). block / needs_approval / manual_recovery 면 최소 1개. 하나도 없으면 필드가 없다",

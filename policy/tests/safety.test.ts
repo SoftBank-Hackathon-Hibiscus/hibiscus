@@ -96,7 +96,7 @@ describe("롤백 요청의 targets 는 known_targets 안에 있어야 한다", (
   const req = RollbackRequestSchema.parse(readJson("fixtures/rollback/05-default.json"));
 
   it("모르는 대상이 있으면 에러 (어느 쪽인지 표시)", () => {
-    const badStable = { ...req, stable: { ...req.stable, targets: ["local", "aws"] } };
+    const badStable = { ...req, stable: { ...req.stable, targets: ["onprem", "aws"] } };
     expect(() => assertKnownTargets(badStable, policy)).toThrow("알 수 없는 배포 대상: aws (rollback_request.stable.targets)");
     expect(() => decideRollback(badStable, policy)).toThrow("aws");
     const badCandidate = { ...req, candidate: { ...req.candidate, targets: ["edge"] } };

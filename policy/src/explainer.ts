@@ -13,7 +13,7 @@ export interface ExplainOptions {
   lang?: Lang;
 }
 
-const LOCAL = "local";
+const ONPREM = "onprem";
 const CLOUD = "cloud_run";
 const SHORT = 12;
 
@@ -29,7 +29,7 @@ interface Strings {
     on: string;
     offForbidden: string;
     offNoCloud: string;
-    offNoLocal: string;
+    offNoOnprem: string;
     offBlocked: string;
     offManual: string;
   };
@@ -52,7 +52,7 @@ interface Strings {
 
 const STRINGS: Record<Lang, Strings> = {
   ko: {
-    targetName: { [LOCAL]: "온프레(사내)", [CLOUD]: "Cloud Run" },
+    targetName: { [ONPREM]: "온프레(사내)", [CLOUD]: "Cloud Run" },
     and: " 및 ",
     none: "없음 (남은 규칙끼리 충돌)",
     deployTitle: (app, runId) => `# 배포 결정: ${app} (실행 ${runId})`,
@@ -71,7 +71,7 @@ const STRINGS: Record<Lang, Strings> = {
       on: "온프레가 멈추면 Cloud Run으로 트래픽을 넘깁니다.",
       offForbidden: "온프레가 멈춰도 Cloud Run으로 넘기지 않습니다 (정책이 금지).",
       offNoCloud: "온프레가 멈춰도 Cloud Run으로 넘기지 않습니다. Cloud Run에는 배포하지 않기 때문입니다.",
-      offNoLocal: "Cloud Run에만 배포하므로 온프레 장애 시 전환은 해당 없습니다.",
+      offNoOnprem: "Cloud Run에만 배포하므로 온프레 장애 시 전환은 해당 없습니다.",
       offBlocked: "배포하지 않으므로 장애 시 전환도 없습니다.",
       offManual: "수동 복구 전까지 장애 시 전환은 없습니다.",
     },
@@ -92,7 +92,7 @@ const STRINGS: Record<Lang, Strings> = {
     serveNone: "미정",
   },
   ja: {
-    targetName: { [LOCAL]: "オンプレ（社内）", [CLOUD]: "Cloud Run" },
+    targetName: { [ONPREM]: "オンプレ（社内）", [CLOUD]: "Cloud Run" },
     and: "と",
     none: "なし（残りのルール同士が衝突）",
     deployTitle: (app, runId) => `# デプロイ判定：${app}（実行${runId}）`,
@@ -111,7 +111,7 @@ const STRINGS: Record<Lang, Strings> = {
       on: "オンプレが停止した場合、Cloud Runにトラフィックを切り替えます。",
       offForbidden: "オンプレが停止してもCloud Runには切り替えません（ポリシーで禁止）。",
       offNoCloud: "オンプレが停止してもCloud Runには切り替えません。Cloud Runにはデプロイしないためです。",
-      offNoLocal: "Cloud Runのみにデプロイするため、オンプレ障害時の切り替えは対象外です。",
+      offNoOnprem: "Cloud Runのみにデプロイするため、オンプレ障害時の切り替えは対象外です。",
       offBlocked: "デプロイしないため、障害時の切り替えもありません。",
       offManual: "手動復旧までは障害時の切り替えはありません。",
     },
@@ -164,10 +164,10 @@ function failoverText(decision: string, targets: readonly string[], failoverAllo
   if (decision === "block") return s.failover.offBlocked;
   if (manual) return s.failover.offManual;
   if (failoverAllowed) return s.failover.on;
-  const hasLocal = targets.includes(LOCAL);
+  const hasOnprem = targets.includes(ONPREM);
   const hasCloud = targets.includes(CLOUD);
-  if (hasLocal && !hasCloud) return s.failover.offNoCloud;
-  if (!hasLocal && hasCloud) return s.failover.offNoLocal;
+  if (hasOnprem && !hasCloud) return s.failover.offNoCloud;
+  if (!hasOnprem && hasCloud) return s.failover.offNoOnprem;
   return s.failover.offForbidden;
 }
 

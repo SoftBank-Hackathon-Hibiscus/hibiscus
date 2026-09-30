@@ -45,7 +45,7 @@ describe("test_result.facts: 정책이 읽는 키만 타입 고정", () => {
     expect(parsed.facts).toEqual({ db: "postgres", framework: "express", node: 24 });
     // 정책 결정에도 영향이 없다
     const pii = PiiReportSchema.parse({ run_id: parsed.run_id, pii: [] });
-    expect(decide(parsed, pii, policy).targets).toEqual(["local", "cloud_run"]);
+    expect(decide(parsed, pii, policy).targets).toEqual(["onprem", "cloud_run"]);
   });
 
   it("보존된 추가 키는 plan_hash 에 반영된다 (입력이 다르면 해시도 다르다)", () => {
@@ -95,7 +95,7 @@ describe("정책 경고: 모르는 facts 키", () => {
     const custom = withRule({
       id: "X9",
       if: { path: "test.facts.framework", eq: "express" },
-      then: { targets: ["local"] },
+      then: { targets: ["onprem"] },
       reason: { ko: "express 는 온프레", ja: "expressはオンプレ {test.facts.framework}" },
     });
     const warnings = lintPolicy(custom);
@@ -117,9 +117,9 @@ describe("정책 경고: 모르는 facts 키", () => {
   });
 
   it("경고는 로드를 막지 않는다 (결정은 그대로 된다)", () => {
-    const custom = withRule({ id: "X9", if: { path: "test.facts.framework", eq: "express" }, then: { targets: ["local"] }, reason: "x" });
+    const custom = withRule({ id: "X9", if: { path: "test.facts.framework", eq: "express" }, then: { targets: ["onprem"] }, reason: "x" });
     const test = TestResultSchema.parse(withFacts({ db: "postgres", framework: "express" }));
     const plan = decide(test, PiiReportSchema.parse({ run_id: test.run_id, pii: [] }), custom);
-    expect(plan.targets).toEqual(["local"]);
+    expect(plan.targets).toEqual(["onprem"]);
   });
 });

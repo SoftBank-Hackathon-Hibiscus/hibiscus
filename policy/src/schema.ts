@@ -279,7 +279,7 @@ export const RollbackPolicySchema = z.strictObject({
   rules: z.array(RollbackRuleSchema),
   default: z.strictObject({
     decision: RollbackDecisionSchema,
-    /** 어떤 규칙도 failover 를 정하지 않았을 때의 값 (최종 targets 에 local·cloud_run 이 모두 있어야 유효) */
+    /** 어떤 규칙도 failover 를 정하지 않았을 때의 값 (최종 targets 에 onprem·cloud_run 이 모두 있어야 유효) */
     failover_allowed: z.boolean(),
     reason: I18nTextSchema.default({ ko: "기본 롤백 정책 적용" }),
   }),
@@ -382,7 +382,7 @@ export const PlanSchema = z
     digest: DigestSchema,
     decision: DecisionSchema,
     targets: z.array(z.string()).describe("배포할 대상 (known_targets 의 부분집합). block 이면 빈 배열"),
-    failover_allowed: z.boolean().describe("온프레 장애 시 Cloud Run 으로 전환해도 되는지. local 과 cloud_run 이 모두 있을 때만 true 가능"),
+    failover_allowed: z.boolean().describe("온프레 장애 시 Cloud Run 으로 전환해도 되는지. onprem 과 cloud_run 이 모두 있을 때만 true 가능"),
     requires: PlanRequiresSchema,
     rules: z.array(RuleResultSchema).describe("평가된 모든 규칙과 결과. block 이후에도 해결 조건과 대상 제한을 모으기 위해 끝까지 평가하며, 그때 걸린 규칙은 matched_after_block 으로 기록 (halt 규칙이 걸리면 즉시 멈춤)"),
     plan_hash: PlanHashSchema,
@@ -422,7 +422,7 @@ export const RollbackPlanSchema = z
     decision: RollbackDecisionSchema,
     serve_digest: DigestSchema.nullable().describe("결정 후 트래픽을 받아야 할 버전. keep_stable / rollback → stable.digest, manual_recovery → null"),
     targets: z.array(z.string()).describe("keep_stable / rollback → stable.targets 에서 좁힌 결과, manual_recovery → []"),
-    failover_allowed: z.boolean().describe("온프레 장애 시 Cloud Run 전환 허용 여부. false 가 이기고, local 과 cloud_run 이 모두 있을 때만 true 가능"),
+    failover_allowed: z.boolean().describe("온프레 장애 시 Cloud Run 전환 허용 여부. false 가 이기고, onprem 과 cloud_run 이 모두 있을 때만 true 가능"),
     requires: PlanRequiresSchema,
     rules: z.array(RuleResultSchema).describe("평가된 모든 롤백 규칙과 결과. manual_recovery 이후에도 해결 조건과 대상 제한을 모으기 위해 끝까지 평가하며, 그때 걸린 규칙은 matched_after_block 으로 기록 (keep_stable 과 halt 규칙은 즉시 멈춤)"),
     plan_hash: PlanHashSchema,

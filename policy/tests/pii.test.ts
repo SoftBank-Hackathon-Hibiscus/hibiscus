@@ -239,11 +239,11 @@ describe("끝에서 끝: 샘플 → pii.json → 정책 엔진", () => {
       match: { total: 10, matched: 10 },
     });
 
-  it("signup-contact → targets [local], failover 금지", async () => {
+  it("signup-contact → targets [onprem], failover 금지", async () => {
     const pii = PiiReportSchema.parse({ run_id: "r-e2e-1", pii: await heuristic("signup-contact") });
     const plan = decide(testResult("r-e2e-1"), pii, policy);
     expect(plan.decision).toBe("allow");
-    expect(plan.targets).toEqual(["local"]);
+    expect(plan.targets).toEqual(["onprem"]);
     expect(plan.failover_allowed).toBe(false);
     expect(plan.rules.find((r) => r.id === "R4")?.reason).toBe("개인정보(contact, phone) 발견: public/signup.html:6, src/routes/signup.js:6");
   });
@@ -252,23 +252,23 @@ describe("끝에서 끝: 샘플 → pii.json → 정책 엔진", () => {
     const pii = PiiReportSchema.parse({ run_id: "r-e2e-2", pii: await heuristic("ambiguous") });
     const plan = decide(testResult("r-e2e-2"), pii, policy);
     expect(plan.decision).toBe("needs_approval");
-    expect(plan.targets).toEqual(["local"]);
+    expect(plan.targets).toEqual(["onprem"]);
     expect(plan.rules.filter((r) => r.result === "matched").map((r) => r.id)).toEqual(["R3", "R4"]);
   });
 
-  it("ambiguous + 녹화 재생 → allow (사람 승인 없이 local 만)", async () => {
+  it("ambiguous + 녹화 재생 → allow (사람 승인 없이 onprem 만)", async () => {
     const recording = loadRecording(join(ROOT, "recordings", "ambiguous.json"));
     const classified = await new ReplayClassifier(new HeuristicClassifier(), recording).classify(extract(loadSources(sample("ambiguous"))));
     const pii = PiiReportSchema.parse({ run_id: "r-e2e-3", pii: classified });
     const plan = decide(testResult("r-e2e-3"), pii, policy);
     expect(plan.decision).toBe("allow");
-    expect(plan.targets).toEqual(["local"]);
+    expect(plan.targets).toEqual(["onprem"]);
   });
 
-  it("no-pii → allow, local + cloud_run", async () => {
+  it("no-pii → allow, onprem + cloud_run", async () => {
     const pii = PiiReportSchema.parse({ run_id: "r-e2e-4", pii: await heuristic("no-pii") });
     const plan = decide(testResult("r-e2e-4"), pii, policy);
     expect(plan.decision).toBe("allow");
-    expect(plan.targets).toEqual(["local", "cloud_run"]);
+    expect(plan.targets).toEqual(["onprem", "cloud_run"]);
   });
 });
