@@ -1,0 +1,8 @@
+{
+  "run_id": "r-014",
+  "app": "todo",
+  "stage": "after_cutover",
+  "candidate": { "digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555", "targets": ["local", "cloud_run"] },
+  "stable": { "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000", "targets": ["local", "cloud_run"] },
+  "state": { "writes_since_cutover": true, "pii_written_onprem": false, "db_migration_backward_compatible": true }
+}
