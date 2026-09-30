@@ -24,7 +24,8 @@ describe("decideRollback: 판단 규칙 5가지", () => {
     expect(plan.serve_digest).not.toBe(req.candidate.digest);
     expect(plan.targets).toEqual(req.stable.targets);
     expect(plan.failover_allowed).toBe(true);
-    expect(plan.rules).toEqual([{ id: "RB1", result: "matched", reason: `컷오버 전 실패: 정상 버전(${STABLE}) 유지, 롤백 불필요` }]);
+    expect(plan.rules).toMatchObject([{ id: "RB1", result: "matched", reason: "컷오버 전 실패: 정상 버전 유지, 롤백 불필요" }]);
+    expect(plan.rules[0]?.reason_i18n?.ja).toBe("カットオーバー前の失敗：正常稼働中のバージョンを維持、ロールバック不要");
     expect(() => RollbackPlanSchema.parse(plan)).not.toThrow();
   });
 
@@ -65,7 +66,7 @@ describe("decideRollback: 판단 규칙 5가지", () => {
     expect(plan.targets).toEqual(["local", "cloud_run"]);
     expect(plan.failover_allowed).toBe(true);
     expect(matchedIds(plan)).toEqual(["RB4"]);
-    expect(plan.rules.find((r) => r.id === "RB4")?.reason).toBe(`컷오버 후 쓰기 없음: 정상 버전(${STABLE})의 대상 그대로 복귀`);
+    expect(plan.rules.find((r) => r.id === "RB4")?.reason).toBe("컷오버 후 쓰기 없음: 정상 버전의 대상 그대로 복귀");
   });
 
   it("그 외 (컷오버 후 쓰기 있음, 문제 없음) → default: stable 로 복귀", () => {
@@ -90,14 +91,14 @@ describe("decideRollback: 병합", () => {
     expect(plan.failover_allowed).toBe(false);
     expect(matchedIds(plan)).toEqual(["RB2"]);
     expect(plan.rules.find((r) => r.id === "RB3")?.result).toBe("matched_after_block");
-    expect(plan.requires).toEqual([{ id: "manual_db_recovery", hint: "DB 스키마를 이전 버전과 호환되게 복구한 뒤 롤백", rule_id: "RB2", allowed_targets: ["local"] }]);
+    expect(plan.requires).toMatchObject([{ id: "manual_db_recovery", hint: "DB 스키마를 이전 버전과 호환되게 복구한 뒤 롤백", rule_id: "RB2", allowed_targets: ["local"] }]);
   });
 
   it("keep_stable 은 halt 와 무관하게 즉시 멈추고, manual_recovery 규칙에 halt 를 붙이면 그 자리에서 멈춘다", () => {
     const section = policy.rollback!;
     const halted = PolicySchema.parse({
       ...policy,
-      rollback: { ...section, rules: section.rules.map((r) => (r.id === "RB2" ? { ...r, halt: true } : r)) },
+      rollback: { ...section, rules: section.rules.map((r) => (r.id === "RB2" ? { ...r, halt: true } : r)), default: section.default },
     });
     const plan = decideRollback(loadRequest("06-pii-and-db-incompatible"), halted);
     expect(plan.rules.map((r) => r.id)).toEqual(["RB1", "RB2"]);
@@ -180,7 +181,7 @@ describe("decideRollback: 해결 조건 (requires)", () => {
     const plan = decideRollback(loadRequest("02-db-incompatible"), policy);
     expect(plan.decision).toBe("manual_recovery");
     // manual_recovery 라 targets 는 비지만, 해결 조건은 정상 버전의 대상(stable.targets) 안에서 충족해야 한다
-    expect(plan.requires).toEqual([{ id: "manual_db_recovery", hint: "DB 스키마를 이전 버전과 호환되게 복구한 뒤 롤백", rule_id: "RB2", allowed_targets: ["local", "cloud_run"] }]);
+    expect(plan.requires).toMatchObject([{ id: "manual_db_recovery", hint: "DB 스키마를 이전 버전과 호환되게 복구한 뒤 롤백", rule_id: "RB2", allowed_targets: ["local", "cloud_run"] }]);
   });
 
   it("rollback / keep_stable 이면 해결 조건이 없다", () => {

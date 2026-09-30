@@ -73,7 +73,6 @@ flowchart LR
 
 | 경로 | 읽는 규칙 | 용도 |
 |---|---|---|
-| `request.stable.digest` | RB1, RB3, RB4, default | reason |
 | `request.stage` | RB1 | 조건 |
 | `request.state.db_migration_backward_compatible` | RB2 | 조건 |
 | `request.state.pii_written_onprem` | RB3 | 조건 |
@@ -89,6 +88,7 @@ flowchart LR
 4. **최근 추가된 필드**
    - `plan.requires` / `rollback_plan.requires` (선택, `[{ id, hint?, rule_id, allowed_targets }]`): 해결 조건. 걸린 규칙들이 "이 규칙을 피하려면 무엇이 필요한가" 를 적은 것을 id 로 합치고 id 순으로 정렬한 것 (예: `[{ "id": "managed_db", "hint": "SQLite를 PostgreSQL로 전환 (allowed_targets 안의 환경에서)", "rule_id": "R5", "allowed_targets": ["local"] }]`). AI 수정 파트가 `id` 로 분기하고 `hint` 를 사람에게 보여준다. `decision` 이 `block` / `needs_approval` / `manual_recovery` 면 항상 1개 이상 있다. 없으면 필드 자체가 없다. 엔진이 스스로 차단할 때(허용 대상 교집합 공백)는 `resolve_target_conflict` / `manual_target_recovery` 가 들어간다.
    - `rules[].result` 는 `matched` / `not_matched` / `matched_after_block` 세 가지다. `block`(롤백은 `manual_recovery`)이 나와도 엔진은 끝까지 평가해 targets 좁히기와 해결 조건을 모두 모으므로, 차단 뒤에 걸린 규칙은 `matched_after_block` 으로 온다. 이 규칙들은 decision 을 바꾸지 않았다. 유일한 예외는 `halt: true` 인 규칙(현재 R2 입력 불일치)과 롤백의 `keep_stable`: 그 자리에서 멈추고 뒤 규칙은 목록에 없다.
+   - `rules[].reason_i18n` / `requires[].hint_i18n` (선택, `{ ja }`): 규정집(policy.yaml)의 reason 과 hint 를 `{ ko, ja }` 로 적으면 결정서의 `reason` / `hint` 는 ko 문자열 그대로이고, 일본어 문구가 이 필드에 함께 실린다. 정책에 ja 가 없으면 필드 자체가 없다. 결정 설명(`src/explain.ts --lang ja`)은 이 필드를 쓰고, 없으면 ko 로 대체한다. 결정 로직에는 영향이 없다.
    - **해결 조건은 `allowed_targets` 안에서만 충족한다.** `allowed_targets` 는 그 결정서의 최종 `targets` 이고, 차단이라 `targets` 가 비었으면 차단 전 마지막 `targets` 다 (고친 뒤 어디로 가게 될지). 예: `allowed_targets` 가 `["local"]` 이면 관리형 DB 도 온프레(예: 로컬 PostgreSQL)여야 하며 Cloud SQL 로 옮기면 안 된다. 개인정보 규칙(R4)이 온프레로 좁힌 앱의 데이터를 클라우드로 보내는 "수정" 이 되지 않게 하기 위해서다. 한 결정서의 모든 해결 조건은 같은 `allowed_targets` 를 가진다.
    - `decisions.jsonl` 의 `kind` (`deploy` | `rollback`): 같은 파일에 두 종류의 결정이 섞이므로 반드시 `kind` 로 구분해서 읽을 것. 두 종류는 필드 구성이 다르다.
    - `rollback_plan.serve_digest` (string | null): 결정 후 트래픽을 받아야 할 버전. `keep_stable`/`rollback` 이면 `stable.digest`, `manual_recovery` 면 null. 배포 파트는 `decision` 이 아니라 이 값으로 라우팅 대상을 정하면 된다.
@@ -209,13 +209,17 @@ flowchart LR
 | `failover_allowed` | boolean | 필수 | 온프레 장애 시 Cloud Run 으로 전환해도 되는지. local 과 cloud_run 이 모두 있을 때만 true 가능 |
 | `requires` | object[] | 선택 | 걸린 규칙들의 해결 조건 (id 로 합치고 id 순 정렬). block / needs_approval / manual_recovery 면 최소 1개. 하나도 없으면 필드가 없다 |
 | `requires[].id` | string | 필수 | 해결 조건 id (예: managed_db, fix_tests) |
-| `requires[].hint` | string | 선택 | 사람이 읽는 설명. 정책에 적혀 있을 때만 |
+| `requires[].hint` | string | 선택 | 사람이 읽는 설명 (ko). 정책에 적혀 있을 때만 |
+| `requires[].hint_i18n` | object | 선택 | hint 의 다른 언어 문구. 정책에 ja 가 적혀 있을 때만 |
+| `requires[].hint_i18n.ja` | string | 필수 | 일본어 문구 |
 | `requires[].rule_id` | string | 필수 | 이 조건을 처음 요구한 규칙 id |
 | `requires[].allowed_targets` | string[] | 필수 | 이 해결 조건을 충족해야 하는 위치. 결정서의 최종 targets. 차단이라 targets 가 비었으면 차단 전 마지막 targets (고친 뒤 어디로 가게 될지) |
 | `rules` | object[] | 필수 | 평가된 모든 규칙과 결과 (block 이후 규칙은 없음) |
 | `rules[].id` | string | 필수 | policy.yaml 의 규칙 id. 'default' 는 기본 정책이 쓰였다는 뜻 |
 | `rules[].result` | "matched" \| "not_matched" \| "matched_after_block" | 필수 | 규칙이 걸렸는지. matched_after_block = 이미 block(롤백은 manual_recovery)이 정해진 뒤 걸림: decision 은 못 바꾸고 targets 좁히기와 해결 조건만 반영됨 |
-| `rules[].reason` | string | 선택 | 걸린 규칙의 사람이 읽는 근거. matched / matched_after_block 일 때만 있다 |
+| `rules[].reason` | string | 선택 | 걸린 규칙의 사람이 읽는 근거 (ko). matched / matched_after_block 일 때만 있다 |
+| `rules[].reason_i18n` | object | 선택 | reason 의 다른 언어 문구. 정책에 ja 가 적혀 있을 때만 |
+| `rules[].reason_i18n.ja` | string | 필수 | 일본어 문구 |
 | `plan_hash` | string | 필수 | 입력과 정책과 결과를 정규화해 sha256 한 값. 같은 입력이면 항상 같다 |
 
 ### 예시 (fixtures/03-pii-confident 를 정책 엔진에 넣은 결과)
@@ -246,7 +250,10 @@ flowchart LR
     {
       "id": "R4",
       "result": "matched",
-      "reason": "개인정보(contact, phone) 발견: src/routes/signup.js:24"
+      "reason": "개인정보(contact, phone) 발견: src/routes/signup.js:24",
+      "reason_i18n": {
+        "ja": "個人情報（contact、phone）を検出：src/routes/signup.js:24"
+      }
     },
     {
       "id": "R5",
@@ -261,7 +268,7 @@ flowchart LR
       "result": "not_matched"
     }
   ],
-  "plan_hash": "98b0e264583b3562fd8a1d67256cccf70a55674faa19a1c16965265e87409d51"
+  "plan_hash": "ae9a50b931be5d1c4d7afb5fdc82b98fd1304aab1f495132faad5e88a6babdfd"
 }
 ```
 
@@ -339,13 +346,17 @@ flowchart LR
 | `failover_allowed` | boolean | 필수 | 온프레 장애 시 Cloud Run 전환 허용 여부. false 가 이기고, local 과 cloud_run 이 모두 있을 때만 true 가능 |
 | `requires` | object[] | 선택 | 걸린 규칙들의 해결 조건 (id 로 합치고 id 순 정렬). block / needs_approval / manual_recovery 면 최소 1개. 하나도 없으면 필드가 없다 |
 | `requires[].id` | string | 필수 | 해결 조건 id (예: managed_db, fix_tests) |
-| `requires[].hint` | string | 선택 | 사람이 읽는 설명. 정책에 적혀 있을 때만 |
+| `requires[].hint` | string | 선택 | 사람이 읽는 설명 (ko). 정책에 적혀 있을 때만 |
+| `requires[].hint_i18n` | object | 선택 | hint 의 다른 언어 문구. 정책에 ja 가 적혀 있을 때만 |
+| `requires[].hint_i18n.ja` | string | 필수 | 일본어 문구 |
 | `requires[].rule_id` | string | 필수 | 이 조건을 처음 요구한 규칙 id |
 | `requires[].allowed_targets` | string[] | 필수 | 이 해결 조건을 충족해야 하는 위치. 결정서의 최종 targets. 차단이라 targets 가 비었으면 차단 전 마지막 targets (고친 뒤 어디로 가게 될지) |
 | `rules` | object[] | 필수 | 평가된 롤백 규칙과 결과 |
 | `rules[].id` | string | 필수 | policy.yaml 의 규칙 id. 'default' 는 기본 정책이 쓰였다는 뜻 |
 | `rules[].result` | "matched" \| "not_matched" \| "matched_after_block" | 필수 | 규칙이 걸렸는지. matched_after_block = 이미 block(롤백은 manual_recovery)이 정해진 뒤 걸림: decision 은 못 바꾸고 targets 좁히기와 해결 조건만 반영됨 |
-| `rules[].reason` | string | 선택 | 걸린 규칙의 사람이 읽는 근거. matched / matched_after_block 일 때만 있다 |
+| `rules[].reason` | string | 선택 | 걸린 규칙의 사람이 읽는 근거 (ko). matched / matched_after_block 일 때만 있다 |
+| `rules[].reason_i18n` | object | 선택 | reason 의 다른 언어 문구. 정책에 ja 가 적혀 있을 때만 |
+| `rules[].reason_i18n.ja` | string | 필수 | 일본어 문구 |
 | `plan_hash` | string | 필수 | 입력과 정책과 결과를 정규화해 sha256 한 값. 같은 입력이면 항상 같다 |
 
 ### 예시 (fixtures/rollback/03-pii-onprem.json 을 롤백 판단에 넣은 결과)
@@ -372,7 +383,10 @@ flowchart LR
     {
       "id": "RB3",
       "result": "matched",
-      "reason": "온프레에 개인정보가 쓰임: cloud_run 으로 되돌리지 않고 온프레 안에서만 정상 버전(sha256:0000000000000000000000000000000000000000000000000000000000000000)으로 복구"
+      "reason": "온프레에 개인정보가 쓰임: Cloud Run으로 되돌리지 않고 온프레 안에서만 정상 버전으로 복구",
+      "reason_i18n": {
+        "ja": "オンプレに個人情報が書き込まれた：Cloud Runには戻さず、オンプレ内でのみ正常稼働中のバージョンへ復旧"
+      }
     },
     {
       "id": "RB4",
@@ -381,10 +395,13 @@ flowchart LR
     {
       "id": "default",
       "result": "matched",
-      "reason": "정상 버전(sha256:0000000000000000000000000000000000000000000000000000000000000000)으로 복귀. 대상은 좁히기 규칙을 따름"
+      "reason": "정상 버전으로 복귀. 대상은 좁히기 규칙을 따름",
+      "reason_i18n": {
+        "ja": "正常稼働中のバージョンへ復帰。デプロイ先は絞り込みルールに従う"
+      }
     }
   ],
-  "plan_hash": "ae8636a7ba5cd67d30d1e6f8b4cd941df3313b2341edd240d7bb707dc7b84ea0"
+  "plan_hash": "243ec2ebf22dd3c7875926e8e046bd12515257ff2c261acbdc5cc797d501b831"
 }
 ```
 
@@ -441,6 +458,6 @@ flowchart LR
   "rule_ids": [
     "R4"
   ],
-  "plan_hash": "98b0e264583b3562fd8a1d67256cccf70a55674faa19a1c16965265e87409d51"
+  "plan_hash": "ae9a50b931be5d1c4d7afb5fdc82b98fd1304aab1f495132faad5e88a6babdfd"
 }
 ```

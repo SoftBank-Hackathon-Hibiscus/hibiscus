@@ -49,8 +49,22 @@
             "description": "해결 조건 id (예: managed_db, fix_tests)"
           },
           "hint": {
-            "description": "사람이 읽는 설명. 정책에 적혀 있을 때만",
+            "description": "사람이 읽는 설명 (ko). 정책에 적혀 있을 때만",
             "type": "string"
+          },
+          "hint_i18n": {
+            "description": "hint 의 다른 언어 문구. 정책에 ja 가 적혀 있을 때만",
+            "type": "object",
+            "properties": {
+              "ja": {
+                "type": "string",
+                "description": "일본어 문구"
+              }
+            },
+            "required": [
+              "ja"
+            ],
+            "additionalProperties": false
           },
           "rule_id": {
             "type": "string",
@@ -92,8 +106,22 @@
             "description": "규칙이 걸렸는지. matched_after_block = 이미 block(롤백은 manual_recovery)이 정해진 뒤 걸림: decision 은 못 바꾸고 targets 좁히기와 해결 조건만 반영됨"
           },
           "reason": {
-            "description": "걸린 규칙의 사람이 읽는 근거. matched / matched_after_block 일 때만 있다",
+            "description": "걸린 규칙의 사람이 읽는 근거 (ko). matched / matched_after_block 일 때만 있다",
             "type": "string"
+          },
+          "reason_i18n": {
+            "description": "reason 의 다른 언어 문구. 정책에 ja 가 적혀 있을 때만",
+            "type": "object",
+            "properties": {
+              "ja": {
+                "type": "string",
+                "description": "일본어 문구"
+              }
+            },
+            "required": [
+              "ja"
+            ],
+            "additionalProperties": false
           }
         },
         "required": [

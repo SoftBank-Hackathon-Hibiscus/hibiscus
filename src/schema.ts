@@ -179,12 +179,27 @@ export const ConditionSchema: z.ZodType<Condition> = z.lazy(() =>
 );
 
 // ---------------------------------------------------------------------------
+// 규정집 문구 (reason, hint): 문자열(ko) 또는 { ko, ja }. 엔진은 항상 { ko, ja? } 로 본다.
+// 결정서에는 ko 문자열을 그대로 싣고, ja 가 있으면 *_i18n: { ja } 를 함께 싣는다.
+// ---------------------------------------------------------------------------
+export interface I18nText {
+  ko: string;
+  ja?: string;
+}
+export const I18nTextSchema = z
+  .union([z.string().min(1), z.strictObject({ ko: z.string().min(1), ja: z.string().min(1).optional() })])
+  .transform((v): I18nText => (typeof v === "string" ? { ko: v } : v));
+
+/** 결정서에 실리는 번역 묶음. ko 는 본문 필드에 있으므로 여기엔 ja 만 */
+export const I18nExtraSchema = z.strictObject({ ja: z.string().describe("일본어 문구") }).describe("ko 외 언어의 문구. 정책에 적혀 있을 때만");
+
+// ---------------------------------------------------------------------------
 // 해결 조건 (requires): "이 규칙에 걸린 이유를 없애려면 무엇이 필요한가"
 // policy.yaml 에서는 문자열(id 만) 또는 { id, hint } 로 적는다. 엔진은 항상 객체로 본다.
 // ---------------------------------------------------------------------------
 export const RequirementSchema = z.strictObject({
   id: z.string().min(1).describe("해결 조건 id (예: managed_db, fix_tests)"),
-  hint: z.string().min(1).optional().describe("사람이 읽는 설명. 무엇을 하면 되는지"),
+  hint: I18nTextSchema.optional().describe("사람이 읽는 설명. 무엇을 하면 되는지. 위치는 적지 않는다 (allowed_targets 가 정한다)"),
 });
 export type Requirement = z.infer<typeof RequirementSchema>;
 
@@ -212,7 +227,8 @@ export const RuleSchema = z.strictObject({
   description: z.string().optional(),
   if: ConditionSchema,
   then: EffectSchema,
-  reason: z.string().min(1),
+  /** 사람이 읽는 근거. 문자열(ko) 또는 { ko, ja }. {경로} 로 값을 넣는다 */
+  reason: I18nTextSchema,
   /**
    * true 면 이 규칙이 걸렸을 때 뒤 규칙을 평가하지 않는다 (예: 입력이 섞여 뒤 판단이 무의미할 때).
    * 기본은 false: block 이 나와도 끝까지 평가해 targets 좁히기와 해결 조건을 모두 모은다.
@@ -250,7 +266,7 @@ export const RollbackRuleSchema = z.strictObject({
   description: z.string().optional(),
   if: ConditionSchema,
   then: RollbackEffectSchema,
-  reason: z.string().min(1),
+  reason: I18nTextSchema,
   /** true 면 걸렸을 때 즉시 멈춘다. keep_stable 은 halt 와 무관하게 항상 즉시 멈춘다 */
   halt: z.boolean().optional(),
 });
@@ -262,7 +278,7 @@ export const RollbackPolicySchema = z.strictObject({
     decision: RollbackDecisionSchema,
     /** 어떤 규칙도 failover 를 정하지 않았을 때의 값 (최종 targets 에 local·cloud_run 이 모두 있어야 유효) */
     failover_allowed: z.boolean(),
-    reason: z.string().min(1).default("기본 롤백 정책 적용"),
+    reason: I18nTextSchema.default({ ko: "기본 롤백 정책 적용" }),
   }),
 });
 export type RollbackPolicy = z.infer<typeof RollbackPolicySchema>;
@@ -276,7 +292,7 @@ export const PolicySchema = z
     default: z.strictObject({
       targets: z.array(z.string().min(1)).min(1),
       failover_allowed: z.boolean(),
-      reason: z.string().min(1).default("기본 정책 적용"),
+      reason: I18nTextSchema.default({ ko: "기본 정책 적용" }),
     }),
     /** 롤백 판단 규칙. 없으면 롤백 CLI 가 에러로 멈춘다 */
     rollback: RollbackPolicySchema.optional(),
@@ -328,7 +344,8 @@ export const RuleResultSchema = z
     result: z
       .enum(["matched", "not_matched", "matched_after_block"])
       .describe("규칙이 걸렸는지. matched_after_block = 이미 block(롤백은 manual_recovery)이 정해진 뒤 걸림: decision 은 못 바꾸고 targets 좁히기와 해결 조건만 반영됨"),
-    reason: z.string().optional().describe("걸린 규칙의 사람이 읽는 근거. matched / matched_after_block 일 때만 있다"),
+    reason: z.string().optional().describe("걸린 규칙의 사람이 읽는 근거 (ko). matched / matched_after_block 일 때만 있다"),
+    reason_i18n: I18nExtraSchema.optional().describe("reason 의 다른 언어 문구. 정책에 ja 가 적혀 있을 때만"),
   })
   .describe("평가된 규칙 하나의 결과");
 export type RuleResult = z.infer<typeof RuleResultSchema>;
@@ -339,7 +356,8 @@ const PlanHashSchema = z.string().regex(/^[0-9a-f]{64}$/).describe("입력과 �
 export const PlanRequirementSchema = z
   .strictObject({
     id: z.string().describe("해결 조건 id (예: managed_db, fix_tests)"),
-    hint: z.string().optional().describe("사람이 읽는 설명. 정책에 적혀 있을 때만"),
+    hint: z.string().optional().describe("사람이 읽는 설명 (ko). 정책에 적혀 있을 때만"),
+    hint_i18n: I18nExtraSchema.optional().describe("hint 의 다른 언어 문구. 정책에 ja 가 적혀 있을 때만"),
     rule_id: z.string().describe("이 조건을 처음 요구한 규칙 id"),
     allowed_targets: z
       .array(z.string())

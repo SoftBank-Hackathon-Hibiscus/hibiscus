@@ -24,13 +24,21 @@
  *   rollback        → serve_digest = stable.digest, targets = 좁혀진 stable.targets
  *   manual_recovery → serve_digest = null,          targets = [], failover_allowed = false
  */
-import { FAILOVER_REQUIRED_TARGETS, RequirementCollector, canonicalize, evaluate, intersect, renderReason, renderTemplate, sha256Hex } from "../engine.js";
+import { FAILOVER_REQUIRED_TARGETS, RequirementCollector, type Suffix, appendSuffix, canonicalize, evaluate, intersect, renderI18nReason, sha256Hex } from "../engine.js";
 import type { Policy, Requirement, RollbackDecision, RollbackPlan, RollbackRequest, RuleResult } from "../schema.js";
 
 /** 복귀 대상의 교집합이 비어 엔진이 스스로 manual_recovery 로 갈 때 넣는 해결 조건 */
 export const TARGET_CONFLICT_RECOVERY: Requirement = {
   id: "manual_target_recovery",
-  hint: "정상 버전의 대상과 롤백 규칙이 허용하는 대상의 교집합이 비어 있음. 사람이 복귀 대상을 정해 복구한다",
+  hint: {
+    ko: "정상 버전의 대상과 롤백 규칙이 허용하는 대상의 교집합이 비어 있음. 사람이 복귀 대상을 정해 복구한다",
+    ja: "正常稼働中のバージョンのデプロイ先とロールバックルールが許容するデプロイ先の共通部分が空。人が復帰先を決めて復旧する",
+  },
+};
+
+const RECOVERY_CONFLICT_SUFFIX: Suffix = {
+  ko: (prev, rule) => ` → 허용된 복귀 대상이 없음 (지금까지 [${prev}] ∩ 규칙 [${rule}] = [])`,
+  ja: (prev, rule) => `→許容される復帰先がありません（これまで[${prev}]∩ルール[${rule}]=[]）`,
 };
 
 /** 롤백 규칙이 바라보는 루트 컨텍스트 */
@@ -64,7 +72,7 @@ export function decideRollback(request: RollbackRequest, policy: Policy): Rollba
       continue;
     }
 
-    let reason = renderReason(rule.reason, root, result.items);
+    let rendered = renderI18nReason(rule.reason, root, result.items);
     // 이미 manual_recovery 면 뒤 규칙은 decision 을 바꾸지 못한다. targets 좁히기와 해결 조건만 반영한다.
     const afterTerminal = decision === "manual_recovery";
 
@@ -75,7 +83,7 @@ export function decideRollback(request: RollbackRequest, policy: Policy): Rollba
       const narrowed = intersect(targets, rule.then.targets);
       if (narrowed.length === 0) {
         decision = "manual_recovery";
-        reason += ` → 허용된 복귀 대상이 없음 (지금까지 [${targets.join(", ")}] ∩ 규칙 [${rule.then.targets.join(", ")}] = [])`;
+        rendered = appendSuffix(rendered, RECOVERY_CONFLICT_SUFFIX, targets, rule.then.targets);
         requires.add(TARGET_CONFLICT_RECOVERY, rule.id);
       }
       targets = narrowed;
@@ -85,13 +93,13 @@ export function decideRollback(request: RollbackRequest, policy: Policy): Rollba
     if (rule.then.failover_allowed === false) failoverAllowed = false;
     else if (rule.then.failover_allowed === true && failoverAllowed === undefined) failoverAllowed = true;
 
-    rules.push({ id: rule.id, result: afterTerminal ? "matched_after_block" : "matched", reason });
+    rules.push({ id: rule.id, result: afterTerminal ? "matched_after_block" : "matched", ...rendered });
     if (decision === "keep_stable" || rule.halt) break;
   }
 
   if (decision === undefined) {
     decision = section.default.decision;
-    rules.push({ id: "default", result: "matched", reason: renderTemplate(section.default.reason, root, root) });
+    rules.push({ id: "default", result: "matched", ...renderI18nReason(section.default.reason, root, []) });
   }
 
   // 결정 후 누가 트래픽을 받는가. manual_recovery 만 "아무도 아님(사람이 정함)".

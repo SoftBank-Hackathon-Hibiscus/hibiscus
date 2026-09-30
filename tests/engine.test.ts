@@ -44,7 +44,7 @@ describe("fixtures", () => {
     expect(plan.targets).toEqual([]);
     expect(plan.failover_allowed).toBe(false);
     // fixture 02 는 facts.db = sqlite 라 R5 가 차단 뒤에 걸린다 (data.db 는 R6 가 무시)
-    expect(plan.rules).toEqual([
+    expect(plan.rules).toMatchObject([
       { id: "R1", result: "matched", reason: "테스트 실패 (17/20 일치)" },
       { id: "R2", result: "not_matched" },
       { id: "R3", result: "not_matched" },
@@ -304,14 +304,15 @@ describe("해결 조건 (requires)", () => {
     // 다른 규칙이 섞이지 않게 facts 를 비운다 (fixture 그대로면 R5 도 걸린다)
     const plan = decide({ ...test, facts: { db: "postgres" as const } }, pii, policy);
     expect(plan.decision).toBe("block");
-    expect(plan.requires).toEqual([{ id: "fix_tests", hint: "재생 불일치 요청을 고친 뒤 다시 테스트", rule_id: "R1", allowed_targets: ["local", "cloud_run"] }]);
+    expect(plan.requires).toMatchObject([{ id: "fix_tests", hint: "재생 불일치 요청을 고친 뒤 다시 테스트", rule_id: "R1", allowed_targets: ["local", "cloud_run"] }]);
+    expect(plan.requires?.[0]?.hint_i18n?.ja).toBe("再生結果が一致しないリクエストを修正してから再テスト");
   });
 
   it("R2 입력 불일치 → rerun_same_run", () => {
     const { test } = loadFixture("01-allow");
     const plan = decide(test, { run_id: "r-999", pii: [] }, policy);
     expect(plan.decision).toBe("block");
-    expect(plan.requires).toEqual([{ id: "rerun_same_run", hint: "같은 run_id로 테스트와 개인정보 판정을 다시 실행", rule_id: "R2", allowed_targets: ["local", "cloud_run"] }]);
+    expect(plan.requires).toMatchObject([{ id: "rerun_same_run", hint: "같은 run_id로 테스트와 개인정보 판정을 다시 실행", rule_id: "R2", allowed_targets: ["local", "cloud_run"] }]);
   });
 
   it("R3 개인정보 애매 → needs_approval 에 human_review_pii. R4 는 해결 조건이 없다", () => {
@@ -319,7 +320,7 @@ describe("해결 조건 (requires)", () => {
     const plan = decide(test, pii, policy);
     expect(plan.decision).toBe("needs_approval");
     expect(matchedIds(plan)).toEqual(["R3", "R4"]);
-    expect(plan.requires).toEqual([{ id: "human_review_pii", hint: "해당 칼럼이 개인정보인지 사람이 확인", rule_id: "R3", allowed_targets: ["local"] }]);
+    expect(plan.requires).toMatchObject([{ id: "human_review_pii", hint: "해당 칼럼이 개인정보인지 사람이 확인", rule_id: "R3", allowed_targets: ["local"] }]);
   });
 
   it("문자열만 적은 requires 는 id 만 있는 것으로 본다", () => {
@@ -327,7 +328,8 @@ describe("해결 조건 (requires)", () => {
       ...policy,
       rules: [{ id: "S1", if: { path: "test.passed", eq: true }, then: { targets: ["local"], requires: ["managed_db", { id: "cdn", hint: "CDN 앞단" }] }, reason: "s" }],
     });
-    expect(custom.rules[0]!.then.requires).toEqual([{ id: "managed_db" }, { id: "cdn", hint: "CDN 앞단" }]);
+    // hint 는 { ko } 로 정규화된다
+    expect(custom.rules[0]!.then.requires).toEqual([{ id: "managed_db" }, { id: "cdn", hint: { ko: "CDN 앞단" } }]);
     const { test, pii } = loadFixture("01-allow");
     const plan = decide(test, pii, custom);
     expect(plan.requires).toEqual([
@@ -415,9 +417,9 @@ describe("block 이후 계속 평가 / halt", () => {
       ["R7", "not_matched"],
     ]);
     expect(plan.rules.find((r) => r.id === "R4")?.reason).toBe("개인정보(contact, phone) 발견: src/routes/signup.js:24");
-    expect(plan.requires).toEqual([
+    expect(plan.requires).toMatchObject([
       { id: "fix_tests", hint: "재생 불일치 요청을 고친 뒤 다시 테스트", rule_id: "R1", allowed_targets: ["local"] },
-      { id: "managed_db", hint: "SQLite를 PostgreSQL로 전환 (allowed_targets 안의 환경에서)", rule_id: "R5", allowed_targets: ["local"] },
+      { id: "managed_db", hint: "SQLite를 PostgreSQL로 전환", hint_i18n: { ja: "SQLiteをPostgreSQLへ移行" }, rule_id: "R5", allowed_targets: ["local"] },
     ]);
   });
 
@@ -428,7 +430,7 @@ describe("block 이후 계속 평가 / halt", () => {
     expect(plan.decision).toBe("block");
     expect(plan.rules.map((r) => r.id)).toEqual(["R1", "R2"]);
     expect(plan.rules.find((r) => r.id === "R4")).toBeUndefined();
-    expect(plan.requires).toEqual([{ id: "rerun_same_run", hint: "같은 run_id로 테스트와 개인정보 판정을 다시 실행", rule_id: "R2", allowed_targets: ["local", "cloud_run"] }]);
+    expect(plan.requires).toMatchObject([{ id: "rerun_same_run", hint: "같은 run_id로 테스트와 개인정보 판정을 다시 실행", rule_id: "R2", allowed_targets: ["local", "cloud_run"] }]);
   });
 
   it("block 뒤의 규칙은 decision 을 바꾸지 못한다 (needs_approval 이 와도 block 유지)", () => {
@@ -488,6 +490,46 @@ describe("block 이후 계속 평가 / halt", () => {
       ["c_fix", ["local"]],
       ["resolve_target_conflict", ["local"]],
     ]);
+  });
+});
+
+describe("규정집 문구의 다국어 (reason_i18n / hint_i18n)", () => {
+  it("정책에 ja 가 있으면 결정서에 reason_i18n.ja 와 hint_i18n.ja 가 실리고, ko 본문은 그대로", () => {
+    const { test, pii } = loadFixture("02-block-test-failed");
+    const plan = decide(test, pii, policy);
+    const r1 = plan.rules.find((r) => r.id === "R1")!;
+    expect(r1.reason).toBe("테스트 실패 (17/20 일치)");
+    expect(r1.reason_i18n).toEqual({ ja: "テスト失敗（17/20一致）" });
+    expect(plan.rules.find((r) => r.id === "R2")).toEqual({ id: "R2", result: "not_matched" }); // 안 걸린 규칙엔 없다
+    expect(plan.requires?.find((r) => r.id === "fix_tests")?.hint_i18n).toEqual({ ja: "再生結果が一致しないリクエストを修正してから再テスト" });
+  });
+
+  it("문자열만 적은 규칙은 reason_i18n / hint_i18n 이 없다", () => {
+    const custom = PolicySchema.parse({
+      ...policy,
+      rules: [{ id: "S1", if: { path: "test.passed", eq: true }, then: { targets: ["local"], requires: [{ id: "x", hint: "ko 만" }] }, reason: "ko 문구만" }],
+    });
+    const { test, pii } = loadFixture("01-allow");
+    const plan = decide(test, pii, custom);
+    expect(plan.rules.find((r) => r.id === "S1")).toEqual({ id: "S1", result: "matched", reason: "ko 문구만" });
+    expect(plan.requires).toEqual([{ id: "x", hint: "ko 만", rule_id: "S1", allowed_targets: ["local"] }]);
+  });
+
+  it("{ ko, ja } 템플릿은 각각 렌더링되고 default 도 같다", () => {
+    const custom = PolicySchema.parse({
+      ...policy,
+      rules: [{ id: "T1", if: { path: "test.passed", eq: true }, then: { targets: ["local"] }, reason: { ko: "앱 {test.app}", ja: "アプリ{test.app}" } }],
+      default: { ...policy.default, reason: { ko: "기본", ja: "既定" } },
+    });
+    const { test, pii } = loadFixture("01-allow");
+    const plan = decide(test, pii, custom);
+    expect(plan.rules.find((r) => r.id === "T1")).toEqual({ id: "T1", result: "matched", reason: "앱 todo", reason_i18n: { ja: "アプリtodo" } });
+    const passthrough = decide({ ...test, passed: false, match: { total: 1, matched: 0 } }, pii, custom);
+    expect(passthrough.rules.find((r) => r.id === "default")).toEqual({ id: "default", result: "matched", reason: "기본", reason_i18n: { ja: "既定" } });
+  });
+
+  it("ja 만 적은 문구는 거부된다 (ko 는 필수)", () => {
+    expect(PolicySchema.safeParse({ ...policy, rules: [{ id: "J1", if: { path: "test.passed", eq: true }, then: {}, reason: { ja: "日本語のみ" } }] }).success).toBe(false);
   });
 });
 
@@ -555,7 +597,9 @@ describe("R6: 로컬 파일 쓰기", () => {
     expect(plan.failover_allowed).toBe(false);
     expect(matchedIds(plan)).toEqual(["R6"]);
     expect(plan.rules.find((r) => r.id === "R6")?.reason).toBe("로컬 파일 쓰기: /app/uploads/avatar.png");
-    expect(plan.requires).toEqual([{ id: "object_storage", hint: "로컬 폴더에 쓰는 파일을 오브젝트 스토리지로 이전 (allowed_targets 안의 환경에서)", rule_id: "R6", allowed_targets: ["local"] }]);
+    expect(plan.requires).toEqual([
+      { id: "object_storage", hint: "로컬 폴더에 쓰는 파일을 오브젝트 스토리지로 이전", hint_i18n: { ja: "ローカルフォルダに書き込むファイルをオブジェクトストレージへ移行" }, rule_id: "R6", allowed_targets: ["local"] },
+    ]);
   });
 
   it("/tmp 와 로그 파일만 쓰면 걸리지 않는다", () => {
@@ -581,7 +625,7 @@ describe("R6: 로컬 파일 쓰기", () => {
     const plan = decide({ ...test, facts: { db: "sqlite" as const, writes_local_file: ["/app/data.db"] } }, pii, policy);
     expect(matchedIds(plan)).toEqual(["R5"]);
     expect(plan.rules.find((r) => r.id === "R6")).toEqual({ id: "R6", result: "not_matched" });
-    expect(plan.requires).toEqual([{ id: "managed_db", hint: "SQLite를 PostgreSQL로 전환 (allowed_targets 안의 환경에서)", rule_id: "R5", allowed_targets: ["local"] }]);
+    expect(plan.requires).toEqual([{ id: "managed_db", hint: "SQLite를 PostgreSQL로 전환", hint_i18n: { ja: "SQLiteをPostgreSQLへ移行" }, rule_id: "R5", allowed_targets: ["local"] }]);
   });
 
   it("db: sqlite + writes [/app/data.db, /app/uploads/cat.png] → R5 와 R6 모두, R6 reason 에는 cat.png 만", () => {
@@ -632,7 +676,7 @@ describe("R5: SQLite / requires", () => {
     expect(plan.decision).toBe("allow");
     expect(plan.targets).toEqual(["local"]);
     expect(plan.failover_allowed).toBe(false);
-    expect(plan.requires).toEqual([{ id: "managed_db", hint: "SQLite를 PostgreSQL로 전환 (allowed_targets 안의 환경에서)", rule_id: "R5", allowed_targets: ["local"] }]);
+    expect(plan.requires).toEqual([{ id: "managed_db", hint: "SQLite를 PostgreSQL로 전환", hint_i18n: { ja: "SQLiteをPostgreSQLへ移行" }, rule_id: "R5", allowed_targets: ["local"] }]);
     expect(matchedIds(plan)).toEqual(["R5"]);
     expect(plan.rules.find((r) => r.id === "R5")?.reason).toBe("SQLite 사용 (sqlite): 관리형 DB로 전환하기 전까지 클라우드 배포 제외");
   });
@@ -656,7 +700,7 @@ describe("R5: SQLite / requires", () => {
     expect(plan.decision).toBe("allow");
     expect(plan.targets).toEqual(["local"]);
     expect(plan.failover_allowed).toBe(false);
-    expect(plan.requires).toEqual([{ id: "managed_db", hint: "SQLite를 PostgreSQL로 전환 (allowed_targets 안의 환경에서)", rule_id: "R5", allowed_targets: ["local"] }]);
+    expect(plan.requires).toEqual([{ id: "managed_db", hint: "SQLite를 PostgreSQL로 전환", hint_i18n: { ja: "SQLiteをPostgreSQLへ移行" }, rule_id: "R5", allowed_targets: ["local"] }]);
     expect(matchedIds(plan)).toEqual(["R4", "R5"]);
   });
 

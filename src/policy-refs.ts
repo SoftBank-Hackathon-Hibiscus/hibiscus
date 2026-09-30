@@ -6,7 +6,7 @@
  *
  * 경로 표기: 조건의 path 그대로. `some` 안의 where 는 원소 기준이므로 `<배열 경로>[].<path>` 로 적는다.
  */
-import { KNOWN_FACTS_KEYS, type Condition, type Policy } from "./schema.js";
+import { type Condition, type I18nText, KNOWN_FACTS_KEYS, type Policy } from "./schema.js";
 
 export interface PathRef {
   path: string;
@@ -68,7 +68,13 @@ function firstSomePath(cond: Condition): string | undefined {
   return undefined;
 }
 
-function collect(rules: ReadonlyArray<{ id: string; if: Condition; reason: string }>, defaultReason: string): PathRef[] {
+/** reason 은 { ko, ja? } 이므로 두 언어의 템플릿을 모두 본다 */
+function walkI18nReason(text: I18nText, rule: string, somePrefix: string | undefined, out: RefCollector): void {
+  walkReason(text.ko, rule, somePrefix, out);
+  if (text.ja !== undefined) walkReason(text.ja, rule, somePrefix, out);
+}
+
+function collect(rules: ReadonlyArray<{ id: string; if: Condition; reason: I18nText }>, defaultReason: I18nText): PathRef[] {
   const map = new Map<string, PathRef>();
   const out: RefCollector = {
     add(path, rule, use) {
@@ -80,9 +86,9 @@ function collect(rules: ReadonlyArray<{ id: string; if: Condition; reason: strin
   };
   for (const rule of rules) {
     walkCondition(rule.if, rule.id, undefined, out);
-    walkReason(rule.reason, rule.id, firstSomePath(rule.if), out);
+    walkI18nReason(rule.reason, rule.id, firstSomePath(rule.if), out);
   }
-  walkReason(defaultReason, "default", undefined, out);
+  walkI18nReason(defaultReason, "default", undefined, out);
   return [...map.values()].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
 }
 

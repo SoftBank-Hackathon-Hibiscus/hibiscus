@@ -72,7 +72,9 @@ describe("정책이 읽는 경로 수집", () => {
     const rollback = Object.fromEntries(refs.rollback.map((r) => [r.path, r]));
     expect(rollback["request.stage"]?.rules).toEqual(["RB1"]);
     expect(rollback["request.state.pii_written_onprem"]?.rules).toEqual(["RB3"]);
-    expect(rollback["request.stable.digest"]?.rules).toEqual(["RB1", "RB3", "RB4", "default"]);
+    // 롤백 규칙의 reason 은 digest 를 넣지 않는다 (설명 함수가 따로 붙인다)
+    expect(rollback["request.stable.digest"]).toBeUndefined();
+    expect(Object.keys(rollback).sort()).toEqual(["request.stage", "request.state.db_migration_backward_compatible", "request.state.pii_written_onprem", "request.state.writes_since_cutover"]);
   });
 
   it("경로는 정렬돼 있고 결정적이다", () => {
@@ -94,7 +96,7 @@ describe("정책 경고: 모르는 facts 키", () => {
       id: "X9",
       if: { path: "test.facts.framework", eq: "express" },
       then: { targets: ["local"] },
-      reason: "express 는 온프레",
+      reason: { ko: "express 는 온프레", ja: "expressはオンプレ {test.facts.framework}" },
     });
     const warnings = lintPolicy(custom);
     expect(warnings).toHaveLength(1);

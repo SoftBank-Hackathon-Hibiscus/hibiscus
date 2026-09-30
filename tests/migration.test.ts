@@ -223,7 +223,7 @@ describe("R7: 파괴적 마이그레이션 → block", () => {
     const plan = decide({ ...baseTest, facts: { db: "postgres", migration: destructive } }, pii, policy);
     expect(plan.decision).toBe("block");
     expect(plan.targets).toEqual([]);
-    expect(plan.requires).toEqual([
+    expect(plan.requires).toMatchObject([
       {
         id: "two_phase_migration",
         hint: "파괴적 변경을 확장→전환→정리 2단계 배포로 나누기 (먼저 새 구조를 추가하고, 옛 구조는 다음 배포에서 제거)",

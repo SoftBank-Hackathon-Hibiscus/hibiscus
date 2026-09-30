@@ -3,7 +3,8 @@
  *
  * - 순수 함수. 같은 입력이면 같은 출력. 엔진 결과를 바꾸지 않는다.
  * - 규칙 id(R1 등)는 괄호로만 보조 표시하고 본문은 사람이 읽는 문장으로 쓴다.
- * - lang: ko(기본) | ja
+ * - lang: ko(기본) | ja. 규칙의 reason/hint 는 결정서의 *_i18n 에 해당 언어가 있으면 그것을, 없으면 ko 를 쓴다.
+ * - reason/hint 안의 sha256:<64자> 는 앞 12자로 줄인다 (안전장치).
  */
 import type { Plan, PlanRequirement, RollbackPlan, RuleResult } from "./schema.js";
 
@@ -35,14 +36,13 @@ interface Strings {
   reasonsHeading: string;
   reasonsNone: string;
   defaultPolicy: (reason: string) => string;
+  reasonLine: (reason: string, ruleId: string) => string;
   afterBlockHeading: string;
   afterManualHeading: string;
   afterNote: string;
-  ruleTag: (id: string) => string;
   requiresHeading: string;
   requiresNone: string;
-  requirementWhere: (targets: string) => string;
-  requirementTag: (ruleId: string, id: string) => string;
+  requirementLine: (what: string, targets: string, ruleId: string, id: string) => string;
   footer: (planHash: string, digestLabel: string, digest: string) => string;
   imageLabel: string;
   serveLabel: string;
@@ -77,55 +77,53 @@ const STRINGS: Record<Lang, Strings> = {
     reasonsHeading: "## 이유",
     reasonsNone: "걸린 규칙이 없습니다.",
     defaultPolicy: (reason) => `기본 정책을 적용했습니다: ${reason}`,
+    reasonLine: (reason, id) => `- ${reason} (규칙 ${id})`,
     afterBlockHeading: "### 차단이 정해진 뒤에 걸린 규칙",
     afterManualHeading: "### 수동 복구가 정해진 뒤에 걸린 규칙",
     afterNote: "결정은 바꾸지 않았고, 배포 위치와 해결 조건에만 반영됐습니다.",
-    ruleTag: (id) => `(규칙 ${id})`,
     requiresHeading: "## 해결 조건",
     requiresNone: "해결할 것이 없습니다.",
-    requirementWhere: (t) => `충족 위치: ${t} 안에서만`,
-    requirementTag: (ruleId, id) => `(규칙 ${ruleId}, \`${id}\`)`,
+    requirementLine: (what, t, ruleId, id) => `- **${what}** — 충족 위치: ${t} 안에서만 (규칙 ${ruleId}, \`${id}\`)`,
     footer: (hash, label, digest) => `결정 지문 \`${hash}\` · ${label} \`${digest}\``,
     imageLabel: "이미지",
     serveLabel: "트래픽을 받을 버전",
     serveNone: "미정",
   },
   ja: {
-    targetName: { [LOCAL]: "オンプレ(社内)", [CLOUD]: "Cloud Run" },
-    and: " と ",
+    targetName: { [LOCAL]: "オンプレ（社内）", [CLOUD]: "Cloud Run" },
+    and: "と",
     none: "なし",
-    deployTitle: (app, runId) => `# デプロイ判定: ${app} (実行 ${runId})`,
-    rollbackTitle: (app, runId) => `# ロールバック判定: ${app} (実行 ${runId})`,
+    deployTitle: (app, runId) => `# デプロイ判定：${app}（実行${runId}）`,
+    rollbackTitle: (app, runId) => `# ロールバック判定：${app}（実行${runId}）`,
     conclusion: {
-      allow: (t) => `**デプロイ許可。** このイメージを ${t} にデプロイします。`,
-      needs_approval: (t) => `**人の承認が必要。** 承認されれば ${t} にデプロイします。承認前はデプロイしません。`,
-      block: () => `**デプロイ遮断。** このイメージはデプロイしません。下記の解決条件を満たしてから再テストが必要です。`,
+      allow: (t) => `**デプロイ可。**このイメージを${t}にデプロイします。`,
+      needs_approval: (t) => `**人の承認が必要。**承認されれば${t}にデプロイします。承認前はデプロイしません。`,
+      block: () => `**デプロイ不可。**このイメージはデプロイしません。下記の解決条件を満たしてから再テストが必要です。`,
     },
     rollbackConclusion: {
-      keep_stable: (serve, t) => `**安定版を維持。** 戻すものはありません。安定版(${serve})が引き続き ${t} でトラフィックを受けます。`,
-      rollback: (serve, t) => `**ロールバック。** 安定版(${serve})に戻します。戻す場所: ${t}。`,
-      manual_recovery: () => `**手動復旧が必要。** 自動では戻せません。下記の解決条件に従って人が復旧する必要があり、それまでトラフィックを受けるバージョンは未定です。`,
+      keep_stable: (serve, t) => `**正常稼働中のバージョンを維持。**戻すものはありません。正常稼働中のバージョン（${serve}）が引き続き${t}でトラフィックを受けます。`,
+      rollback: (serve, t) => `**ロールバック。**正常稼働中のバージョン（${serve}）に戻します。戻す先は${t}です。`,
+      manual_recovery: () => `**手動復旧が必要。**自動では戻せません。下記の解決条件に従って人が復旧する必要があり、それまでトラフィックを受けるバージョンは未定です。`,
     },
     failover: {
-      on: "オンプレが停止した場合、Cloud Run にトラフィックを切り替えます。",
-      offForbidden: "オンプレが停止しても Cloud Run には切り替えません (ポリシーで禁止)。",
-      offNoCloud: "オンプレが停止しても Cloud Run には切り替えません。Cloud Run にはデプロイしないためです。",
-      offNoLocal: "Cloud Run のみにデプロイするため、オンプレ障害時の切り替えは対象外です。",
+      on: "オンプレが停止した場合、Cloud Runにトラフィックを切り替えます。",
+      offForbidden: "オンプレが停止してもCloud Runには切り替えません（ポリシーで禁止）。",
+      offNoCloud: "オンプレが停止してもCloud Runには切り替えません。Cloud Runにはデプロイしないためです。",
+      offNoLocal: "Cloud Runのみにデプロイするため、オンプレ障害時の切り替えは対象外です。",
       offBlocked: "デプロイしないため、障害時の切り替えもありません。",
       offManual: "手動復旧までは障害時の切り替えはありません。",
     },
     reasonsHeading: "## 理由",
     reasonsNone: "該当したルールはありません。",
-    defaultPolicy: (reason) => `既定ポリシーを適用しました: ${reason}`,
-    afterBlockHeading: "### 遮断が決まった後に該当したルール",
+    defaultPolicy: (reason) => `既定ポリシーを適用しました：${reason}`,
+    reasonLine: (reason, id) => `- ${reason}（ルール${id}）`,
+    afterBlockHeading: "### デプロイ不可が決まった後に該当したルール",
     afterManualHeading: "### 手動復旧が決まった後に該当したルール",
     afterNote: "判定は変えず、デプロイ先と解決条件にのみ反映されました。",
-    ruleTag: (id) => `(ルール ${id})`,
     requiresHeading: "## 解決条件",
-    requiresNone: "解決すべきことはありません。",
-    requirementWhere: (t) => `満たす場所: ${t} の中でのみ`,
-    requirementTag: (ruleId, id) => `(ルール ${ruleId}, \`${id}\`)`,
-    footer: (hash, label, digest) => `判定フィンガープリント \`${hash}\` · ${label} \`${digest}\``,
+    requiresNone: "対応が必要な事項はありません。",
+    requirementLine: (what, t, ruleId, id) => `- **${what}** — 対応範囲：${t}のみ（ルール${ruleId}、\`${id}\`）`,
+    footer: (hash, label, digest) => `判定ハッシュ\`${hash}\`・${label}\`${digest}\``,
     imageLabel: "イメージ",
     serveLabel: "トラフィックを受けるバージョン",
     serveNone: "未定",
@@ -148,6 +146,17 @@ export function shortDigest(digest: string): string {
 }
 export const shortHash = (hash: string): string => hash.slice(0, SHORT);
 
+/** 문장 안에 든 긴 digest 를 앞 12자로 줄인다 (규칙 reason 이 digest 를 통째로 넣었을 때의 안전장치) */
+export function shortenDigests(text: string): string {
+  return text.replace(/sha256:([0-9a-fA-F]{13,})/g, (_m, hex: string) => `sha256:${hex.slice(0, SHORT)}`);
+}
+
+/** lang 에 맞는 문구. 없으면 ko 로 대체 */
+function pick(ko: string | undefined, i18n: { ja?: string } | undefined, lang: Lang): string {
+  if (lang === "ja" && i18n?.ja !== undefined) return i18n.ja;
+  return ko ?? "";
+}
+
 function failoverText(decision: string, targets: readonly string[], failoverAllowed: boolean, s: Strings, manual: boolean): string {
   if (decision === "block") return s.failover.offBlocked;
   if (manual) return s.failover.offManual;
@@ -159,35 +168,36 @@ function failoverText(decision: string, targets: readonly string[], failoverAllo
   return s.failover.offForbidden;
 }
 
-function reasonsSection(rules: readonly RuleResult[], s: Strings, afterHeading: string): string[] {
+function reasonsSection(rules: readonly RuleResult[], s: Strings, lang: Lang, afterHeading: string): string[] {
   const lines: string[] = [s.reasonsHeading, ""];
   const matched = rules.filter((r) => r.result === "matched");
   const after = rules.filter((r) => r.result === "matched_after_block");
+  const text = (r: RuleResult) => shortenDigests(pick(r.reason, r.reason_i18n, lang));
 
   if (matched.length === 0) {
     lines.push(`- ${s.reasonsNone}`);
   } else {
     for (const r of matched) {
-      if (r.id === "default") lines.push(`- ${s.defaultPolicy(r.reason ?? "")}`);
-      else lines.push(`- ${r.reason ?? ""} ${s.ruleTag(r.id)}`);
+      if (r.id === "default") lines.push(`- ${s.defaultPolicy(text(r))}`);
+      else lines.push(s.reasonLine(text(r), r.id));
     }
   }
   if (after.length > 0) {
     lines.push("", afterHeading, "", s.afterNote, "");
-    for (const r of after) lines.push(`- ${r.reason ?? ""} ${s.ruleTag(r.id)}`);
+    for (const r of after) lines.push(s.reasonLine(text(r), r.id));
   }
   return lines;
 }
 
-function requiresSection(requires: readonly PlanRequirement[] | undefined, s: Strings): string[] {
+function requiresSection(requires: readonly PlanRequirement[] | undefined, s: Strings, lang: Lang): string[] {
   const lines: string[] = [s.requiresHeading, ""];
   if (!requires || requires.length === 0) {
     lines.push(`- ${s.requiresNone}`);
     return lines;
   }
   for (const r of requires) {
-    const what = r.hint ?? r.id;
-    lines.push(`- **${what}** — ${s.requirementWhere(targetsText(r.allowed_targets, s))} ${s.requirementTag(r.rule_id, r.id)}`);
+    const what = shortenDigests(pick(r.hint, r.hint_i18n, lang) || r.id);
+    lines.push(s.requirementLine(what, targetsText(r.allowed_targets, s), r.rule_id, r.id));
   }
   return lines;
 }
@@ -197,7 +207,8 @@ function requiresSection(requires: readonly PlanRequirement[] | undefined, s: St
 // ---------------------------------------------------------------------------
 
 export function explainPlan(plan: Plan, opts: ExplainOptions = {}): string {
-  const s = STRINGS[opts.lang ?? "ko"];
+  const lang = opts.lang ?? "ko";
+  const s = STRINGS[lang];
   const targets = targetsText(plan.targets, s);
   const lines: string[] = [
     s.deployTitle(plan.app, plan.run_id),
@@ -206,9 +217,9 @@ export function explainPlan(plan: Plan, opts: ExplainOptions = {}): string {
     "",
     failoverText(plan.decision, plan.targets, plan.failover_allowed, s, false),
     "",
-    ...reasonsSection(plan.rules, s, s.afterBlockHeading),
+    ...reasonsSection(plan.rules, s, lang, s.afterBlockHeading),
     "",
-    ...requiresSection(plan.requires, s),
+    ...requiresSection(plan.requires, s, lang),
     "",
     "---",
     "",
@@ -219,7 +230,8 @@ export function explainPlan(plan: Plan, opts: ExplainOptions = {}): string {
 }
 
 export function explainRollbackPlan(plan: RollbackPlan, opts: ExplainOptions = {}): string {
-  const s = STRINGS[opts.lang ?? "ko"];
+  const lang = opts.lang ?? "ko";
+  const s = STRINGS[lang];
   const targets = targetsText(plan.targets, s);
   const serve = plan.serve_digest ? shortDigest(plan.serve_digest) : s.serveNone;
   const manual = plan.decision === "manual_recovery";
@@ -230,9 +242,9 @@ export function explainRollbackPlan(plan: RollbackPlan, opts: ExplainOptions = {
     "",
     failoverText(plan.decision, plan.targets, plan.failover_allowed, s, manual),
     "",
-    ...reasonsSection(plan.rules, s, s.afterManualHeading),
+    ...reasonsSection(plan.rules, s, lang, s.afterManualHeading),
     "",
-    ...requiresSection(plan.requires, s),
+    ...requiresSection(plan.requires, s, lang),
     "",
     "---",
     "",

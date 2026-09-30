@@ -98,7 +98,9 @@ default:
 
 **효과(`then`)**: `decision: block | needs_approval`, `targets: [...]`, `failover_allowed: bool`, `requires: [...]`. 적지 않은 키는 바꾸지 않는다.
 
-**해결 조건(`requires`)**: "이 규칙에 걸린 이유를 없애려면 무엇이 필요한가". `{ id: managed_db, hint: "SQLite를 PostgreSQL로 전환 (allowed_targets 안의 환경에서)" }`처럼 설명과 함께 적거나, `managed_db`처럼 id만 적는다. 걸린 규칙들의 해결 조건이 `plan.json`의 `requires`에 `[{ id, hint?, rule_id, allowed_targets }]`로 모여(id로 합치고 정렬) 다음 단계(AI 수정 파트)가 무엇을 고쳐야 하는지 읽는다. `allowed_targets`는 그 결정서의 최종 `targets`이고, 차단이면 차단 전 마지막 `targets`다. 해결 조건은 그 위치 안에서만 충족해야 하므로 hint는 위치를 정하지 않게 쓴다. `block`이나 `needs_approval`을 내는 규칙은 해결 조건이 최소 1개 있어야 하며 없으면 정책 로드 에러다. 엔진이 교집합 공백으로 스스로 차단할 때는 `resolve_target_conflict`를 넣는다.
+**해결 조건(`requires`)**: "이 규칙에 걸린 이유를 없애려면 무엇이 필요한가". `{ id: managed_db, hint: "SQLite를 PostgreSQL로 전환" }`처럼 설명과 함께 적거나, `managed_db`처럼 id만 적는다. 걸린 규칙들의 해결 조건이 `plan.json`의 `requires`에 `[{ id, hint?, rule_id, allowed_targets }]`로 모여(id로 합치고 정렬) 다음 단계(AI 수정 파트)가 무엇을 고쳐야 하는지 읽는다. `allowed_targets`는 그 결정서의 최종 `targets`이고, 차단이면 차단 전 마지막 `targets`다. 해결 조건은 그 위치 안에서만 충족해야 하므로 hint에는 위치를 적지 않는다 (결정 설명이 위치를 따로 붙인다).
+
+**규정집 문구의 다국어**: `reason`과 `requires[].hint`는 문자열(한국어) 또는 `{ ko: "...", ja: "..." }`로 적는다. 결정서의 `reason`/`hint`는 ko 문자열 그대로이고, ja가 있으면 선택 필드 `reason_i18n` / `hint_i18n`에 `{ ja }`가 함께 실린다. 결정 설명은 lang에 맞는 문구를 쓰고 없으면 ko로 대체한다. 기본 규칙(R1~R7, RB1~RB4, default)에는 일본어 문구가 채워져 있다. reason과 hint에는 digest 전체나 `cloud_run` 같은 내부 이름을 넣지 않는다 (설명이 위치와 버전을 따로 붙이고, 혹시 들어 있어도 digest는 앞 12자로 줄인다). `block`이나 `needs_approval`을 내는 규칙은 해결 조건이 최소 1개 있어야 하며 없으면 정책 로드 에러다. 엔진이 교집합 공백으로 스스로 차단할 때는 `resolve_target_conflict`를 넣는다.
 
 **기본 규칙 (가상 플랫폼팀 예시)**
 
@@ -108,8 +110,8 @@ default:
 | R2 | `test.run_id ≠ pii.run_id` | block (입력 불일치) | rerun_same_run: 같은 run_id로 테스트와 개인정보 판정을 다시 실행 |
 | R3 | 확신 없는 개인정보 후보 있음 | needs_approval | human_review_pii: 해당 칼럼이 개인정보인지 사람이 확인 |
 | R4 | 개인정보 후보 있음 | targets [local], failover 금지 | |
-| R5 | `test.facts.db = sqlite` | targets [local] | managed_db: SQLite를 PostgreSQL로 전환 (allowed_targets 안의 환경에서) |
-| R6 | `test.facts.writes_local_file`에 `/tmp/`, `*.log`, DB 파일(`*.db`, `*.sqlite`, `*.sqlite3`, 대소문자 무시) 제외 원소 있음 | targets [local] | object_storage: 로컬 폴더에 쓰는 파일을 오브젝트 스토리지로 이전 (allowed_targets 안의 환경에서) |
+| R5 | `test.facts.db = sqlite` | targets [local] | managed_db: SQLite를 PostgreSQL로 전환 |
+| R6 | `test.facts.writes_local_file`에 `/tmp/`, `*.log`, DB 파일(`*.db`, `*.sqlite`, `*.sqlite3`, 대소문자 무시) 제외 원소 있음 | targets [local] | object_storage: 로컬 폴더에 쓰는 파일을 오브젝트 스토리지로 이전 |
 | R7 | `test.facts.migration.destructive = true` (DROP/RENAME/타입 변경/DEFAULT 없는 NOT NULL 추가/SET NOT NULL/TRUNCATE) | block | two_phase_migration: 파괴적 변경을 확장→전환→정리 2단계 배포로 나누기 (먼저 새 구조를 추가하고, 옛 구조는 다음 배포에서 제거) |
 | default | | targets [local, cloud_run], failover 허용 | |
 
@@ -153,7 +155,8 @@ R5의 이유: 클라우드에서는 인스턴스가 교체되면 SQLite 파일�
 - `decision`: `allow` | `block` | `needs_approval`
 - `targets`: `block`이면 빈 배열
 - `rules`: 평가된 모든 규칙과 결과. `result`는 `matched` / `not_matched` / `matched_after_block`(차단이 정해진 뒤 걸림)
-- `requires`: 해결 조건 `[{ id, hint?, rule_id, allowed_targets }]`. 걸린 규칙들의 것을 id로 합치고 정렬. `allowed_targets`는 끝까지 좁힌 `targets`(차단으로 비면 비기 직전의 `targets`)이며 해결 조건은 그 안에서만 충족한다. `block`/`needs_approval`이면 항상 1개 이상. 하나도 없으면 필드가 없다. 예: `[{ "id": "managed_db", "hint": "SQLite를 PostgreSQL로 전환 (allowed_targets 안의 환경에서)", "rule_id": "R5", "allowed_targets": ["local"] }]`
+- `requires`: 해결 조건 `[{ id, hint?, hint_i18n?, rule_id, allowed_targets }]`. 걸린 규칙들의 것을 id로 합치고 정렬. `allowed_targets`는 끝까지 좁힌 `targets`(차단으로 비면 비기 직전의 `targets`)이며 해결 조건은 그 안에서만 충족한다. `block`/`needs_approval`이면 항상 1개 이상. 하나도 없으면 필드가 없다. 예: `[{ "id": "managed_db", "hint": "SQLite를 PostgreSQL로 전환", "hint_i18n": { "ja": "SQLiteをPostgreSQLへ移行" }, "rule_id": "R5", "allowed_targets": ["local"] }]`
+- `rules[].reason_i18n`: 정책에 ja 문구가 있을 때만 `{ ja }`가 함께 실린다
 - `rules[].reason`은 `matched`와 `matched_after_block`일 때만 있다
 - `plan_hash`: `{ inputs: {test, pii}, policy, plan(해시 제외) }`를 키 정렬 JSON으로 만든 뒤 sha256. 입력·정책·결과 중 하나라도 바뀌면 달라진다
 
@@ -185,7 +188,7 @@ npx tsx src/stage.ts --src samples/signup-contact --test fixtures/01-allow/test_
 
 보안 단계 실행기에 `--explain`을 주면 out-dir에 `explain.ko.md`와 `explain.ja.md`를 함께 쓴다.
 
-구성은 결론 한 줄(허용·승인 필요·차단과 배포 위치), failover를 쉬운 말로, 이유(걸린 규칙의 reason, 차단 뒤에 걸린 규칙은 따로), 해결 조건(무엇을, 어디에서), 결정 지문(plan_hash 앞 12자)과 이미지 digest 앞 12자 순이다. 규칙 id는 괄호로만 보조 표시한다. 대상 이름은 `local` → 온프레(사내) / オンプレ(社内), `cloud_run` → Cloud Run이다. 규칙의 reason 문구 자체는 policy.yaml에 적힌 언어로 나온다.
+구성은 결론 한 줄(허용·승인 필요·차단과 배포 위치), failover를 쉬운 말로, 이유(걸린 규칙의 reason, 차단 뒤에 걸린 규칙은 따로), 해결 조건(무엇을, 어디에서), 결정 지문(plan_hash 앞 12자)과 이미지 digest 앞 12자 순이다. 규칙 id는 괄호로만 보조 표시한다. 대상 이름은 `local` → 온프레(사내) / オンプレ（社内）, `cloud_run` → Cloud Run이다. 규칙의 reason과 hint는 결정서의 `reason_i18n` / `hint_i18n`에 해당 언어가 있으면 그것을 쓰고, 없으면 ko로 대체한다. reason이나 hint 안에 sha256 digest 전체가 들어 있어도 앞 12자로 줄인다. 일본어 출력은 단어 사이 공백 없이, 괄호는 전각（）으로 쓴다.
 
 **예시 (ko)** — fixtures/02-block-test-failed
 
@@ -209,33 +212,33 @@ npx tsx src/stage.ts --src samples/signup-contact --test fixtures/01-allow/test_
 ## 해결 조건
 
 - **재생 불일치 요청을 고친 뒤 다시 테스트** — 충족 위치: 온프레(사내) 안에서만 (규칙 R1, `fix_tests`)
-- **SQLite를 PostgreSQL로 전환 (allowed_targets 안의 환경에서)** — 충족 위치: 온프레(사내) 안에서만 (규칙 R5, `managed_db`)
+- **SQLite를 PostgreSQL로 전환** — 충족 위치: 온프레(사내) 안에서만 (규칙 R5, `managed_db`)
 
 ---
 
-결정 지문 `22f8da84d1c3` · 이미지 `sha256:b2c3d4e5f607`
+결정 지문 `3bb2b6ebe119` · 이미지 `sha256:b2c3d4e5f607`
 ```
 
 **예시 (ja)** — fixtures/03-pii-confident
 
 ```markdown
-# デプロイ判定: todo (実行 r-003)
+# デプロイ判定：todo（実行r-003）
 
-**デプロイ許可。** このイメージを オンプレ(社内) にデプロイします。
+**デプロイ可。**このイメージをオンプレ（社内）にデプロイします。
 
-オンプレが停止しても Cloud Run には切り替えません。Cloud Run にはデプロイしないためです。
+オンプレが停止してもCloud Runには切り替えません。Cloud Runにはデプロイしないためです。
 
 ## 理由
 
-- 개인정보(contact, phone) 발견: src/routes/signup.js:24 (ルール R4)
+- 個人情報（contact、phone）を検出：src/routes/signup.js:24（ルールR4）
 
 ## 解決条件
 
-- 解決すべきことはありません。
+- 対応が必要な事項はありません。
 
 ---
 
-判定フィンガープリント `98b0e264583b` · イメージ `sha256:c3d4e5f60718`
+判定ハッシュ`ae9a50b931be`・イメージ`sha256:c3d4e5f60718`
 ```
 
 ## 파괴적 DB 마이그레이션 판정 (`src/migration/`)
@@ -367,7 +370,7 @@ npx tsx src/rollback/cli.ts --request rollback_request.json --policy policy.yaml
 |---|---|---|
 | RB1 | `stage = before_cutover` | keep_stable (되돌릴 것이 없음, 정상 버전이 계속 받음) |
 | RB2 | DB 마이그레이션이 정상 버전과 비호환 | manual_recovery (자동 롤백 차단). 해결 조건 manual_db_recovery: DB 스키마를 이전 버전과 호환되게 복구한 뒤 롤백 |
-| RB3 | 온프레에 개인정보가 쓰임 | targets [local], failover 금지 (cloud_run으로 되돌리지 않음) |
+| RB3 | 온프레에 개인정보가 쓰임 | targets [local], failover 금지 (Cloud Run으로 되돌리지 않음) |
 | RB4 | 컷오버 후 쓰기 없음 | rollback (정상 버전의 대상 그대로) |
 | default | | rollback, failover 허용 (대상은 좁히기 규칙을 따름) |
 
@@ -389,9 +392,9 @@ npx tsx src/rollback/cli.ts --request rollback_request.json --policy policy.yaml
   "rules": [
     { "id": "RB1", "result": "not_matched" },
     { "id": "RB2", "result": "not_matched" },
-    { "id": "RB3", "result": "matched", "reason": "온프레에 개인정보가 쓰임: cloud_run 으로 되돌리지 않고 ..." },
+    { "id": "RB3", "result": "matched", "reason": "온프레에 개인정보가 쓰임: Cloud Run으로 되돌리지 않고 온프레 안에서만 정상 버전으로 복구", "reason_i18n": { "ja": "..." } },
     { "id": "RB4", "result": "not_matched" },
-    { "id": "default", "result": "matched", "reason": "정상 버전(sha256:0000...)으로 복귀. 대상은 좁히기 규칙을 따름" }
+    { "id": "default", "result": "matched", "reason": "정상 버전으로 복귀. 대상은 좁히기 규칙을 따름", "reason_i18n": { "ja": "..." } }
   ],
   "plan_hash": "..."
 }

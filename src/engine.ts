@@ -10,6 +10,7 @@ import { createHash } from "node:crypto";
 import type {
   Condition,
   Decision,
+  I18nText,
   JsonPrimitive,
   PiiReport,
   Plan,
@@ -149,7 +150,12 @@ export class RequirementCollector {
 
   add(req: Requirement, ruleId: string): void {
     if (this.map.has(req.id)) return;
-    this.map.set(req.id, { id: req.id, ...(req.hint !== undefined ? { hint: req.hint } : {}), rule_id: ruleId });
+    this.map.set(req.id, {
+      id: req.id,
+      ...(req.hint !== undefined ? { hint: req.hint.ko } : {}),
+      ...(req.hint?.ja !== undefined ? { hint_i18n: { ja: req.hint.ja } } : {}),
+      rule_id: ruleId,
+    });
   }
 
   addAll(reqs: readonly Requirement[] | undefined, ruleId: string): void {
@@ -171,7 +177,10 @@ export class RequirementCollector {
 /** 규칙들이 허용하는 대상의 교집합이 비어 엔진이 스스로 차단할 때 넣는 해결 조건 */
 export const TARGET_CONFLICT_REQUIREMENT: Requirement = {
   id: "resolve_target_conflict",
-  hint: "규칙들이 허용하는 배포 대상의 교집합이 비어 있음. 정책 또는 앱을 조정해 한 대상이라도 남게 한다",
+  hint: {
+    ko: "규칙들이 허용하는 배포 대상의 교집합이 비어 있음. 정책 또는 앱을 조정해 한 대상이라도 남게 한다",
+    ja: "ルールが許容するデプロイ先の共通部分が空。ポリシーまたはアプリを調整し、少なくとも1つのデプロイ先を残す",
+  },
 };
 
 /**
@@ -182,6 +191,31 @@ export function renderReason(template: string, root: object, items: unknown[]): 
   if (items.length === 0) return renderTemplate(template, root, root);
   return items.map((item) => renderTemplate(template, root, item)).join("; ");
 }
+
+/** 렌더링된 근거: ko 본문 + (정책에 ja 가 있으면) reason_i18n */
+export interface RenderedReason {
+  reason: string;
+  reason_i18n?: { ja: string };
+}
+
+export function renderI18nReason(text: I18nText, root: object, items: unknown[]): RenderedReason {
+  const reason = renderReason(text.ko, root, items);
+  return text.ja !== undefined ? { reason, reason_i18n: { ja: renderReason(text.ja, root, items) } } : { reason };
+}
+
+/** 엔진이 스스로 붙이는 문구 (교집합 공백). 두 언어 모두 준비한다 */
+export type Suffix = { ko: (prev: string, rule: string) => string; ja: (prev: string, rule: string) => string };
+
+export function appendSuffix(rendered: RenderedReason, suffix: Suffix, prev: readonly string[], rule: readonly string[]): RenderedReason {
+  const out: RenderedReason = { reason: rendered.reason + suffix.ko(prev.join(", "), rule.join(", ")) };
+  if (rendered.reason_i18n) out.reason_i18n = { ja: rendered.reason_i18n.ja + suffix.ja(prev.join(", "), rule.join(", ")) };
+  return out;
+}
+
+export const TARGET_CONFLICT_SUFFIX: Suffix = {
+  ko: (prev, rule) => ` → 허용된 배포 대상이 없음 (지금까지 [${prev}] ∩ 규칙 [${rule}] = [])`,
+  ja: (prev, rule) => `→許容されるデプロイ先がありません（これまで[${prev}]∩ルール[${rule}]=[]）`,
+};
 
 // ---------------------------------------------------------------------------
 // 결정 병합: allow < needs_approval < block (강한 쪽만 남는다)
@@ -270,7 +304,7 @@ export function decide(test: TestResult, pii: PiiReport, policy: Policy): Plan {
       continue;
     }
 
-    let reason = renderReason(rule.reason, root, result.items);
+    let rendered = renderI18nReason(rule.reason, root, result.items);
     // 이미 block 이면 뒤 규칙은 decision 을 바꾸지 못한다. targets 좁히기와 해결 조건만 반영한다.
     const afterBlock = decision === "block";
 
@@ -282,7 +316,7 @@ export function decide(test: TestResult, pii: PiiReport, policy: Policy): Plan {
       const narrowed = intersect(targets, rule.then.targets);
       if (narrowed.length === 0) {
         decision = "block";
-        reason += ` → 허용된 배포 대상이 없음 (지금까지 [${targets.join(", ")}] ∩ 규칙 [${rule.then.targets.join(", ")}] = [])`;
+        rendered = appendSuffix(rendered, TARGET_CONFLICT_SUFFIX, targets, rule.then.targets);
         requires.add(TARGET_CONFLICT_REQUIREMENT, rule.id);
       }
       targets = narrowed;
@@ -293,7 +327,7 @@ export function decide(test: TestResult, pii: PiiReport, policy: Policy): Plan {
     if (rule.then.failover_allowed === false) failoverAllowed = false;
     else if (rule.then.failover_allowed === true && failoverAllowed === undefined) failoverAllowed = true;
 
-    rules.push({ id: rule.id, result: afterBlock ? "matched_after_block" : "matched", reason });
+    rules.push({ id: rule.id, result: afterBlock ? "matched_after_block" : "matched", ...rendered });
 
     if (rule.halt) break;
   }
@@ -303,7 +337,7 @@ export function decide(test: TestResult, pii: PiiReport, policy: Policy): Plan {
     targets = [];
   } else if (!narrowedByRule) {
     // 어떤 규칙도 targets 를 정하지 않았다: default 가 그대로 쓰였음을 기록한다.
-    rules.push({ id: "default", result: "matched", reason: renderTemplate(policy.default.reason, root, root) });
+    rules.push({ id: "default", result: "matched", ...renderI18nReason(policy.default.reason, root, []) });
   }
 
   // false 가 이긴다. 아무도 정하지 않았으면 default. failover 에 필요한 대상이 빠져 있으면 무조건 false.
