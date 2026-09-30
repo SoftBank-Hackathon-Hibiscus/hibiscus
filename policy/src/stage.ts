@@ -17,13 +17,15 @@ const USAGE = `사용법:
   --since       마이그레이션 판정: 이 이름보다 뒤의 마이그레이션만 검사
   --log         결정 기록 파일 (기본 ./decisions.jsonl)
   --explain     out-dir 에 사람이 읽는 설명 explain.ko.md, explain.ja.md 를 함께 쓴다
+  --source-revision  커밋 SHA (소문자 hex 7~40자). test_result.source_revision 보다 우선한다.
+                둘 다 있는데 서로 다르면 실행 오류(종료 코드 1)
   --json        사람이 읽는 출력 대신 한 줄 JSON 요약을 stdout 에 출력
   --help        이 도움말
 
 종료 코드: allow 0, needs_approval 2, block 3, 실행 오류 1
 out-dir 에 pii.json, plan.json, 정책에 실제로 들어간 test_result.json 을 쓴다.
 test_result 의 facts.migration 이 없으면 마이그레이션 판정을 돌려 채우고 migration.json 도 쓴다.
-run_id 는 test_result.json 의 값을 쓴다.`;
+run_id 는 test_result.json 의 값을 쓴다. source_revision 은 있을 때만 plan.json 과 결정 기록에 실린다.`;
 
 const FLAGS = new Set(["json", "explain"]);
 
@@ -46,6 +48,7 @@ async function main(argv: string[]): Promise<number> {
     logPath: args.log,
     since: args.since,
     explain: args.explain === "true",
+    sourceRevision: args["source-revision"],
   });
 
   if (json) {
@@ -55,7 +58,7 @@ async function main(argv: string[]): Promise<number> {
   }
 
   const { summary, plan } = result;
-  console.log(`[stage] run_id=${summary.run_id} digest=${plan.digest}`);
+  console.log(`[stage] run_id=${summary.run_id} digest=${plan.digest}${plan.source_revision ? ` source_revision=${plan.source_revision}` : ""}`);
   for (const n of result.notes) console.log(`  ! ${n}`);
   console.log(`  pii      : ${result.pii.pii.length}건 -> ${summary.pii_path}`);
   for (const p of result.pii.pii) console.log(`    - ${p.table}.${p.column} ${p.kind} confident=${p.confident} ${p.evidence}`);

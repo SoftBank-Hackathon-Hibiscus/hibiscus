@@ -5,6 +5,7 @@
  * - 규칙 id(R1 등)는 괄호로만 보조 표시하고 본문은 사람이 읽는 문장으로 쓴다.
  * - lang: ko(기본) | ja. 규칙의 reason/hint 는 결정서의 *_i18n 에 해당 언어가 있으면 그것을, 없으면 ko 를 쓴다.
  * - reason/hint 안의 sha256:<64자> 는 앞 12자로 줄인다 (안전장치).
+ * - 결정서에 source_revision(커밋 SHA)이 있으면 맨 아래 줄에 앞 7자리를 표시한다.
  */
 import type { Plan, PlanRequirement, RollbackPlan, RuleResult } from "./schema.js";
 
@@ -16,6 +17,7 @@ export interface ExplainOptions {
 const ONPREM = "onprem";
 const CLOUD = "cloud_run";
 const SHORT = 12;
+const SHORT_REVISION = 7;
 
 interface Strings {
   targetName: Record<string, string>;
@@ -45,6 +47,7 @@ interface Strings {
   requiresNote: string;
   requirementLine: (what: string, targets: string, ruleId: string, id: string) => string;
   footer: (planHash: string, digestLabel: string, digest: string) => string;
+  revisionLine: (revision: string) => string;
   imageLabel: string;
   serveLabel: string;
   serveNone: string;
@@ -87,6 +90,7 @@ const STRINGS: Record<Lang, Strings> = {
     requiresNote: "한 규칙이 해결 조건을 여러 개 요구하면 모두 충족해야 합니다. 수정 후에는 새 버전으로 전체 정책을 다시 평가합니다.",
     requirementLine: (what, t, ruleId, id) => `- **${what}** — 이 위반을 해소하면 나머지 제약상 가능한 배포 위치: ${t} (규칙 ${ruleId}, \`${id}\`)`,
     footer: (hash, label, digest) => `결정 지문 \`${hash}\` · ${label} \`${digest}\``,
+    revisionLine: (revision) => `커밋 \`${revision}\``,
     imageLabel: "이미지",
     serveLabel: "트래픽을 받을 버전",
     serveNone: "미정",
@@ -127,6 +131,7 @@ const STRINGS: Record<Lang, Strings> = {
     requiresNote: "1つのルールが複数の解決条件を要求する場合はすべて満たす必要があります。修正後は新しいバージョンでポリシー全体を再評価します。",
     requirementLine: (what, t, ruleId, id) => `- **${what}** — この違反を解消した場合に残りの制約上可能なデプロイ先：${t}（ルール${ruleId}、\`${id}\`）`,
     footer: (hash, label, digest) => `判定ハッシュ\`${hash}\`・${label}\`${digest}\``,
+    revisionLine: (revision) => `コミット\`${revision}\``,
     imageLabel: "イメージ",
     serveLabel: "トラフィックを受けるバージョン",
     serveNone: "未定",
@@ -148,6 +153,13 @@ export function shortDigest(digest: string): string {
   return prefix + hex.slice(0, SHORT);
 }
 export const shortHash = (hash: string): string => hash.slice(0, SHORT);
+/** 커밋 SHA 는 앞 7자 */
+export const shortRevision = (revision: string): string => revision.slice(0, SHORT_REVISION);
+
+/** 맨 아래 줄: 커밋 앞 7자리. source_revision 이 없으면 아무 줄도 넣지 않는다 */
+function revisionLines(revision: string | undefined, s: Strings): string[] {
+  return revision !== undefined ? [s.revisionLine(shortRevision(revision))] : [];
+}
 
 /** 문장 안에 든 긴 digest 를 앞 12자로 줄인다 (규칙 reason 이 digest 를 통째로 넣었을 때의 안전장치) */
 export function shortenDigests(text: string): string {
@@ -228,6 +240,7 @@ export function explainPlan(plan: Plan, opts: ExplainOptions = {}): string {
     "---",
     "",
     s.footer(shortHash(plan.plan_hash), s.imageLabel, shortDigest(plan.digest)),
+    ...revisionLines(plan.source_revision, s),
     "",
   ];
   return lines.join("\n");
@@ -253,6 +266,7 @@ export function explainRollbackPlan(plan: RollbackPlan, opts: ExplainOptions = {
     "---",
     "",
     s.footer(shortHash(plan.plan_hash), s.serveLabel, serve),
+    ...revisionLines(plan.source_revision, s),
     "",
   ];
   return lines.join("\n");

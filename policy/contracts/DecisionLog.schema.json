@@ -25,6 +25,11 @@
           "pattern": "^sha256:[0-9a-f]{64}$",
           "description": "결정한 이미지의 digest (plan.digest)"
         },
+        "source_revision": {
+          "description": "plan.source_revision. plan 에 있을 때만",
+          "type": "string",
+          "pattern": "^[0-9a-f]{7,40}$"
+        },
         "decision": {
           "type": "string",
           "enum": [
@@ -88,6 +93,11 @@
           "type": "string",
           "pattern": "^sha256:[0-9a-f]{64}$",
           "description": "문제가 난 배포 후보(candidate)의 digest"
+        },
+        "source_revision": {
+          "description": "rollback_plan.source_revision. 요청에 있을 때만",
+          "type": "string",
+          "pattern": "^[0-9a-f]{7,40}$"
         },
         "serve_digest": {
           "anyOf": [

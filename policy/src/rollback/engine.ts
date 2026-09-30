@@ -131,6 +131,7 @@ export function decideRollback(request: RollbackRequest, policy: Policy): Rollba
   const body: Omit<RollbackPlan, "plan_hash"> = {
     run_id: request.run_id,
     app: request.app,
+    ...(request.source_revision !== undefined ? { source_revision: request.source_revision } : {}),
     decision,
     serve_digest: serveDigest,
     targets,

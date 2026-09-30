@@ -54,6 +54,8 @@ npm run typecheck
 
 `digest`는 `sha256:` 뒤에 소문자 hex 64자, `run_id`는 영문·숫자·`._-`만 1~64자다. 결정 기록의 digest와 plan_hash도 같은 형식으로 검증된다.
 
+`source_revision`(선택)은 테스트한 소스의 **커밋 SHA**로, 소문자 hex 7~40자다. 백엔드가 webhook의 커밋 SHA를 고정해서 넘긴다. 아직 선택이며 `"unknown"`은 없는 것으로 취급한다. 값이 있으면 `plan.json`과 결정 기록에 그대로 전달되고 `plan_hash`에도 반영된다. 없으면 출력에 필드 자체가 없어 기존 `plan_hash`가 바뀌지 않는다.
+
 `facts`는 정책이 읽는 키만 타입이 정해져 있다. `db`는 `sqlite` | `postgres` | `mysql` | `none`(소문자), `writes_local_file`은 문자열 배열, `migration`은 파괴적 마이그레이션 판정 `{ destructive, backward_compatible, findings }`이다 (없으면 보안 단계 실행기가 채운다). 그 밖의 키는 자유롭게 넣을 수 있고 그대로 보존된다. 규칙이 정의되지 않은 facts 키를 읽으면 정책을 불러올 때 경고가 난다. 규칙이 실제로 읽는 경로 목록은 [contracts/README.md](contracts/README.md)의 "정책이 읽는 필드"에 자동 생성된다.
 
 ### `pii.json` (개인정보 후보. 지금은 가짜 파일, 나중에 AI 판정 결과)
@@ -145,6 +147,7 @@ R5의 이유: 클라우드에서는 인스턴스가 교체되면 SQLite 파일�
   "run_id": "r-004",
   "app": "todo",
   "digest": "sha256:d4e5...",
+  "source_revision": "9f8e7d6c5b4a39281706f5e4d3c2b1a0f9e8d7c6",
   "decision": "needs_approval",
   "targets": ["onprem"],
   "failover_allowed": false,
@@ -159,6 +162,7 @@ R5의 이유: 클라우드에서는 인스턴스가 교체되면 SQLite 파일�
 ```
 
 - `decision`: `allow` | `block` | `needs_approval`
+- `source_revision`: test_result의 커밋 SHA 그대로. 입력에 있을 때만 (없거나 `"unknown"`이면 필드가 없다)
 - `targets`: `block`이면 빈 배열
 - `rules`: 평가된 모든 규칙과 결과. block 이후에도 해결 조건과 대상 제한을 모으기 위해 끝까지 평가하며, 그때 걸린 규칙은 `matched_after_block`으로 기록한다 (halt 규칙이 걸리면 즉시 멈춤). `result`는 `matched` / `not_matched` / `matched_after_block`
 - 출력 파일(plan, rollback_plan, decisions.jsonl)의 객체는 모두 strict라 추가 필드가 있으면 zod와 JSON Schema 모두 거부한다. 입력 파일은 모르는 필드를 허용한다.
@@ -170,11 +174,11 @@ R5의 이유: 클라우드에서는 인스턴스가 교체되면 SQLite 파일�
 ### `decisions.jsonl` (한 줄씩 추가만)
 
 ```json
-{"kind":"deploy","time":"2026-09-29T13:40:02.172Z","run_id":"r-004","digest":"sha256:d4e5...","decision":"needs_approval","targets":["onprem"],"rule_ids":["R3","R4"],"plan_hash":"7ecaf343..."}
+{"kind":"deploy","time":"2026-09-29T13:40:02.172Z","run_id":"r-004","digest":"sha256:d4e5...","source_revision":"9f8e7d6c5b4a39281706f5e4d3c2b1a0f9e8d7c6","decision":"needs_approval","targets":["onprem"],"rule_ids":["R3","R4"],"plan_hash":"7ecaf343..."}
 {"kind":"rollback","time":"2026-09-29T14:02:11.004Z","run_id":"r-012","digest":"sha256:3333...","serve_digest":"sha256:0000...","decision":"rollback","targets":["onprem"],"failover_allowed":false,"rule_ids":["RB3","default"],"plan_hash":"..."}
 ```
 
-`kind`로 배포 결정과 롤백 결정을 구분한다. `rule_ids`는 걸린 규칙(`matched`와 `matched_after_block`) 전부를 구분 없이 id만 담으며, 정책 CLI·롤백 CLI·실행기가 같은 함수로 만든다. 시간 값은 CLI에서만 붙이고 엔진(`decide`, `decideRollback`)은 시간을 쓰지 않는다.
+`kind`로 배포 결정과 롤백 결정을 구분한다. `rule_ids`는 걸린 규칙(`matched`와 `matched_after_block`) 전부를 구분 없이 id만 담으며, 정책 CLI·롤백 CLI·실행기가 같은 함수로 만든다. 시간 값은 CLI에서만 붙이고 엔진(`decide`, `decideRollback`)은 시간을 쓰지 않는다. `source_revision`은 결정서(plan, rollback_plan)에 있을 때만 그대로 실린다.
 
 ## 결정 설명 (`src/explainer.ts`, `src/explain.ts`)
 
@@ -195,7 +199,7 @@ npx tsx src/stage.ts --src samples/signup-contact --test fixtures/01-allow/test_
 
 보안 단계 실행기에 `--explain`을 주면 out-dir에 `explain.ko.md`와 `explain.ja.md`를 함께 쓴다.
 
-구성은 결론 한 줄(허용·승인 필요·차단과 배포 위치), failover를 쉬운 말로, 이유(걸린 규칙의 reason, 차단 뒤에 걸린 규칙은 따로), 해결 조건(무엇을, 어디에서), 결정 지문(plan_hash 앞 12자)과 이미지 digest 앞 12자 순이다. 규칙 id는 괄호로만 보조 표시한다. 대상 이름은 `onprem` → 온프레(사내) / オンプレ（社内）, `cloud_run` → Cloud Run이다. 규칙의 reason과 hint는 결정서의 `reason_i18n` / `hint_i18n`에 해당 언어가 있으면 그것을 쓰고, 없으면 ko로 대체한다. reason이나 hint 안에 sha256 digest 전체가 들어 있어도 앞 12자로 줄인다. 일본어 출력은 단어 사이 공백 없이, 괄호는 전각（）으로 쓴다.
+구성은 결론 한 줄(허용·승인 필요·차단과 배포 위치), failover를 쉬운 말로, 이유(걸린 규칙의 reason, 차단 뒤에 걸린 규칙은 따로), 해결 조건(무엇을, 어디에서), 결정 지문(plan_hash 앞 12자)과 이미지 digest 앞 12자 순이다. 결정서에 `source_revision`이 있으면 맨 아래 줄에 커밋 앞 7자리를 표시한다 (`커밋 \`9f8e7d6\`` / `コミット\`9f8e7d6\``). 규칙 id는 괄호로만 보조 표시한다. 대상 이름은 `onprem` → 온프레(사내) / オンプレ（社内）, `cloud_run` → Cloud Run이다. 규칙의 reason과 hint는 결정서의 `reason_i18n` / `hint_i18n`에 해당 언어가 있으면 그것을 쓰고, 없으면 ko로 대체한다. reason이나 hint 안에 sha256 digest 전체가 들어 있어도 앞 12자로 줄인다. 일본어 출력은 단어 사이 공백 없이, 괄호는 전각（）으로 쓴다.
 
 **예시 (ko)** — fixtures/02-block-test-failed
 
@@ -312,6 +316,7 @@ npx tsx src/stage.ts --src samples/signup-contact --test fixtures/01-allow/test_
 | `--since` | 마이그레이션 판정에서 이 이름보다 뒤의 파일만 검사 |
 | `--log` | 결정 기록 파일. 기본 `./decisions.jsonl` |
 | `--explain` | out-dir에 사람이 읽는 설명 `explain.ko.md`, `explain.ja.md`를 함께 쓴다 |
+| `--source-revision` | 커밋 SHA (소문자 hex 7~40자). `test_result.source_revision`보다 우선한다. 둘 다 있는데 서로 다르면 실행 오류(종료 코드 1). `"unknown"`은 받지 않는다 |
 | `--json` | 사람이 읽는 출력 대신 한 줄 JSON 요약을 stdout에 출력 |
 
 순서는 test_result 검증 → policy 로드 → 마이그레이션 판정 → 개인정보 판정 → 정책 결정 → 파일 저장 → 결정 기록이다. 마이그레이션 판정은 항상 실행기가 직접 계산한다. test_result에 `facts.migration`이 있으면 그 값을 쓰되 `destructive`가 실행기 계산과 다르면 두 값을 보여주며 실행 오류로 멈춘다. `--since`로 준 이름을 마이그레이션 목록에서 찾지 못하면 실행 오류다(잘못된 이름이 검사 범위를 조용히 바꾸지 않게). 앱 폴더 안의 symlink는 따라가지 않고 건너뛰며 그 경로를 알린다. 중간에 실패하면 `오류 [단계: test_result] ...`처럼 어느 단계에서 왜 실패했는지 출력한다. out-dir에는 `pii.json`, `plan.json`과 함께 정책에 실제로 들어간 `test_result.json`이 남고, 마이그레이션을 실행기가 판정했으면 `migration.json`도 남는다. 남은 `test_result.json`으로 `src/cli.ts`를 돌리면 같은 plan_hash가 나온다.
@@ -323,7 +328,7 @@ npx tsx src/stage.ts --src samples/signup-contact --test fixtures/01-allow/test_
 | block | 3 |
 | 실행 오류 (파일 없음, 형식 오류 등) | 1 |
 
-`--json`의 요약은 `{ run_id, decision, targets, failover_allowed, requires, plan_path, pii_path }` 한 줄이다. 따로 실행한 개인정보 CLI와 정책 CLI의 결과와 같은 파일이 나온다 (테스트로 확인).
+`--json`의 요약은 `{ run_id, source_revision?, decision, targets, failover_allowed, requires, plan_path, pii_path }` 한 줄이다 (`source_revision`은 있을 때만). 따로 실행한 개인정보 CLI와 정책 CLI의 결과와 같은 파일이 나온다 (테스트로 확인).
 
 ```bash
 npx tsx src/stage.ts --src samples/ambiguous --test fixtures/01-allow/test_result.json --policy policy.yaml --out-dir out/r-001 --json
@@ -360,6 +365,7 @@ npx tsx src/rollback/cli.ts --request rollback_request.json --policy policy.yaml
   "run_id": "r-010",
   "app": "todo",
   "stage": "after_cutover",
+  "source_revision": "9f8e7d6c5b4a39281706f5e4d3c2b1a0f9e8d7c6",
   "candidate": { "digest": "sha256:...", "targets": ["onprem"] },
   "stable":    { "digest": "sha256:...", "targets": ["onprem", "cloud_run"] },
   "state": {
@@ -372,6 +378,7 @@ npx tsx src/rollback/cli.ts --request rollback_request.json --policy policy.yaml
 
 - `candidate`: 이번 배포 후보 (문제가 난 버전). `stable`: 이번 배포 전 정상 버전 (되돌아갈 곳)
 - `stage`: `before_cutover`(트래픽을 후보로 넘기기 전 실패) / `after_cutover`(넘긴 뒤 실패)
+- `source_revision`(선택): 배포 후보의 커밋 SHA. test_result와 같은 형식이며 `"unknown"`은 없는 것으로 취급한다. 있으면 `rollback_plan.json`과 결정 기록에 그대로 실리고 `plan_hash`에 반영된다
 
 ### 규칙 (`policy.yaml`의 `rollback` 섹션, 조건 문법은 배포 규칙과 같고 컨텍스트는 `{ request }`)
 
@@ -394,6 +401,7 @@ npx tsx src/rollback/cli.ts --request rollback_request.json --policy policy.yaml
 ```json
 {
   "run_id": "r-012", "app": "todo",
+  "source_revision": "9f8e7d6c5b4a39281706f5e4d3c2b1a0f9e8d7c6",
   "decision": "rollback",
   "serve_digest": "sha256:0000...",
   "targets": ["onprem"],

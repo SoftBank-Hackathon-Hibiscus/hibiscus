@@ -385,6 +385,8 @@ export function decide(test: TestResult, pii: PiiReport, policy: Policy): Plan {
     run_id: test.run_id,
     app: test.app,
     digest: test.digest,
+    // 커밋 SHA 는 입력에 있을 때만 그대로 싣는다 (없으면 필드 자체가 없어 기존 plan_hash 가 바뀌지 않는다)
+    ...(test.source_revision !== undefined ? { source_revision: test.source_revision } : {}),
     decision,
     targets,
     failover_allowed: failoverAllowed,
@@ -394,7 +396,7 @@ export function decide(test: TestResult, pii: PiiReport, policy: Policy): Plan {
   };
 
   // 입력(test, pii, policy) 과 결과를 함께 정규화해 해시한다.
-  // -> 입력이 하나라도 바뀌면 hash 가 바뀌고, 같은 입력이면 항상 같다.
+  // -> 입력이 하나라도 바뀌면 hash 가 바뀌고, 같은 입력이면 항상 같다 (source_revision 도 test 에 실려 반영된다).
   const plan_hash = sha256Hex(canonicalize({ inputs: { test, pii }, policy, plan: body }));
   return { ...body, plan_hash };
 }

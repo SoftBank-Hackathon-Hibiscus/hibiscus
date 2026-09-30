@@ -13,6 +13,11 @@
       "type": "string",
       "description": "앱 이름 (요청에서 그대로)"
     },
+    "source_revision": {
+      "description": "배포 후보의 커밋 SHA (rollback_request 에서 그대로). 요청에 있을 때만",
+      "type": "string",
+      "pattern": "^[0-9a-f]{7,40}$"
+    },
     "decision": {
       "type": "string",
       "enum": [

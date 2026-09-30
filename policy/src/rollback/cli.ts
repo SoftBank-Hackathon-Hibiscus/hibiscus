@@ -45,6 +45,7 @@ runCli(() => {
     kind: "rollback",
     run_id: plan.run_id,
     digest: request.candidate.digest,
+    ...(plan.source_revision !== undefined ? { source_revision: plan.source_revision } : {}),
     serve_digest: plan.serve_digest,
     decision: plan.decision,
     targets: plan.targets,
@@ -53,7 +54,7 @@ runCli(() => {
     plan_hash: plan.plan_hash,
   });
 
-  console.log(`[rollback] run_id=${plan.run_id} stage=${request.stage} candidate=${request.candidate.digest} stable=${request.stable.digest}`);
+  console.log(`[rollback] run_id=${plan.run_id} stage=${request.stage} candidate=${request.candidate.digest} stable=${request.stable.digest}${plan.source_revision ? ` source_revision=${plan.source_revision}` : ""}`);
   console.log(`  decision : ${plan.decision}`);
   console.log(`  serve    : ${plan.serve_digest ?? "(none: manual recovery)"}`);
   console.log(`  targets  : ${plan.targets.length ? plan.targets.join(", ") : "(none)"}`);

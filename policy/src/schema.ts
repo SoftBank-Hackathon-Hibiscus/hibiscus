@@ -17,6 +17,25 @@ const RunIdSchema = z
   .regex(/^[A-Za-z0-9._-]{1,64}$/, "run_id 는 영문·숫자·._- 만, 1~64자여야 합니다")
   .describe("파이프라인 실행 id. 영문·숫자·._- 만, 1~64자. 모든 파일이 같은 값을 가져야 한다");
 
+/**
+ * source_revision: 테스트한 소스의 커밋 SHA (백엔드가 webhook 의 커밋 SHA 를 고정해서 넘긴다).
+ * 소문자 hex 7~40자. 출력(plan, rollback_plan, 결정 기록)에는 값이 있을 때만 그대로 실린다.
+ */
+export const SourceRevisionSchema = z
+  .string()
+  .regex(/^[0-9a-f]{7,40}$/, "source_revision 은 소문자 hex 7~40자여야 합니다")
+  .describe("테스트한 소스의 커밋 SHA. 소문자 hex 7~40자");
+
+/**
+ * 입력 쪽 source_revision. 아직 선택이며, 테스트 파트가 짧은 해시나 "unknown" 을 줄 수 있다.
+ * "unknown" 은 없는 것으로 취급한다 (undefined 로 바뀌어 plan_hash 에도 들어가지 않는다).
+ */
+export const SOURCE_REVISION_UNKNOWN = "unknown";
+const SourceRevisionInputSchema = z
+  .union([SourceRevisionSchema, z.literal(SOURCE_REVISION_UNKNOWN).transform((): undefined => undefined)])
+  .optional()
+  .describe(`테스트한 소스의 커밋 SHA (선택). 소문자 hex 7~40자. "${SOURCE_REVISION_UNKNOWN}" 은 없는 것으로 취급한다`);
+
 // ---------------------------------------------------------------------------
 // 파괴적 DB 마이그레이션 판정 결과 (src/migration/ 이 만든다. test_result.facts.migration 에 실린다)
 // ---------------------------------------------------------------------------
@@ -72,6 +91,7 @@ export const TestResultSchema = z
     run_id: RunIdSchema,
     app: z.string().min(1).describe("앱 이름"),
     digest: DigestSchema,
+    source_revision: SourceRevisionInputSchema,
     passed: z.boolean().describe("재생 테스트 통과 여부. false 면 정책 엔진이 차단한다"),
     match: z
       .object({
@@ -380,6 +400,7 @@ export const PlanSchema = z
     run_id: RunIdSchema,
     app: z.string().describe("앱 이름 (test_result 에서 그대로)"),
     digest: DigestSchema,
+    source_revision: SourceRevisionSchema.optional().describe("테스트한 소스의 커밋 SHA (test_result 에서 그대로). 입력에 있을 때만"),
     decision: DecisionSchema,
     targets: z.array(z.string()).describe("배포할 대상 (known_targets 의 부분집합). block 이면 빈 배열"),
     failover_allowed: z.boolean().describe("온프레 장애 시 Cloud Run 으로 전환해도 되는지. onprem 과 cloud_run 이 모두 있을 때만 true 가능"),
@@ -398,6 +419,7 @@ export const RollbackRequestSchema = z
     run_id: RunIdSchema,
     app: z.string().min(1).describe("앱 이름"),
     stage: z.enum(["before_cutover", "after_cutover"]).describe("before_cutover=후보로 트래픽을 넘기기 전 실패, after_cutover=넘긴 뒤 실패"),
+    source_revision: SourceRevisionInputSchema,
     candidate: z
       .object({ digest: DigestSchema, targets: z.array(z.string().min(1)).describe("후보가 배포된 대상") })
       .describe("이번 배포 후보 (문제가 난 버전)"),
@@ -419,6 +441,7 @@ export const RollbackPlanSchema = z
   .strictObject({
     run_id: RunIdSchema,
     app: z.string().describe("앱 이름 (요청에서 그대로)"),
+    source_revision: SourceRevisionSchema.optional().describe("배포 후보의 커밋 SHA (rollback_request 에서 그대로). 요청에 있을 때만"),
     decision: RollbackDecisionSchema,
     serve_digest: DigestSchema.nullable().describe("결정 후 트래픽을 받아야 할 버전. keep_stable / rollback → stable.digest, manual_recovery → null"),
     targets: z.array(z.string()).describe("keep_stable / rollback → stable.targets 에서 좁힌 결과, manual_recovery → []"),
@@ -442,6 +465,7 @@ export const DeployDecisionLogSchema = z
     time: LogTimeSchema,
     run_id: RunIdSchema,
     digest: DigestSchema.describe("결정한 이미지의 digest (plan.digest)"),
+    source_revision: SourceRevisionSchema.optional().describe("plan.source_revision. plan 에 있을 때만"),
     decision: DecisionSchema,
     targets: z.array(z.string()).describe("plan.targets"),
     rule_ids: RuleIdsSchema,
@@ -454,6 +478,7 @@ export const RollbackDecisionLogSchema = z
     time: LogTimeSchema,
     run_id: RunIdSchema,
     digest: DigestSchema.describe("문제가 난 배포 후보(candidate)의 digest"),
+    source_revision: SourceRevisionSchema.optional().describe("rollback_plan.source_revision. 요청에 있을 때만"),
     serve_digest: DigestSchema.nullable().describe("결정 후 트래픽을 받을 버전. manual_recovery 면 null"),
     decision: RollbackDecisionSchema,
     targets: z.array(z.string()).describe("rollback_plan.targets"),

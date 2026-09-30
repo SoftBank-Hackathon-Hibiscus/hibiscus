@@ -135,6 +135,7 @@ export const CONTRACTS: Contract[] = [
         time: EXAMPLE_TIME,
         run_id: plan.run_id,
         digest: plan.digest,
+        ...(plan.source_revision !== undefined ? { source_revision: plan.source_revision } : {}),
         decision: plan.decision,
         targets: plan.targets,
         rule_ids: matchedRuleIds(plan.rules),
@@ -276,10 +277,11 @@ flowchart LR
 
 const AGREEMENTS = `## 팀과 합의가 필요한 점
 
-1. **run_id 와 digest 는 끝까지 그대로 전달한다.** 테스트 파트가 정한 \`run_id\` 와 이미지 \`digest\` 가 test_result → pii → plan → 서명 → 배포 → rollback_request 까지 바뀌지 않아야 한다. 정책 엔진은 test_result 와 pii 의 \`run_id\` 가 다르면 차단한다(R2). \`digest\` 는 \`sha256:\` + 소문자 hex 64자만 받고(결정 기록의 digest 와 plan_hash 도 같은 형식), \`run_id\` 는 영문·숫자·\`._-\` 만 1~64자다. rollback_request 의 \`candidate.targets\` 와 \`stable.targets\` 는 \`known_targets\` 안에 있어야 한다.
+1. **run_id 와 digest 는 끝까지 그대로 전달한다.** \`source_revision\`(커밋 SHA, 선택)도 있으면 그대로 전달한다 (아래 "최근 추가된 필드" 참고). 테스트 파트가 정한 \`run_id\` 와 이미지 \`digest\` 가 test_result → pii → plan → 서명 → 배포 → rollback_request 까지 바뀌지 않아야 한다. 정책 엔진은 test_result 와 pii 의 \`run_id\` 가 다르면 차단한다(R2). \`digest\` 는 \`sha256:\` + 소문자 hex 64자만 받고(결정 기록의 digest 와 plan_hash 도 같은 형식), \`run_id\` 는 영문·숫자·\`._-\` 만 1~64자다. rollback_request 의 \`candidate.targets\` 와 \`stable.targets\` 는 \`known_targets\` 안에 있어야 한다.
 2. **비밀값은 어떤 파일에도 넣지 않는다.** API 키, 토큰, 접속 문자열을 \`facts\`, \`failures\`, \`evidence\` 등에 넣지 말 것. 개인정보 판정 모듈은 근거 조각의 비밀처럼 보이는 값을 \`[REDACTED]\` 로 가리지만, 다른 파트의 파일은 각자 책임진다.
 3. **선택 필드는 "없을 수 있다" 는 뜻이지 "null 을 넣어도 된다" 는 뜻이 아니다.** 예: \`plan.requires\` 는 없거나 객체 배열이다. \`pii[].source\` 도 마찬가지.
 4. **최근 추가된 필드**
+   - \`test_result.source_revision\` / \`rollback_request.source_revision\` (선택, 소문자 hex 7~40자): 테스트한 소스의 **커밋 SHA**. 백엔드가 webhook 의 커밋 SHA 를 고정해서 넘긴다. 아직 선택이며 \`"unknown"\` 은 없는 것으로 취급한다. 값이 있으면 \`plan.source_revision\` / \`rollback_plan.source_revision\` 과 결정 기록(\`decisions.jsonl\`)에 그대로 실리고 \`plan_hash\` 에도 반영된다. 없으면 출력에 필드 자체가 없고 기존 \`plan_hash\` 는 바뀌지 않는다. 보안 단계 실행기의 \`--source-revision\` 옵션이 test_result 의 값보다 우선하며, 둘 다 있는데 다르면 실행 오류(종료 코드 1)다. 결정 설명의 맨 아래 줄에 커밋 앞 7자리가 표시된다.
    - \`plan.requires\` / \`rollback_plan.requires\` (선택, \`[{ id, hint?, rule_id, allowed_targets }]\`): 해결 조건. 걸린 규칙들이 "이 규칙을 피하려면 무엇이 필요한가" 를 적은 것을 id 로 합치고 id 순으로 정렬한 것 (예: \`[{ "id": "managed_db", "hint": "SQLite를 PostgreSQL로 전환", "rule_id": "R5", "allowed_targets": ["onprem", "cloud_run"] }]\`). AI 수정 파트가 \`id\` 로 분기하고 \`hint\` 를 사람에게 보여준다. \`decision\` 이 \`block\` / \`needs_approval\` / \`manual_recovery\` 면 항상 1개 이상 있다. 없으면 필드 자체가 없다. 엔진이 스스로 차단할 때(허용 대상 교집합 공백)는 \`resolve_target_conflict\` / \`manual_target_recovery\` 가 들어간다.
    - \`rules[].result\` 는 \`matched\` / \`not_matched\` / \`matched_after_block\` 세 가지다. \`block\`(롤백은 \`manual_recovery\`)이 나와도 엔진은 끝까지 평가해 targets 좁히기와 해결 조건을 모두 모으므로, 차단 뒤에 걸린 규칙은 \`matched_after_block\` 으로 온다. 이 규칙들은 decision 을 바꾸지 않았다. 유일한 예외는 \`halt: true\` 인 규칙(현재 R2 입력 불일치)과 롤백의 \`keep_stable\`: 그 자리에서 멈추고 뒤 규칙은 목록에 없다.
    - \`rules[].reason_i18n\` / \`requires[].hint_i18n\` (선택, \`{ ja }\`): 규정집(policy.yaml)의 reason 과 hint 를 \`{ ko, ja }\` 로 적으면 결정서의 \`reason\` / \`hint\` 는 ko 문자열 그대로이고, 일본어 문구가 이 필드에 함께 실린다. 정책에 ja 가 없으면 필드 자체가 없다. 결정 설명(\`src/explain.ts --lang ja\`)은 이 필드를 쓰고, 없으면 ko 로 대체한다. 결정 로직에는 영향이 없다.
