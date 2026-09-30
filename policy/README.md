@@ -1,4 +1,6 @@
-# policy-engine — 정책 엔진
+# policy
+
+정책 엔진: 테스트 결과를 받아 배포 허용·차단, 배포 위치 결정 (류진)
 
 증명 기반 하이브리드 배포 서비스의 2단계(보안·결정) 중 **정책 엔진** 모듈.
 
@@ -10,6 +12,8 @@
 - 모든 결정은 `decisions.jsonl`에 한 줄씩 **추가만** 한다.
 
 ## 실행
+
+모든 명령은 `policy/` 폴더 안에서 실행한다.
 
 ```bash
 npm install
@@ -518,7 +522,8 @@ scripts/demo.mjs     fixtures 일괄 실행
 
 - **입력**: 테스트 파트의 `test_result.json`, 이 저장소의 `src/pii/cli.ts`가 만드는 `pii.json`
 - **출력**: `plan.json` → 서명 파트 (사람 승인은 `decision: needs_approval`일 때), → 배포 파트 (`targets`, `failover_allowed`), → AI 수정 파트 (`requires`: 무엇을 고쳐야 다른 대상에 갈 수 있는지)
-- 모노레포로 옮길 때 이 폴더를 통째로 옮기면 된다. 외부 의존성은 `zod`, `yaml`, 그리고 LLM 호출용 `@anthropic-ai/sdk`뿐이다.
+- 전체 흐름 `parity → policy → signer → deploy`에서 이 폴더는 두 번째 단계다. `parity/`가 만든 `test_result.json`을 받아 `plan.json`을 내고, `signer/`가 그 계획을 승인·서명하며 `deploy/`가 배포와 트래픽 전환을 실행한다. 파트 사이는 JSON 파일로만 주고받는다.
+- 외부 의존성은 `zod`, `yaml`, 그리고 LLM 호출용 `@anthropic-ai/sdk`뿐이다.
 
 ```bash
 npx tsx src/pii/cli.ts --src samples/signup-contact --run-id r-001 --out pii.json && npx tsx src/cli.ts --test fixtures/01-allow/test_result.json --pii pii.json --policy policy.yaml --out plan.json
