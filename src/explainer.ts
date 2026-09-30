@@ -53,7 +53,7 @@ const STRINGS: Record<Lang, Strings> = {
   ko: {
     targetName: { [LOCAL]: "온프레(사내)", [CLOUD]: "Cloud Run" },
     and: " 및 ",
-    none: "없음",
+    none: "없음 (남은 규칙끼리 충돌)",
     deployTitle: (app, runId) => `# 배포 결정: ${app} (실행 ${runId})`,
     rollbackTitle: (app, runId) => `# 롤백 결정: ${app} (실행 ${runId})`,
     conclusion: {
@@ -83,7 +83,7 @@ const STRINGS: Record<Lang, Strings> = {
     afterNote: "결정은 바꾸지 않았고, 배포 위치와 해결 조건에만 반영됐습니다.",
     requiresHeading: "## 해결 조건",
     requiresNone: "해결할 것이 없습니다.",
-    requirementLine: (what, t, ruleId, id) => `- **${what}** — 충족 위치: ${t} 안에서만 (규칙 ${ruleId}, \`${id}\`)`,
+    requirementLine: (what, t, ruleId, id) => `- **${what}** — 충족하면 배포 가능: ${t} (규칙 ${ruleId}, \`${id}\`)`,
     footer: (hash, label, digest) => `결정 지문 \`${hash}\` · ${label} \`${digest}\``,
     imageLabel: "이미지",
     serveLabel: "트래픽을 받을 버전",
@@ -92,7 +92,7 @@ const STRINGS: Record<Lang, Strings> = {
   ja: {
     targetName: { [LOCAL]: "オンプレ（社内）", [CLOUD]: "Cloud Run" },
     and: "と",
-    none: "なし",
+    none: "なし（残りのルール同士が衝突）",
     deployTitle: (app, runId) => `# デプロイ判定：${app}（実行${runId}）`,
     rollbackTitle: (app, runId) => `# ロールバック判定：${app}（実行${runId}）`,
     conclusion: {
@@ -122,7 +122,7 @@ const STRINGS: Record<Lang, Strings> = {
     afterNote: "判定は変えず、デプロイ先と解決条件にのみ反映されました。",
     requiresHeading: "## 解決条件",
     requiresNone: "対応が必要な事項はありません。",
-    requirementLine: (what, t, ruleId, id) => `- **${what}** — 対応範囲：${t}のみ（ルール${ruleId}、\`${id}\`）`,
+    requirementLine: (what, t, ruleId, id) => `- **${what}** — 対応後のデプロイ先：${t}（ルール${ruleId}、\`${id}\`）`,
     footer: (hash, label, digest) => `判定ハッシュ\`${hash}\`・${label}\`${digest}\``,
     imageLabel: "イメージ",
     serveLabel: "トラフィックを受けるバージョン",

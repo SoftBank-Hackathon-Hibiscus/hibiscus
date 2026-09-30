@@ -137,7 +137,7 @@ describe("contracts/ 폴더가 최신인지", () => {
     expect(readme).toContain("| `requires[].hint` | string | 선택 |");
     expect(readme).toContain("| `requires[].rule_id` | string | 필수 |");
     expect(readme).toContain("| `requires[].allowed_targets` | string[] | 필수 |");
-    expect(readme).toContain("해결 조건은 `allowed_targets` 안에서만 충족한다");
+    expect(readme).toContain("`allowed_targets` 는 \"이 해결 조건을 충족하면 배포 가능한 위치\" 다");
     expect(readme).toContain("**kind = \"rollback\"**");
     expect(readme).toContain("팀과 합의가 필요한 점");
     expect(readme).toContain("```mermaid");

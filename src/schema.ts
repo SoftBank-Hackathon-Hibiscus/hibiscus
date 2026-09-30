@@ -364,7 +364,7 @@ export const PlanRequirementSchema = z
     rule_id: z.string().describe("이 조건을 처음 요구한 규칙 id"),
     allowed_targets: z
       .array(z.string())
-      .describe("이 해결 조건을 충족해야 하는 위치. 결정서의 최종 targets. 차단이라 targets 가 비었으면 차단 전 마지막 targets (고친 뒤 어디로 가게 될지)"),
+      .describe("이 해결 조건을 충족하면 배포 가능한 위치. 이 조건을 요구한 규칙들을 뺀 나머지 걸린 규칙만으로 좁힌 targets. 나머지 규칙끼리 충돌하면 빈 배열"),
   })
   .describe("해결 조건 하나");
 export type PlanRequirement = z.infer<typeof PlanRequirementSchema>;

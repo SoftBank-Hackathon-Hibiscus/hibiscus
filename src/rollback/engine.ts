@@ -18,13 +18,14 @@
  *   - failover_allowed : false 가 이긴다. 최종 targets 에 local 과 cloud_run 이 모두 있을 때만 true 가능.
  *   - 아무 규칙도 decision 을 정하지 않으면 rollback 섹션의 default 를 쓴다 (rules 에 "default" 로 기록).
  *   - requires(해결 조건) 는 배포 엔진과 같이 id 로 합치고 정렬한다. manual_recovery 면 최소 1개 (규칙이 적거나 엔진이 넣음).
+ *     allowed_targets 는 그 조건을 요구한 규칙을 뺀 나머지 걸린 규칙만으로 stable.targets 에서 좁힌 결과.
  *
  * 결과
  *   keep_stable     → serve_digest = stable.digest, targets = 좁혀진 stable.targets
  *   rollback        → serve_digest = stable.digest, targets = 좁혀진 stable.targets
  *   manual_recovery → serve_digest = null,          targets = [], failover_allowed = false
  */
-import { FAILOVER_REQUIRED_TARGETS, RequirementCollector, type Suffix, appendSuffix, canonicalize, evaluate, intersect, renderI18nReason, sha256Hex } from "../engine.js";
+import { FAILOVER_REQUIRED_TARGETS, RequirementCollector, type Suffix, appendSuffix, canonicalize, evaluate, intersect, narrowWithout, renderI18nReason, sha256Hex } from "../engine.js";
 import type { Policy, Requirement, RollbackDecision, RollbackPlan, RollbackRequest, RuleResult } from "../schema.js";
 
 /** 복귀 대상의 교집합이 비어 엔진이 스스로 manual_recovery 로 갈 때 넣는 해결 조건 */
@@ -74,11 +75,10 @@ export function decideRollback(request: RollbackRequest, policy: Policy): Rollba
   const root: RollbackContext = { request };
   let decision: RollbackDecision | undefined;
   let targets: string[] = [...request.stable.targets];
-  /** manual_recovery 로 targets 가 비어도 해결 조건의 위치를 알리기 위해 마지막으로 비어 있지 않던 targets */
-  let lastNonEmptyTargets: string[] = [...targets];
   let failoverAllowed: boolean | undefined;
   const rules: RuleResult[] = [];
   const requires = new RequirementCollector();
+  const matchedRules: NonNullable<Policy["rollback"]>["rules"] = [];
 
   for (const rule of section.rules) {
     const result = evaluate(rule.if, root);
@@ -87,6 +87,7 @@ export function decideRollback(request: RollbackRequest, policy: Policy): Rollba
       continue;
     }
 
+    matchedRules.push(rule);
     let rendered = renderI18nReason(rule.reason, root, result.items);
     // 이미 manual_recovery 면 뒤 규칙은 decision 을 바꾸지 못한다. targets 좁히기와 해결 조건만 반영한다.
     const afterTerminal = decision === "manual_recovery";
@@ -102,7 +103,6 @@ export function decideRollback(request: RollbackRequest, policy: Policy): Rollba
         requires.add(TARGET_CONFLICT_RECOVERY, rule.id);
       }
       targets = narrowed;
-      if (narrowed.length > 0) lastNonEmptyTargets = narrowed;
     }
 
     if (rule.then.failover_allowed === false) failoverAllowed = false;
@@ -125,8 +125,8 @@ export function decideRollback(request: RollbackRequest, policy: Policy): Rollba
   const failoverPossible = FAILOVER_REQUIRED_TARGETS.every((t) => targets.includes(t));
   failoverAllowed = failoverPossible && (failoverAllowed ?? section.default.failover_allowed);
 
-  // 해결 조건은 최종 targets 안에서만 충족해야 한다. manual_recovery 면 그 전 마지막 targets.
-  const requiresList = requires.toList(targets.length > 0 ? targets : lastNonEmptyTargets);
+  // 해결 조건의 allowed_targets: 그 조건을 요구한 규칙들을 빼고 나머지 걸린 규칙만으로 stable.targets 에서 다시 좁힌 결과
+  const requiresList = requires.toList((requesters) => narrowWithout(request.stable.targets, matchedRules, requesters));
 
   const body: Omit<RollbackPlan, "plan_hash"> = {
     run_id: request.run_id,

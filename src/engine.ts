@@ -147,8 +147,13 @@ export function renderTemplate(template: string, root: object, scope: unknown): 
 
 export class RequirementCollector {
   private readonly map = new Map<string, Omit<PlanRequirement, "allowed_targets">>();
+  /** 해결 조건 id → 그것을 요구한 모든 규칙 id (첫 규칙뿐 아니라 전부) */
+  private readonly requesters = new Map<string, Set<string>>();
 
   add(req: Requirement, ruleId: string): void {
+    const set = this.requesters.get(req.id) ?? new Set<string>();
+    set.add(ruleId);
+    this.requesters.set(req.id, set);
     if (this.map.has(req.id)) return;
     this.map.set(req.id, {
       id: req.id,
@@ -164,14 +169,33 @@ export class RequirementCollector {
 
   /**
    * id 순 정렬. 하나도 없으면 undefined (plan 에 필드를 싣지 않는다).
-   * allowedTargets: 이 결정서의 해결 조건을 충족해야 하는 위치 (모든 항목에 같은 값)
+   * allowedFor(요구한 규칙 id 들): 그 규칙들을 제외하고 나머지 걸린 규칙만으로 좁힌 targets
+   *   = "이 해결 조건을 충족하면 배포 가능한 위치"
    */
-  toList(allowedTargets: readonly string[]): PlanRequirement[] | undefined {
+  toList(allowedFor: (requesters: ReadonlySet<string>) => string[]): PlanRequirement[] | undefined {
     if (this.map.size === 0) return undefined;
     return [...this.map.values()]
       .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-      .map((r) => ({ ...r, allowed_targets: [...allowedTargets] }));
+      .map((r) => ({ ...r, allowed_targets: allowedFor(this.requesters.get(r.id) ?? new Set()) }));
   }
+}
+
+/**
+ * 걸린 규칙 중 excluded 를 뺀 나머지만으로 base 에서 시작해 좁힌 targets.
+ * 해결 조건의 allowed_targets 계산에 쓴다 (두 번째 패스. decision 에는 영향 없음).
+ * 나머지 규칙끼리 충돌하면 빈 배열이 될 수 있다.
+ */
+export function narrowWithout(
+  base: readonly string[],
+  matchedRules: ReadonlyArray<{ id: string; then: { targets?: readonly string[] } }>,
+  excluded: ReadonlySet<string>,
+): string[] {
+  let targets = [...base];
+  for (const rule of matchedRules) {
+    if (excluded.has(rule.id) || rule.then.targets === undefined) continue;
+    targets = intersect(targets, rule.then.targets);
+  }
+  return targets;
 }
 
 /** 규칙들이 허용하는 대상의 교집합이 비어 엔진이 스스로 차단할 때 넣는 해결 조건 */
@@ -291,19 +315,20 @@ export function intersect(current: readonly string[], next: readonly string[]): 
  * - 아무 규칙도 targets 를 정하지 않았으면 policy.default 를 쓴다 (rules 에 id "default" 로 기록).
  * - requires(해결 조건) 는 걸린 규칙들의 것을 id 로 합치고 정렬한다. 비어 있으면 plan 에 싣지 않는다.
  *   교집합 공백으로 엔진이 스스로 block 할 때는 resolve_target_conflict 를 넣는다.
- *   allowed_targets 는 끝까지 좁힌 결과 (그것이 비면 비기 직전의 비어 있지 않은 targets).
+ *   각 해결 조건의 allowed_targets 는 "그 조건을 요구한 규칙들을 뺀 나머지 걸린 규칙만으로 default.targets 에서
+ *   좁힌 결과" = 이 조건을 충족하면 배포 가능한 위치 (두 번째 패스, decision 에 영향 없음).
  */
 export function decide(test: TestResult, pii: PiiReport, policy: Policy): Plan {
   const root: Context = { test, pii };
 
   let decision: Decision = "allow";
   let targets: string[] = [...policy.default.targets];
-  /** 차단으로 targets 가 비어도 "고친 뒤 어디로 가게 될지" 를 알리기 위해 마지막으로 비어 있지 않던 targets 를 기억한다 */
-  let lastNonEmptyTargets: string[] = [...targets];
   let narrowedByRule = false;
   let failoverAllowed: boolean | undefined;
   const rules: RuleResult[] = [];
   const requires = new RequirementCollector();
+  /** 걸린 규칙(순서대로). 해결 조건의 allowed_targets 를 두 번째 패스로 계산할 때 쓴다 */
+  const matchedRules: Policy["rules"] = [];
 
   for (const rule of policy.rules) {
     const result = evaluate(rule.if, root);
@@ -312,6 +337,7 @@ export function decide(test: TestResult, pii: PiiReport, policy: Policy): Plan {
       continue;
     }
 
+    matchedRules.push(rule);
     let rendered = renderI18nReason(rule.reason, root, result.items);
     // 이미 block 이면 뒤 규칙은 decision 을 바꾸지 못한다. targets 좁히기와 해결 조건만 반영한다.
     const afterBlock = decision === "block";
@@ -328,7 +354,6 @@ export function decide(test: TestResult, pii: PiiReport, policy: Policy): Plan {
         requires.add(TARGET_CONFLICT_REQUIREMENT, rule.id);
       }
       targets = narrowed;
-      if (narrowed.length > 0) lastNonEmptyTargets = narrowed;
       narrowedByRule = true;
     }
 
@@ -352,9 +377,9 @@ export function decide(test: TestResult, pii: PiiReport, policy: Policy): Plan {
   const failoverPossible = FAILOVER_REQUIRED_TARGETS.every((t) => targets.includes(t));
   failoverAllowed = failoverPossible && (failoverAllowed ?? policy.default.failover_allowed);
 
-  // 해결 조건은 최종 targets 안에서만 충족해야 한다. 차단이면 차단 전 마지막 targets.
-  const allowedTargets = targets.length > 0 ? targets : lastNonEmptyTargets;
-  const requiresList = requires.toList(allowedTargets);
+  // 해결 조건의 allowed_targets: 그 조건을 요구한 규칙들을 빼고 나머지 걸린 규칙만으로 다시 좁힌 결과
+  // = "이 조건을 충족하면 배포 가능한 위치". decision 에는 영향이 없다.
+  const requiresList = requires.toList((requesters) => narrowWithout(policy.default.targets, matchedRules, requesters));
 
   const body: Omit<Plan, "plan_hash"> = {
     run_id: test.run_id,

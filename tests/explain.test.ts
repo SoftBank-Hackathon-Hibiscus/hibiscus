@@ -106,7 +106,7 @@ describe("결정 종류별 결론 문장 (ko)", () => {
   it("needs_approval: 승인되면 어디에", () => {
     const md = explainPlan(fixturePlan("04-pii-unconfident"));
     expect(md).toContain("**사람 승인 필요.** 승인되면 온프레(사내)에 배포합니다.");
-    expect(md).toContain("- **해당 칼럼이 개인정보인지 사람이 확인** — 충족 위치: 온프레(사내) 안에서만 (규칙 R3, `human_review_pii`)");
+    expect(md).toContain("- **해당 칼럼이 개인정보인지 사람이 확인** — 충족하면 배포 가능: 온프레(사내) (규칙 R3, `human_review_pii`)");
   });
 
   it("block: 배포하지 않음, 해결 조건과 위치, 차단 후 규칙은 따로", () => {
@@ -118,8 +118,8 @@ describe("결정 종류별 결론 문장 (ko)", () => {
     expect(md).toContain("### 차단이 정해진 뒤에 걸린 규칙");
     expect(md).toContain("결정은 바꾸지 않았고, 배포 위치와 해결 조건에만 반영됐습니다.");
     expect(md).toContain("- SQLite 사용 (sqlite): 관리형 DB로 전환하기 전까지 클라우드 배포 제외 (규칙 R5)");
-    expect(md).toContain("- **재생 불일치 요청을 고친 뒤 다시 테스트** — 충족 위치: 온프레(사내) 안에서만 (규칙 R1, `fix_tests`)");
-    expect(md).toContain("- **SQLite를 PostgreSQL로 전환** — 충족 위치: 온프레(사내) 안에서만 (규칙 R5, `managed_db`)");
+    expect(md).toContain("- **재생 불일치 요청을 고친 뒤 다시 테스트** — 충족하면 배포 가능: 온프레(사내) (규칙 R1, `fix_tests`)");
+    expect(md).toContain("- **SQLite를 PostgreSQL로 전환** — 충족하면 배포 가능: 온프레(사내) 및 Cloud Run (규칙 R5, `managed_db`)");
   });
 
   it("차단 후 규칙이 없으면 그 절이 없다", () => {
@@ -150,7 +150,7 @@ describe("롤백 결론 문장 (ko)", () => {
     expect(manual).toContain("**수동 복구 필요.** 자동으로 되돌릴 수 없습니다.");
     expect(manual).toContain("수동 복구 전까지 장애 시 전환은 없습니다.");
     expect(manual).toContain("### 수동 복구가 정해진 뒤에 걸린 규칙");
-    expect(manual).toContain("- **DB 스키마를 이전 버전과 호환되게 복구한 뒤 롤백** — 충족 위치: 온프레(사내) 안에서만 (규칙 RB2, `manual_db_recovery`)");
+    expect(manual).toContain("- **DB 스키마를 이전 버전과 호환되게 복구한 뒤 롤백** — 충족하면 배포 가능: 온프레(사내) (규칙 RB2, `manual_db_recovery`)");
     expect(manual).toContain("트래픽을 받을 버전 `미정`");
   });
 });
@@ -228,7 +228,7 @@ describe("일본어 출력", () => {
     const block = explainPlan(fixturePlan("02-block-test-failed"), { lang: "ja" });
     expect(block).toContain("**デプロイ不可。**");
     expect(block).toContain("### デプロイ不可が決まった後に該当したルール");
-    expect(block).toContain("- **SQLiteをPostgreSQLへ移行** — 対応範囲：オンプレ（社内）のみ（ルールR5、`managed_db`）");
+    expect(block).toContain("- **SQLiteをPostgreSQLへ移行** — 対応後のデプロイ先：オンプレ（社内）とCloud Run（ルールR5、`managed_db`）");
     expect(block).not.toContain("遮断");
     expect(block).not.toContain("満たす場所");
     expect(block).not.toContain("の中でのみ");
@@ -266,7 +266,7 @@ describe("일본어 출력", () => {
     const plan = decide(baseTest, PiiReportSchema.parse({ run_id: baseTest.run_id, pii: [] }), custom);
     const md = explainPlan(plan, { lang: "ja" });
     expect(md).toContain("- 한국어 근거만 있음（ルールS1）");
-    expect(md).toContain("- **한국어 힌트만 있음** — 対応範囲：オンプレ（社内）のみ（ルールS1、`x_fix`）");
+    expect(md).toContain("- **한국어 힌트만 있음** — 対応後のデプロイ先：オンプレ（社内）とCloud Run（ルールS1、`x_fix`）");
     // 틀은 일본어 그대로
     expect(md).toContain("**デプロイ可。**");
   });

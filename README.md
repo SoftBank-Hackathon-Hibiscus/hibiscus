@@ -100,7 +100,7 @@ default:
 
 **효과(`then`)**: `decision: block | needs_approval`, `targets: [...]`, `failover_allowed: bool`, `requires: [...]`. 적지 않은 키는 바꾸지 않는다.
 
-**해결 조건(`requires`)**: "이 규칙에 걸린 이유를 없애려면 무엇이 필요한가". `{ id: managed_db, hint: "SQLite를 PostgreSQL로 전환" }`처럼 설명과 함께 적거나, `managed_db`처럼 id만 적는다. 걸린 규칙들의 해결 조건이 `plan.json`의 `requires`에 `[{ id, hint?, rule_id, allowed_targets }]`로 모여(id로 합치고 정렬) 다음 단계(AI 수정 파트)가 무엇을 고쳐야 하는지 읽는다. `allowed_targets`는 그 결정서의 최종 `targets`이고, 차단이면 차단 전 마지막 `targets`다. 해결 조건은 그 위치 안에서만 충족해야 하므로 hint에는 위치를 적지 않는다 (결정 설명이 위치를 따로 붙인다).
+**해결 조건(`requires`)**: "이 규칙에 걸린 이유를 없애려면 무엇이 필요한가". `{ id: managed_db, hint: "SQLite를 PostgreSQL로 전환" }`처럼 설명과 함께 적거나, `managed_db`처럼 id만 적는다. 걸린 규칙들의 해결 조건이 `plan.json`의 `requires`에 `[{ id, hint?, rule_id, allowed_targets }]`로 모여(id로 합치고 정렬) 다음 단계(AI 수정 파트)가 무엇을 고쳐야 하는지 읽는다. `allowed_targets`는 "이 해결 조건을 충족하면 배포 가능한 위치"다. 그 조건을 요구한 규칙들을 뺀 나머지 걸린 규칙만으로 `default.targets`에서 다시 좁힌 결과라 조건마다 다를 수 있다 (엔진이 규칙 평가를 한 번 더 도는 방식이며 decision에는 영향이 없다). 예를 들어 SQLite만 걸린 앱의 managed_db는 [local, cloud_run]이고, SQLite와 개인정보가 함께 걸린 앱의 managed_db는 개인정보 규칙이 남으므로 [local]이다. hint에는 위치를 적지 않는다 (결정 설명이 위치를 따로 붙인다).
 
 **규정집 문구의 다국어**: `reason`과 `requires[].hint`는 문자열(한국어) 또는 `{ ko: "...", ja: "..." }`로 적는다. 결정서의 `reason`/`hint`는 ko 문자열 그대로이고, ja가 있으면 선택 필드 `reason_i18n` / `hint_i18n`에 `{ ja }`가 함께 실린다. 결정 설명은 lang에 맞는 문구를 쓰고 없으면 ko로 대체한다. 기본 규칙(R1~R7, RB1~RB4, default)에는 일본어 문구가 채워져 있다. reason과 hint에는 digest 전체나 `cloud_run` 같은 내부 이름을 넣지 않는다 (설명이 위치와 버전을 따로 붙이고, 혹시 들어 있어도 digest는 앞 12자로 줄인다). `block`이나 `needs_approval`을 내는 규칙은 해결 조건이 최소 1개 있어야 하며 없으면 정책 로드 에러다. 엔진이 교집합 공백으로 스스로 차단할 때는 `resolve_target_conflict`를 넣는다.
 
@@ -157,7 +157,7 @@ R5의 이유: 클라우드에서는 인스턴스가 교체되면 SQLite 파일�
 - `decision`: `allow` | `block` | `needs_approval`
 - `targets`: `block`이면 빈 배열
 - `rules`: 평가된 모든 규칙과 결과. `result`는 `matched` / `not_matched` / `matched_after_block`(차단이 정해진 뒤 걸림)
-- `requires`: 해결 조건 `[{ id, hint?, hint_i18n?, rule_id, allowed_targets }]`. 걸린 규칙들의 것을 id로 합치고 정렬. `allowed_targets`는 끝까지 좁힌 `targets`(차단으로 비면 비기 직전의 `targets`)이며 해결 조건은 그 안에서만 충족한다. `block`/`needs_approval`이면 항상 1개 이상. 하나도 없으면 필드가 없다. 예: `[{ "id": "managed_db", "hint": "SQLite를 PostgreSQL로 전환", "hint_i18n": { "ja": "SQLiteをPostgreSQLへ移行" }, "rule_id": "R5", "allowed_targets": ["local"] }]`
+- `requires`: 해결 조건 `[{ id, hint?, hint_i18n?, rule_id, allowed_targets }]`. 걸린 규칙들의 것을 id로 합치고 정렬. `allowed_targets`는 이 조건을 충족하면 배포 가능한 위치(그 조건을 요구한 규칙을 뺀 나머지 규칙으로 좁힌 결과). `block`/`needs_approval`이면 항상 1개 이상. 하나도 없으면 필드가 없다. 예: `[{ "id": "managed_db", "hint": "SQLite를 PostgreSQL로 전환", "hint_i18n": { "ja": "SQLiteをPostgreSQLへ移行" }, "rule_id": "R5", "allowed_targets": ["local", "cloud_run"] }]`
 - `rules[].reason_i18n`: 정책에 ja 문구가 있을 때만 `{ ja }`가 함께 실린다
 - `rules[].reason`은 `matched`와 `matched_after_block`일 때만 있다
 - `plan_hash`: `{ inputs: {test, pii}, policy, plan(해시 제외) }`를 키 정렬 JSON으로 만든 뒤 sha256. 입력·정책·결과 중 하나라도 바뀌면 달라진다
@@ -213,12 +213,12 @@ npx tsx src/stage.ts --src samples/signup-contact --test fixtures/01-allow/test_
 
 ## 해결 조건
 
-- **재생 불일치 요청을 고친 뒤 다시 테스트** — 충족 위치: 온프레(사내) 안에서만 (규칙 R1, `fix_tests`)
-- **SQLite를 PostgreSQL로 전환** — 충족 위치: 온프레(사내) 안에서만 (규칙 R5, `managed_db`)
+- **재생 불일치 요청을 고친 뒤 다시 테스트** — 충족하면 배포 가능: 온프레(사내) (규칙 R1, `fix_tests`)
+- **SQLite를 PostgreSQL로 전환** — 충족하면 배포 가능: 온프레(사내) 및 Cloud Run (규칙 R5, `managed_db`)
 
 ---
 
-결정 지문 `3bb2b6ebe119` · 이미지 `sha256:b2c3d4e5f607`
+결정 지문 `b7e31137d5b6` · 이미지 `sha256:b2c3d4e5f607`
 ```
 
 **예시 (ja)** — fixtures/03-pii-confident
@@ -380,7 +380,7 @@ npx tsx src/rollback/cli.ts --request rollback_request.json --policy policy.yaml
 - `decision`은 `rollback < keep_stable < manual_recovery` 순으로 강한 쪽만 남는다. `keep_stable`은 되돌릴 것이 없으므로 즉시 멈춘다. `manual_recovery`는 `halt`가 아니면 끝까지 평가해 `targets` 좁히기와 해결 조건만 모으고, 뒤에 걸린 규칙은 `matched_after_block`으로 기록된다. 그래서 개인정보와 DB 비호환이 동시에 있으면 규칙 순서와 무관하게 `manual_recovery`이고 해결 조건의 `allowed_targets`는 `[local]`이다.
 - `targets`는 `stable.targets`에서 시작해 좁히기만 되고, 교집합이 비면 `manual_recovery`다. 롤백 규칙의 `targets`도 `known_targets` 검증을 받는다.
 - `failover_allowed`는 `false`가 이긴다. 최종 `targets`에 `local`과 `cloud_run`이 둘 다 있을 때만 `true`가 될 수 있고, 아무 규칙도 정하지 않으면 `default.failover_allowed`를 쓴다.
-- `requires`(해결 조건)는 배포 엔진과 같은 방식이다. `manual_recovery`를 내는 규칙은 해결 조건이 최소 1개 있어야 하고, 엔진이 교집합 공백으로 스스로 `manual_recovery`로 가면 `manual_target_recovery`를 넣는다.
+- `requires`(해결 조건)는 배포 엔진과 같은 방식이다. `manual_recovery`를 내는 규칙은 해결 조건이 최소 1개 있어야 하고, 엔진이 교집합 공백으로 스스로 `manual_recovery`로 가면 `manual_target_recovery`를 넣는다. `allowed_targets`는 그 조건을 요구한 규칙을 뺀 나머지 걸린 규칙만으로 `stable.targets`에서 좁힌 결과다.
 
 ### 출력 `rollback_plan.json`
 
