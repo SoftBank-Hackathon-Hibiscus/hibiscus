@@ -1,0 +1,34 @@
+{
+  "stage": "test",
+  "commit": "a1b2c3d",
+  "image": "guestbook:1",
+  "passed": false,
+  "facts": [
+    {
+      "kind": "sqlite",
+      "path": "/app/data/data.db",
+      "storage": "container_layer",
+      "evidence": "docker diff A /app/data/data.db; header 'SQLite format 3'"
+    },
+    {
+      "kind": "local_upload",
+      "path": "/app/uploads",
+      "storage": "container_layer",
+      "evidence": "docker diff: 2 file(s) written under /app/uploads"
+    }
+  ],
+  "replay": [
+    {"condition": "none", "total": 20, "matched": 20},
+    {"condition": "restart", "total": 20, "matched": 17}
+  ],
+  "mismatches": [
+    {
+      "condition": "restart",
+      "index": 12,
+      "request": "GET /posts",
+      "expected": "200 [{\"id\":1,\"author\":\"alice\",\"message\":\"hi\",\"created_at\":\"2026-09-30T01:00:00.000+00:00\"}]",
+      "actual": "200 []",
+      "related_fact": "/app/data/data.db"
+    }
+  ]
+}
