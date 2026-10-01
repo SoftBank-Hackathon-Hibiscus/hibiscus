@@ -16,7 +16,9 @@
  *   - 없는 값은 null 대신 키를 생략한다 (조건 DSL 의 exists 는 null 도 "있음" 으로 본다).
  *
  * 변환을 거부하는 경우 (ParityAdapterError): 재생이 중단된 조건이 있음(replay[].error), 진단 status 가 completed 가 아님,
- * 진단의 registry_digest 가 metadata.digest 와 다름, 기준 조건 none 이 없음, 조건·불일치 수가 서로 맞지 않음.
+ * 진단의 registry_digest 가 metadata.digest 와 다름, 조건이 none / restart / replace 정확히 한 번씩이 아님
+ * (빠짐·중복·모르는 조건. parity CLI 기본값은 none,restart 라 replace 를 빼먹은 결과가 들어오는 것을 막는다),
+ * 조건·불일치 수가 서로 맞지 않음.
  * 경고만 하는 경우: metadata.digest 가 진단의 local_image_id 와 같음 (레지스트리 위치가 정해지면 오류로 바꾼다).
  */
 import { z } from "zod";
@@ -33,8 +35,10 @@ import {
 
 export const PARITY_HANDOFF_FORMAT = "parity-handoff-v1-proposal";
 export const PARITY_DIAGNOSTICS_FORMAT = "parity-execution-v1";
-/** 기준 조건. match 는 이 조건의 결과이고, 이 조건이 없으면 변환하지 않는다 */
+/** 기준 조건. match 는 이 조건의 결과다 */
 export const BASELINE_CONDITION = "none";
+/** 정책 판단(R1 / R1b / R1c)에 필요한 조건. 이 세 개가 정확히 한 번씩 있어야 변환한다 */
+export const REQUIRED_CONDITIONS: readonly string[] = [BASELINE_CONDITION, "restart", "replace"];
 /** facts.db = "sqlite" 가 되는 사실 종류 */
 export const SQLITE_KIND = "sqlite";
 /** facts.writes_local_file 에 들어가는 사실 종류 */
@@ -55,7 +59,8 @@ export const ParityFactSchema = z
 export const ParityReplayEntrySchema = z
   .looseObject({
     condition: z.string().min(1),
-    total: z.number().int().nonnegative(),
+    /** parity handoff.py 와 같이 1 이상. 요청 0건은 판정이 아니다 */
+    total: z.number().int().positive(),
     matched: z.number().int().nonnegative(),
     /** 재생이 중단됐을 때만 있다. 있으면 변환하지 않는다 */
     error: z.string().min(1).optional(),
@@ -168,15 +173,20 @@ export function adaptParityHandoff(handoff: ParityHandoff, diagnostics?: ParityD
   }
   if (diagnostics !== undefined) checkDiagnostics(diagnostics, metadata.digest, warnings);
 
-  // 2) 조건과 불일치가 서로 맞는지
+  // 2) 조건이 none / restart / replace 정확히 한 번씩인지, 불일치가 조건과 맞는지
   const seen = new Set<string>();
   for (const entry of result.replay) {
     if (seen.has(entry.condition)) fail(`같은 조건이 두 번 있습니다: ${entry.condition}`);
     seen.add(entry.condition);
     if (entry.matched > entry.total) fail(`${entry.condition}: matched(${entry.matched})가 total(${entry.total})보다 큽니다`);
   }
-  const baseline = result.replay.find((entry) => entry.condition === BASELINE_CONDITION);
-  if (baseline === undefined) fail(`기준 조건 ${BASELINE_CONDITION} 이 없습니다 (재생한 조건: ${result.replay.map((e) => e.condition).join(", ")})`);
+  const unknown = [...seen].filter((name) => !REQUIRED_CONDITIONS.includes(name));
+  if (unknown.length > 0) fail(`모르는 조건이 있습니다: ${unknown.join(", ")} (받는 조건: ${REQUIRED_CONDITIONS.join(", ")})`);
+  const missing = REQUIRED_CONDITIONS.filter((name) => !seen.has(name));
+  if (missing.length > 0) {
+    fail(`필요한 조건이 빠졌습니다: ${missing.join(", ")} (재생한 조건: ${[...seen].join(", ")}). 정책 판단에는 ${REQUIRED_CONDITIONS.join(", ")} 세 조건이 모두 필요합니다. parity test 를 --conditions ${REQUIRED_CONDITIONS.join(",")} 으로 실행하세요`);
+  }
+  const baseline = result.replay.find((entry) => entry.condition === BASELINE_CONDITION)!;
   for (const mismatch of result.mismatches) {
     if (!seen.has(mismatch.condition)) fail(`불일치가 모르는 조건을 가리킵니다: ${mismatch.condition} (요청 ${mismatch.index})`);
   }

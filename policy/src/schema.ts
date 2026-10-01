@@ -91,9 +91,14 @@ export const ConditionFactSchema = z
   .looseObject({
     name: z.string().min(1).describe("조건 이름. none(기준선) / restart(재시작) / replace(컨테이너 교체)"),
     total: z.number().int().nonnegative().describe("이 조건에서 재생한 요청 수"),
-    matched: z.number().int().nonnegative().describe("응답이 일치한 요청 수"),
-    failed: z.boolean().describe("이 조건에서 어긋난 요청이 하나라도 있는지 (matched < total). R1 / R1b / R1c 가 읽는다"),
+    matched: z.number().int().nonnegative().describe("응답이 일치한 요청 수 (total 이하)"),
+    failed: z.boolean().describe("이 조건에서 어긋난 요청이 하나라도 있는지. matched < total 과 같아야 한다. R1 / R1b / R1c 가 읽는다"),
     mismatches: z.array(ConditionMismatchSchema).describe("어긋난 요청 목록. 없으면 빈 배열"),
+  })
+  .superRefine((c, ctx) => {
+    // 규칙이 failed 를 읽으므로 수치와 어긋난 값이 들어오면 거부한다 (JSON Schema 에는 표현되지 않는 검사)
+    if (c.matched > c.total) ctx.addIssue({ code: "custom", path: ["matched"], message: `matched(${c.matched})는 total(${c.total}) 이하여야 합니다` });
+    if (c.failed !== c.matched < c.total) ctx.addIssue({ code: "custom", path: ["failed"], message: `failed 는 matched < total (${c.matched} < ${c.total}) 과 같아야 합니다` });
   })
   .describe("조건 하나의 재생 결과");
 export type ConditionFact = z.infer<typeof ConditionFactSchema>;
@@ -122,8 +127,9 @@ export const FactsSchema = z
     migration: MigrationReportSchema.optional(),
     conditions: z
       .array(ConditionFactSchema)
+      .min(1)
       .optional()
-      .describe("조건별 재생 결과 (none / restart / replace). 있으면 R1 / R1b / R1c 가 이것으로 판단하고 passed 는 원본 종합값 보존용이다. 없으면 R1 이 passed 를 본다"),
+      .describe("조건별 재생 결과 (none / restart / replace). 있으면 비어 있지 않아야 하며 R1 / R1b / R1c 가 이것으로 판단하고 passed 는 원본 종합값 보존용이다. 없으면 R1 이 passed 를 본다"),
     storage: z.array(StorageFactSchema).optional().describe("컨테이너 안에 남은 상태 목록 (테스트 파트 facts[] 원본의 kind, path, storage). 정책 판단에는 conditions[].mismatches[].related_kind 를 쓰고, 이 목록은 보존·설명용"),
   })
   .describe("테스트 중 관찰한 사실. 정의된 키(db, writes_local_file, migration, conditions, storage)는 타입이 고정되고, 그 밖의 키는 자유");

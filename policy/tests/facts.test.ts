@@ -27,6 +27,20 @@ describe("test_result.facts: 정책이 읽는 키만 타입 고정", () => {
     expect(TestResultSchema.safeParse(withFacts({ storage: [{ kind: "sqlite", path: "/app/data/data.db" }] })).success).toBe(false);
   });
 
+  it("facts.conditions 런타임 검증: 비어 있지 않음, matched <= total, failed == (matched < total)", () => {
+    const ok = { name: "none", total: 20, matched: 20, failed: false, mismatches: [] };
+    expect(TestResultSchema.safeParse(withFacts({ conditions: [ok] })).success).toBe(true);
+    expect(TestResultSchema.safeParse(withFacts({ conditions: [] })).success).toBe(false);
+    const issues = (facts: unknown) => {
+      const r = TestResultSchema.safeParse(withFacts(facts));
+      return r.success ? [] : r.error.issues.map((i) => i.path.join("."));
+    };
+    expect(issues({ conditions: [{ ...ok, matched: 21 }] })).toContain("facts.conditions.0.matched");
+    expect(issues({ conditions: [{ ...ok, failed: true }] })).toContain("facts.conditions.0.failed");
+    expect(issues({ conditions: [{ ...ok, matched: 19 }] })).toContain("facts.conditions.0.failed");
+    expect(TestResultSchema.safeParse(withFacts({ conditions: [{ ...ok, matched: 19, failed: true }] })).success).toBe(true);
+  });
+
   it('facts.db = "SQLite" (대문자) → 형식 오류', () => {
     const result = TestResultSchema.safeParse(withFacts({ db: "SQLite" }));
     expect(result.success).toBe(false);

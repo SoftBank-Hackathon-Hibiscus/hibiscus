@@ -286,11 +286,23 @@ describe("변환 거부 / 경고", () => {
     expect(warnings[0]).toContain("레지스트리");
   });
 
-  it("기준 조건 none 이 없거나, 조건·불일치 수가 맞지 않으면 오류", () => {
-    expect(() => adaptParityHandoff(variant([ALL_PASS[1]!, ALL_PASS[2]!], []))).toThrow(/기준 조건 none/);
-    expect(() => adaptParityHandoff(variant([{ condition: "none", total: 20, matched: 19 }], []))).toThrow(/불일치 0건인데 total-matched 는 1/);
+  it("조건은 none / restart / replace 가 정확히 한 번씩: 빠지거나 모르는 조건이 있으면 오류", () => {
+    // parity CLI 기본값(none,restart)으로 돌려 replace 를 빼먹은 결과
+    expect(() => adaptParityHandoff(variant([ALL_PASS[0]!, ALL_PASS[1]!], []))).toThrow(/필요한 조건이 빠졌습니다: replace/);
+    expect(() => adaptParityHandoff(variant([ALL_PASS[0]!, ALL_PASS[2]!], []))).toThrow(/필요한 조건이 빠졌습니다: restart/);
+    expect(() => adaptParityHandoff(variant([ALL_PASS[1]!, ALL_PASS[2]!], []))).toThrow(/필요한 조건이 빠졌습니다: none/);
+    expect(() => adaptParityHandoff(variant([...ALL_PASS, { condition: "replicas", total: 20, matched: 20 }], []))).toThrow(/모르는 조건이 있습니다: replicas/);
+    expect(() => adaptParityHandoff(variant([ALL_PASS[0]!, ALL_PASS[1]!, { condition: "recreate", total: 20, matched: 20 }], []))).toThrow(/모르는 조건이 있습니다: recreate/);
+    expect(() => adaptParityHandoff(variant([ALL_PASS[0]!, ALL_PASS[0]!, ALL_PASS[1]!, ALL_PASS[2]!], []))).toThrow(/같은 조건이 두 번/);
+  });
+
+  it("total 은 1 이상 (0/0 은 판정이 아님). 조건·불일치 수가 맞지 않으면 오류", () => {
+    const h = handoff();
+    const zero = { ...h, result: { ...h.result, replay: [{ condition: "none", total: 0, matched: 0 }, ALL_PASS[1]!, ALL_PASS[2]!] } };
+    expect(ParityHandoffSchema.safeParse(zero).success).toBe(false);
+    expect(() => adaptParityHandoff(variant([{ condition: "none", total: 20, matched: 19 }, ALL_PASS[1]!, ALL_PASS[2]!], []))).toThrow(/none: 불일치 0건인데 total-matched 는 1/);
     expect(() => adaptParityHandoff(variant(ALL_PASS, [guestbookMismatch("replace", 16)]))).toThrow(/replace: 불일치 1건인데/);
-    expect(() => adaptParityHandoff(variant([ALL_PASS[0]!, ALL_PASS[0]!], []))).toThrow(/같은 조건이 두 번/);
+    expect(() => adaptParityHandoff(variant([{ condition: "none", total: 20, matched: 21 }, ALL_PASS[1]!, ALL_PASS[2]!], []))).toThrow(/matched\(21\)가 total\(20\)보다/);
   });
 
   it("format 이나 stage 가 다르면 형식 오류 (verify 결과는 받지 않는다)", () => {

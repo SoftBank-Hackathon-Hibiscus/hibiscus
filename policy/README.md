@@ -75,7 +75,7 @@ npm run typecheck
 }
 ```
 
-- `conditions[]`: 조건(`none` 기준선 / `restart` 재시작 / `replace` 컨테이너 교체)마다 `{ name, total, matched, failed, mismatches[] }`. `mismatches[]`의 `related_*`는 테스트 파트가 붙인 관련 사실 힌트(`related_fact` = path)를 원본 facts에서 찾아 옮긴 조회값이다. 없는 값은 `null`이 아니라 **키를 생략**한다 (조건 문법의 `exists`가 `null`도 있음으로 보기 때문).
+- `conditions[]`: 조건(`none` 기준선 / `restart` 재시작 / `replace` 컨테이너 교체)마다 `{ name, total, matched, failed, mismatches[] }`. 있으면 비어 있지 않아야 하고, `matched <= total`, `failed == (matched < total)`이어야 한다 (형식 오류). `mismatches[]`의 `related_*`는 테스트 파트가 붙인 관련 사실 힌트(`related_fact` = path)를 원본 facts에서 찾아 옮긴 조회값이다. 없는 값은 `null`이 아니라 **키를 생략**한다 (조건 문법의 `exists`가 `null`도 있음으로 보기 때문).
 - `storage[]`: 테스트 파트 facts 원본의 `kind, path, storage`. 보존·설명용이다.
 - **`passed`의 의미**: `facts.conditions`가 있는 입력에서는 `passed`는 parity 원본의 종합값을 보존하는 필드이고, 정책 판단(R1, R1b, R1c)은 조건별 사실을 읽는다. 그래서 `passed: false`인데 `allow`가 나올 수 있다 (예: replace에서만 업로드 유실이 나고 그 원인이 `local_upload` 저장 사실로 설명될 때는 R6가 위치 제한으로 다룬다). `facts.conditions`가 없는 구형 입력에서만 R1이 `passed`를 fallback으로 본다. `match`는 `conditions`가 있으면 기준 조건 `none`의 결과다. 규칙이 정의되지 않은 facts 키를 읽으면 정책을 불러올 때 경고가 난다. 규칙이 실제로 읽는 경로 목록은 [contracts/README.md](contracts/README.md)의 "정책이 읽는 필드"에 자동 생성된다.
 
@@ -356,7 +356,8 @@ npx tsx src/stage.ts --src <앱 폴더> --handoff handoff.json --diagnostics res
 - 재생이 중단된 조건이 있다 (`replay[].error`, 예: `NOT_EXECUTED`, `prepare: DockerError`)
 - `--diagnostics`의 `status`가 `completed`가 아니다
 - `--diagnostics`의 `registry_digest`가 있는데 `metadata.digest`와 다르다
-- 기준 조건 `none`이 없거나, 조건별 불일치 수가 `total - matched`와 맞지 않는다, `stage`가 `test`가 아니다 (`verify`는 배포 후 확인이라 받지 않는다)
+- 조건이 `none` / `restart` / `replace` 정확히 한 번씩이 아니다 (빠짐·중복·모르는 조건. `parity test`의 기본값은 `none,restart`라 `replace`를 빼먹은 결과가 들어오는 것을 막는다. `--conditions none,restart,replace`로 실행할 것)
+- 조건의 `total`이 0이거나 조건별 불일치 수가 `total - matched`와 맞지 않는다, `stage`가 `test`가 아니다 (`verify`는 배포 후 확인이라 받지 않는다)
 
 **경고만 하는 경우**: `metadata.digest`가 `--diagnostics`의 `local_image_id`와 같다. 레지스트리 digest 자리에 로컬 image ID를 넣었을 가능성이 크지만, 레지스트리 위치가 아직 정해지지 않아 지금은 막지 않는다. **레지스트리가 확정되면 오류로 전환할 예정이다.**
 

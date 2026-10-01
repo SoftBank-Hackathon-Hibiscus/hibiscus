@@ -143,11 +143,11 @@ flowchart LR
 | `facts.migration.findings[].kind` | "drop_table" \| "drop_column" \| "rename_table" \| "rename_column" \| "alter_column_type" \| "add_not_null_without_default" \| "set_not_null" \| "truncate" | 필수 | 파괴적 변경의 종류 |
 | `facts.migration.findings[].statement` | string | 필수 | 해당 SQL 문장 (한 줄로 줄임) |
 | `facts.migration.findings[].evidence` | string | 필수 | 위치 '파일:줄' |
-| `facts.conditions` | object[] | 선택 | 조건별 재생 결과 (none / restart / replace). 있으면 R1 / R1b / R1c 가 이것으로 판단하고 passed 는 원본 종합값 보존용이다. 없으면 R1 이 passed 를 본다 |
+| `facts.conditions` | object[] | 선택 | 조건별 재생 결과 (none / restart / replace). 있으면 비어 있지 않아야 하며 R1 / R1b / R1c 가 이것으로 판단하고 passed 는 원본 종합값 보존용이다. 없으면 R1 이 passed 를 본다 |
 | `facts.conditions[].name` | string | 필수 | 조건 이름. none(기준선) / restart(재시작) / replace(컨테이너 교체) |
 | `facts.conditions[].total` | integer | 필수 | 이 조건에서 재생한 요청 수 |
-| `facts.conditions[].matched` | integer | 필수 | 응답이 일치한 요청 수 |
-| `facts.conditions[].failed` | boolean | 필수 | 이 조건에서 어긋난 요청이 하나라도 있는지 (matched < total). R1 / R1b / R1c 가 읽는다 |
+| `facts.conditions[].matched` | integer | 필수 | 응답이 일치한 요청 수 (total 이하) |
+| `facts.conditions[].failed` | boolean | 필수 | 이 조건에서 어긋난 요청이 하나라도 있는지. matched < total 과 같아야 한다. R1 / R1b / R1c 가 읽는다 |
 | `facts.conditions[].mismatches` | object[] | 필수 | 어긋난 요청 목록. 없으면 빈 배열 |
 | `facts.conditions[].mismatches[].index` | integer | 필수 | 기록 파일의 요청 번호 (1부터) |
 | `facts.conditions[].mismatches[].request` | string | 필수 | 요청 한 줄 (예: "GET /posts") |

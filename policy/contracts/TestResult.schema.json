@@ -143,7 +143,8 @@
           "description": "파괴적 DB 마이그레이션 판정. 실행기(src/stage.ts)가 facts.migration 이 없으면 채운다"
         },
         "conditions": {
-          "description": "조건별 재생 결과 (none / restart / replace). 있으면 R1 / R1b / R1c 가 이것으로 판단하고 passed 는 원본 종합값 보존용이다. 없으면 R1 이 passed 를 본다",
+          "description": "조건별 재생 결과 (none / restart / replace). 있으면 비어 있지 않아야 하며 R1 / R1b / R1c 가 이것으로 판단하고 passed 는 원본 종합값 보존용이다. 없으면 R1 이 passed 를 본다",
+          "minItems": 1,
           "type": "array",
           "items": {
             "type": "object",
@@ -163,11 +164,11 @@
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 9007199254740991,
-                "description": "응답이 일치한 요청 수"
+                "description": "응답이 일치한 요청 수 (total 이하)"
               },
               "failed": {
                 "type": "boolean",
-                "description": "이 조건에서 어긋난 요청이 하나라도 있는지 (matched < total). R1 / R1b / R1c 가 읽는다"
+                "description": "이 조건에서 어긋난 요청이 하나라도 있는지. matched < total 과 같아야 한다. R1 / R1b / R1c 가 읽는다"
               },
               "mismatches": {
                 "type": "array",
