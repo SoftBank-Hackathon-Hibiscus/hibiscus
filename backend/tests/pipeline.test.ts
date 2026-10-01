@@ -121,6 +121,47 @@ describe("수동 실행 한 바퀴 (가짜 명령)", () => {
     expect(h.runner.npmCalls("sign")).toHaveLength(0);
   });
 
+  it("본인 승인 → 403, awaiting_approval 유지 → 다른 승인자가 승인하면 succeeded", async () => {
+    const h = makeHarness([gitHandler(), policyHandler("needs_approval"), signerHandler()]);
+    const { view } = await runOnce(h, { requester: "ryu" });
+    const runId = view!.run.run_id;
+
+    const self = await post(h.app, `/runs/${runId}/approve`, { approver: "ryu" });
+    expect(self.status).toBe(403);
+    expect(self.json.error).toContain("본인");
+    // signer 를 부르지 않았고 상태는 그대로
+    expect(h.runner.npmCalls("approve")).toHaveLength(0);
+    expect((await get(h.app, `/runs/${runId}`)).json.run.status).toBe("awaiting_approval");
+
+    const other = await post(h.app, `/runs/${runId}/approve`, { approver: "seungpyo" });
+    expect(other.status).toBe(202);
+    await h.service.waitFor(runId);
+    const after = (await get(h.app, `/runs/${runId}`)).json;
+    expect(after.run.status).toBe("succeeded");
+    expect(stageOf(after, "sign").summary.approver).toBe("seungpyo");
+  });
+
+  it("같은 run 에 거의 동시에 온 승인 2개 → 하나만 202, signer approve·sign 은 한 번씩", async () => {
+    const h = makeHarness([gitHandler(), policyHandler("needs_approval"), signerHandler()]);
+    const { view } = await runOnce(h, { requester: "ryu" });
+    const runId = view!.run.run_id;
+
+    const [a, b] = await Promise.all([
+      post(h.app, `/runs/${runId}/approve`, { approver: "seungpyo" }),
+      post(h.app, `/runs/${runId}/approve`, { approver: "taehyun" }),
+    ]);
+    expect([a.status, b.status].sort()).toEqual([202, 409]);
+    await h.service.waitFor(runId);
+
+    expect(h.runner.npmCalls("approve")).toHaveLength(1);
+    expect(h.runner.npmCalls("sign")).toHaveLength(1);
+    const after = (await get(h.app, `/runs/${runId}`)).json;
+    expect(after.run.status).toBe("succeeded");
+    expect(after.stages.filter((s: any) => s.stage === "sign")).toHaveLength(1);
+    const winner = a.status === 202 ? "seungpyo" : "taehyun";
+    expect(stageOf(after, "sign").summary.approver).toBe(winner);
+  });
+
   it("real 모드에서 stub 승인 → 403", async () => {
     const h = makeHarness([gitHandler(), policyHandler("needs_approval"), signerHandler()], { SIGNER_MODE: "real" });
     const { view } = await runOnce(h, { requester: "ryu", digest: REGISTRY_DIGEST });

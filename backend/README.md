@@ -52,7 +52,7 @@ curl -s localhost:8080/runs/<run_id>
 | GET | `/apps/:id` | 앱 하나 | 200 / 404 |
 | POST | `/apps/:id/runs` | 수동 실행. `requester`(필수), `source_revision`(선택, 소문자 hex 7~40자), `digest`(선택, `sha256:` + hex 64자). 단계는 백그라운드로 돈다 | 202 run / 400 / 404 |
 | GET | `/runs/:id` | run + StageExecution 목록 | 200 `{ run, stages }` / 404 |
-| POST | `/runs/:id/approve` | needs_approval 로 멈춘 run 승인. `approver`(필수). signer `approve` → `sign --approval` 순서로 이어서 돈다 | 202 run / 403 / 409 |
+| POST | `/runs/:id/approve` | needs_approval 로 멈춘 run 승인. `approver`(필수). signer `approve` → `sign --approval` 순서로 이어서 돈다. 요청자 본인이면 403 이고 run 은 awaiting_approval 그대로. 같은 run 에 승인이 동시에 오면 먼저 시작한 것만 진행하고 나머지는 409 | 202 run / 403 / 409 |
 | GET | `/healthz` | 살아 있는지 | 200 |
 
 webhook(`POST /webhooks/github`)은 다음 PR 에서 만든다.

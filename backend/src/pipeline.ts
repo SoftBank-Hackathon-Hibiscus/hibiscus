@@ -5,7 +5,7 @@
 import { randomUUID } from "node:crypto";
 import { statSync } from "node:fs";
 import { resolve } from "node:path";
-import type { ApprovalProvider } from "./approval/provider.js";
+import { type ApprovalProvider, ApprovalRefusedError } from "./approval/provider.js";
 import type { CommandRunner } from "./command-runner.js";
 import type { Config } from "./config.js";
 import { ConflictError, NotFoundError, ValidationError } from "./errors.js";
@@ -33,6 +33,8 @@ const now = () => new Date().toISOString();
 
 export class PipelineService {
   private readonly inflight = new Map<string, Promise<void>>();
+  /** 승인 처리 중인 run. 같은 run 에 거의 동시에 온 승인 요청 중 먼저 시작한 것만 진행한다 (프로세스 안 잠금) */
+  private readonly approving = new Set<string>();
 
   constructor(private readonly deps: PipelineDeps) {}
 
@@ -107,15 +109,25 @@ export class PipelineService {
 
   /** needs_approval 로 멈춘 run 을 승인하고 서명·배포를 이어서 돌린다 */
   async approve(runId: string, input: ApproveInput): Promise<DeploymentRun> {
-    const run = await this.getRun(runId);
-    if (run.status !== "awaiting_approval") throw new ConflictError(`승인 대기 상태가 아님 (status=${run.status})`);
-    const app = await this.getApp(run.app_id);
-    const resolved = await this.deps.approvals.resolve({ run, approver: input.approver });
+    if (this.approving.has(runId)) throw new ConflictError("같은 run 의 승인을 이미 처리하는 중");
+    this.approving.add(runId);
+    try {
+      const run = await this.getRun(runId);
+      if (run.status !== "awaiting_approval") throw new ConflictError(`승인 대기 상태가 아님 (status=${run.status})`);
+      // signer 도 본인 승인을 거절하지만, 그 전에 막아야 run 이 failed 로 끝나지 않고 다른 사람이 승인할 수 있다
+      if (input.approver === run.requester) {
+        throw new ApprovalRefusedError(`요청자 본인(${run.requester})은 승인할 수 없다. 다른 사람이 승인해야 한다`);
+      }
+      const app = await this.getApp(run.app_id);
+      const resolved = await this.deps.approvals.resolve({ run, approver: input.approver });
 
-    const updated = await this.deps.store.updateRun(runId, { status: "running", current_stage: "sign" });
-    const paths = new RunPaths(this.deps.config.workDir, runId);
-    this.track(runId, this.continueAfterPolicy(app, runId, paths, { approver: resolved.approver }));
-    return updated;
+      const updated = await this.deps.store.updateRun(runId, { status: "running", current_stage: "sign" });
+      const paths = new RunPaths(this.deps.config.workDir, runId);
+      this.track(runId, this.continueAfterPolicy(app, runId, paths, { approver: resolved.approver }));
+      return updated;
+    } finally {
+      this.approving.delete(runId);
+    }
   }
 
   async getRun(runId: string): Promise<DeploymentRun> {
