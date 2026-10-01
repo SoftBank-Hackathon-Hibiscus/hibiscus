@@ -75,7 +75,7 @@ npm run typecheck
 }
 ```
 
-- `conditions[]`: 조건(`none` 기준선 / `restart` 재시작 / `replace` 컨테이너 교체)마다 `{ name, total, matched, failed, mismatches[] }`. 있으면 비어 있지 않아야 하고, `matched <= total`, `failed == (matched < total)`이어야 한다 (형식 오류). `mismatches[]`의 `related_*`는 테스트 파트가 붙인 관련 사실 힌트(`related_fact` = path)를 원본 facts에서 찾아 옮긴 조회값이다. 없는 값은 `null`이 아니라 **키를 생략**한다 (조건 문법의 `exists`가 `null`도 있음으로 보기 때문).
+- `conditions[]`: 조건(`none` 기준선 / `restart` 재시작 / `replace` 컨테이너 교체)마다 `{ name, total, matched, failed, mismatches[] }`. 있으면 `none` / `restart` / `replace`가 정확히 한 번씩 있어야 하고(다른 이름·누락·중복은 형식 오류), 각 조건은 `total >= 1`, `matched <= total`, `failed == (matched < total)`, `mismatches.length == total - matched`여야 한다. `--handoff`(변환기)와 `--test`(직접 입력) 어느 경로로 들어와도 같은 조건을 스키마가 보장한다. `mismatches[]`의 `related_*`는 테스트 파트가 붙인 관련 사실 힌트(`related_fact` = path)를 원본 facts에서 찾아 옮긴 조회값이다. 없는 값은 `null`이 아니라 **키를 생략**한다 (조건 문법의 `exists`가 `null`도 있음으로 보기 때문).
 - `storage[]`: 테스트 파트 facts 원본의 `kind, path, storage`. 보존·설명용이다.
 - **`passed`의 의미**: `facts.conditions`가 있는 입력에서는 `passed`는 parity 원본의 종합값을 보존하는 필드이고, 정책 판단(R1, R1b, R1c)은 조건별 사실을 읽는다. 그래서 `passed: false`인데 `allow`가 나올 수 있다 (예: replace에서만 업로드 유실이 나고 그 원인이 `local_upload` 저장 사실로 설명될 때는 R6가 위치 제한으로 다룬다). `facts.conditions`가 없는 구형 입력에서만 R1이 `passed`를 fallback으로 본다. `match`는 `conditions`가 있으면 기준 조건 `none`의 결과다. 규칙이 정의되지 않은 facts 키를 읽으면 정책을 불러올 때 경고가 난다. 규칙이 실제로 읽는 경로 목록은 [contracts/README.md](contracts/README.md)의 "정책이 읽는 필드"에 자동 생성된다.
 

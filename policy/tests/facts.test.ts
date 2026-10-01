@@ -16,29 +16,65 @@ describe("test_result.facts: 정책이 읽는 키만 타입 고정", () => {
     expect([...KNOWN_FACTS_KEYS].sort()).toEqual(["conditions", "db", "migration", "storage", "writes_local_file"]);
   });
 
+  const passAll = (name: string) => ({ name, total: 20, matched: 20, failed: false, mismatches: [] });
+  const replace16 = { name: "replace", total: 20, matched: 19, failed: true, mismatches: [{ index: 16, request: "GET /uploads", related_fact: "/app/uploads", related_storage: "container_layer", related_kind: "local_upload" }] };
+  /** none, restart 통과 + replace 는 주어진 값 */
+  const trio = (replace: unknown = replace16) => [passAll("none"), passAll("restart"), replace];
+
   it("facts.conditions / facts.storage: 없는 값은 null 이 아니라 키 생략이어야 한다", () => {
-    const condition = { name: "replace", total: 20, matched: 19, failed: true, mismatches: [{ index: 16, request: "GET /uploads", related_fact: "/app/uploads", related_storage: "container_layer", related_kind: "local_upload" }] };
-    expect(TestResultSchema.safeParse(withFacts({ conditions: [condition] })).success).toBe(true);
-    expect(TestResultSchema.safeParse(withFacts({ conditions: [{ ...condition, mismatches: [{ index: 11, request: "GET /me" }] }] })).success).toBe(true);
+    expect(TestResultSchema.safeParse(withFacts({ conditions: trio() })).success).toBe(true);
+    expect(TestResultSchema.safeParse(withFacts({ conditions: trio({ ...replace16, mismatches: [{ index: 11, request: "GET /me" }] }) })).success).toBe(true);
     // null 은 거부 (조건 DSL 의 exists 가 null 을 "있음" 으로 보기 때문에 생략만 허용)
-    expect(TestResultSchema.safeParse(withFacts({ conditions: [{ ...condition, mismatches: [{ index: 11, request: "GET /me", related_fact: null }] }] })).success).toBe(false);
-    expect(TestResultSchema.safeParse(withFacts({ conditions: [{ ...condition, failed: "yes" }] })).success).toBe(false);
+    expect(TestResultSchema.safeParse(withFacts({ conditions: trio({ ...replace16, mismatches: [{ index: 11, request: "GET /me", related_fact: null }] }) })).success).toBe(false);
+    expect(TestResultSchema.safeParse(withFacts({ conditions: trio({ ...replace16, failed: "yes" }) })).success).toBe(false);
     expect(TestResultSchema.safeParse(withFacts({ storage: [{ kind: "sqlite", path: "/app/data/data.db", storage: "container_layer" }] })).success).toBe(true);
     expect(TestResultSchema.safeParse(withFacts({ storage: [{ kind: "sqlite", path: "/app/data/data.db" }] })).success).toBe(false);
   });
 
-  it("facts.conditions 런타임 검증: 비어 있지 않음, matched <= total, failed == (matched < total)", () => {
-    const ok = { name: "none", total: 20, matched: 20, failed: false, mismatches: [] };
-    expect(TestResultSchema.safeParse(withFacts({ conditions: [ok] })).success).toBe(true);
-    expect(TestResultSchema.safeParse(withFacts({ conditions: [] })).success).toBe(false);
+  describe("facts.conditions 런타임 불변조건 (--test 직접 입력도 --handoff 와 같은 fail-closed)", () => {
     const issues = (facts: unknown) => {
       const r = TestResultSchema.safeParse(withFacts(facts));
-      return r.success ? [] : r.error.issues.map((i) => i.path.join("."));
+      return r.success ? [] : r.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`);
     };
-    expect(issues({ conditions: [{ ...ok, matched: 21 }] })).toContain("facts.conditions.0.matched");
-    expect(issues({ conditions: [{ ...ok, failed: true }] })).toContain("facts.conditions.0.failed");
-    expect(issues({ conditions: [{ ...ok, matched: 19 }] })).toContain("facts.conditions.0.failed");
-    expect(TestResultSchema.safeParse(withFacts({ conditions: [{ ...ok, matched: 19, failed: true }] })).success).toBe(true);
+
+    it("정상 세 조건 입력은 통과한다", () => {
+      expect(TestResultSchema.safeParse(withFacts({ conditions: trio() })).success).toBe(true);
+      expect(TestResultSchema.safeParse(withFacts({ conditions: [passAll("replace"), passAll("none"), passAll("restart")] })).success).toBe(true); // 순서는 자유
+    });
+
+    it("replace 누락 / 중복 / 빈 배열 거부", () => {
+      expect(issues({ conditions: [passAll("none"), passAll("restart")] }).join("\n")).toMatch(/facts\.conditions: /);
+      expect(issues({ conditions: [passAll("none"), passAll("restart"), passAll("restart")] }).join("\n")).toMatch(/조건이 빠졌습니다: replace|같은 조건이 두 번 있습니다: restart/);
+      expect(issues({ conditions: [...trio(), passAll("none")] }).join("\n")).toMatch(/facts\.conditions/);
+      expect(TestResultSchema.safeParse(withFacts({ conditions: [] })).success).toBe(false);
+    });
+
+    it("모르는 조건 이름 거부 (name 은 none / restart / replace 만)", () => {
+      expect(issues({ conditions: [passAll("none"), passAll("restart"), passAll("replicas")] }).join("\n")).toMatch(/facts\.conditions\.2\.name/);
+    });
+
+    it("total=0 거부, matched > total 거부", () => {
+      expect(issues({ conditions: trio({ ...passAll("replace"), total: 0, matched: 0 }) }).join("\n")).toMatch(/facts\.conditions\.2\.total/);
+      expect(issues({ conditions: trio({ ...passAll("replace"), matched: 21 }) }).join("\n")).toMatch(/facts\.conditions\.2\.matched/);
+    });
+
+    it("failed 와 mismatches 수가 수치와 어긋나면 거부", () => {
+      // failed=true, 20/19 인데 mismatches=[] → mismatches 수 불일치
+      expect(issues({ conditions: trio({ ...replace16, mismatches: [] }) }).join("\n")).toMatch(/facts\.conditions\.2\.mismatches: mismatches 는 total - matched \(1\)개여야 하는데 0개/);
+      expect(issues({ conditions: trio({ ...replace16, failed: false }) }).join("\n")).toMatch(/facts\.conditions\.2\.failed/);
+      expect(issues({ conditions: trio({ ...passAll("replace"), failed: true }) }).join("\n")).toMatch(/facts\.conditions\.2\.failed/);
+      expect(issues({ conditions: trio({ ...passAll("replace"), mismatches: [{ index: 1, request: "GET /" }] }) }).join("\n")).toMatch(/facts\.conditions\.2\.mismatches/);
+    });
+
+    it("conditions 가 없는 기존 fixtures 는 그대로 통과하고 결과도 같다", () => {
+      const pii = PiiReportSchema.parse({ run_id: base.run_id, pii: [] });
+      expect(TestResultSchema.safeParse(base).success).toBe(true);
+      expect(decide(TestResultSchema.parse(base), pii, policy).decision).toBe("allow");
+      const failed = TestResultSchema.parse(JSON.parse(readFileSync(join(ROOT, "fixtures", "02-block-test-failed", "test_result.json"), "utf8")));
+      const plan = decide(failed, { run_id: failed.run_id, pii: [] }, policy);
+      expect(plan.decision).toBe("block");
+      expect(plan.requires?.map((r) => r.id)).toEqual(["fix_tests", "managed_db"]);
+    });
   });
 
   it('facts.db = "SQLite" (대문자) → 형식 오류', () => {

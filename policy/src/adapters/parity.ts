@@ -23,6 +23,7 @@
  */
 import { z } from "zod";
 import {
+  CONDITION_NAMES,
   type ConditionFact,
   type ConditionMismatch,
   DigestSchema,
@@ -31,14 +32,15 @@ import {
   type StorageFact,
   type TestResult,
   TestResultSchema,
+  isConditionName,
 } from "../schema.js";
 
 export const PARITY_HANDOFF_FORMAT = "parity-handoff-v1-proposal";
 export const PARITY_DIAGNOSTICS_FORMAT = "parity-execution-v1";
 /** 기준 조건. match 는 이 조건의 결과다 */
 export const BASELINE_CONDITION = "none";
-/** 정책 판단(R1 / R1b / R1c)에 필요한 조건. 이 세 개가 정확히 한 번씩 있어야 변환한다 */
-export const REQUIRED_CONDITIONS: readonly string[] = [BASELINE_CONDITION, "restart", "replace"];
+/** 정책 판단(R1 / R1b / R1c)에 필요한 조건 (schema.ts 의 CONDITION_NAMES). 이 세 개가 정확히 한 번씩 있어야 변환한다 */
+export const REQUIRED_CONDITIONS: readonly string[] = CONDITION_NAMES;
 /** facts.db = "sqlite" 가 되는 사실 종류 */
 export const SQLITE_KIND = "sqlite";
 /** facts.writes_local_file 에 들어가는 사실 종류 */
@@ -202,7 +204,8 @@ export function adaptParityHandoff(handoff: ParityHandoff, diagnostics?: ParityD
   // 3) 사실 옮기기 (판단 없음)
   const factsByPath = new Map(result.facts.map((f) => [f.path, f] as const));
   const conditions: ConditionFact[] = result.replay.map((entry) => ({
-    name: entry.condition,
+    // 위에서 모르는 조건을 이미 거부했으므로 여기서는 항상 참이다
+    name: isConditionName(entry.condition) ? entry.condition : fail(`모르는 조건: ${entry.condition}`),
     total: entry.total,
     matched: entry.matched,
     failed: entry.matched < entry.total,

@@ -87,21 +87,47 @@ export const ConditionMismatchSchema = z
   .describe("한 조건에서 기록과 어긋난 요청 하나");
 export type ConditionMismatch = z.infer<typeof ConditionMismatchSchema>;
 
+/** 정책 판단(R1 / R1b / R1c)에 필요한 조건. conditions 가 있으면 이 세 개가 정확히 한 번씩 있어야 한다 */
+export const CONDITION_NAMES = ["none", "restart", "replace"] as const;
+export const ConditionNameSchema = z.enum(CONDITION_NAMES).describe("조건 이름. none(기준선) / restart(재시작) / replace(컨테이너 교체)");
+export type ConditionName = z.infer<typeof ConditionNameSchema>;
+export function isConditionName(value: string): value is ConditionName {
+  return (CONDITION_NAMES as readonly string[]).includes(value);
+}
+
 export const ConditionFactSchema = z
   .looseObject({
-    name: z.string().min(1).describe("조건 이름. none(기준선) / restart(재시작) / replace(컨테이너 교체)"),
-    total: z.number().int().nonnegative().describe("이 조건에서 재생한 요청 수"),
+    name: ConditionNameSchema,
+    total: z.number().int().positive().describe("이 조건에서 재생한 요청 수 (1 이상. 요청 0건은 판정이 아니다)"),
     matched: z.number().int().nonnegative().describe("응답이 일치한 요청 수 (total 이하)"),
     failed: z.boolean().describe("이 조건에서 어긋난 요청이 하나라도 있는지. matched < total 과 같아야 한다. R1 / R1b / R1c 가 읽는다"),
-    mismatches: z.array(ConditionMismatchSchema).describe("어긋난 요청 목록. 없으면 빈 배열"),
+    mismatches: z.array(ConditionMismatchSchema).describe("어긋난 요청 목록 (total - matched 개). 없으면 빈 배열"),
   })
   .superRefine((c, ctx) => {
-    // 규칙이 failed 를 읽으므로 수치와 어긋난 값이 들어오면 거부한다 (JSON Schema 에는 표현되지 않는 검사)
+    // 규칙이 failed 와 mismatches 를 읽으므로 수치와 어긋난 값이 들어오면 거부한다 (JSON Schema 에는 표현되지 않는 검사).
+    // --handoff(변환기)와 --test(직접 입력) 어느 경로로 와도 같은 조건을 보장한다
     if (c.matched > c.total) ctx.addIssue({ code: "custom", path: ["matched"], message: `matched(${c.matched})는 total(${c.total}) 이하여야 합니다` });
     if (c.failed !== c.matched < c.total) ctx.addIssue({ code: "custom", path: ["failed"], message: `failed 는 matched < total (${c.matched} < ${c.total}) 과 같아야 합니다` });
+    if (c.mismatches.length !== c.total - c.matched) {
+      ctx.addIssue({ code: "custom", path: ["mismatches"], message: `mismatches 는 total - matched (${c.total - c.matched})개여야 하는데 ${c.mismatches.length}개입니다` });
+    }
   })
   .describe("조건 하나의 재생 결과");
 export type ConditionFact = z.infer<typeof ConditionFactSchema>;
+
+/** conditions 배열: none / restart / replace 가 정확히 한 번씩 (빠짐·중복 거부. 모르는 이름은 name enum 이 거부) */
+export const ConditionFactsSchema = z
+  .array(ConditionFactSchema)
+  .min(CONDITION_NAMES.length)
+  .max(CONDITION_NAMES.length)
+  .superRefine((conditions, ctx) => {
+    const names = conditions.map((c) => c.name);
+    const missing = CONDITION_NAMES.filter((n) => !names.includes(n));
+    const duplicated = names.filter((n, i) => names.indexOf(n) !== i);
+    if (missing.length > 0) ctx.addIssue({ code: "custom", message: `조건이 빠졌습니다: ${missing.join(", ")} (none, restart, replace 가 정확히 한 번씩 있어야 합니다)` });
+    if (duplicated.length > 0) ctx.addIssue({ code: "custom", message: `같은 조건이 두 번 있습니다: ${[...new Set(duplicated)].join(", ")}` });
+  })
+  .describe("조건별 재생 결과 (none / restart / replace 정확히 한 번씩). 있으면 R1 / R1b / R1c 가 이것으로 판단하고 passed 는 원본 종합값 보존용이다. 없으면 R1 이 passed 를 본다");
 
 export const StorageFactSchema = z
   .looseObject({
@@ -125,11 +151,7 @@ export const FactsSchema = z
     db: z.enum(["sqlite", "postgres", "mysql", "none"]).optional().describe("앱이 쓰는 DB. 소문자만. R5 가 읽는다. 관찰하지 못했으면 키를 생략한다 (none 은 'DB 없음' 을 확인했을 때만)"),
     writes_local_file: z.array(z.string()).optional().describe("앱이 쓰는 로컬 파일 경로 목록. R6 가 읽는다"),
     migration: MigrationReportSchema.optional(),
-    conditions: z
-      .array(ConditionFactSchema)
-      .min(1)
-      .optional()
-      .describe("조건별 재생 결과 (none / restart / replace). 있으면 비어 있지 않아야 하며 R1 / R1b / R1c 가 이것으로 판단하고 passed 는 원본 종합값 보존용이다. 없으면 R1 이 passed 를 본다"),
+    conditions: ConditionFactsSchema.optional(),
     storage: z.array(StorageFactSchema).optional().describe("컨테이너 안에 남은 상태 목록 (테스트 파트 facts[] 원본의 kind, path, storage). 정책 판단에는 conditions[].mismatches[].related_kind 를 쓰고, 이 목록은 보존·설명용"),
   })
   .describe("테스트 중 관찰한 사실. 정의된 키(db, writes_local_file, migration, conditions, storage)는 타입이 고정되고, 그 밖의 키는 자유");
