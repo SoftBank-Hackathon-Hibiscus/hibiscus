@@ -1,0 +1,62 @@
+{
+  "run_id": "r-004",
+  "app": "todo",
+  "digest": "sha256:d4e5f60718293a4b5c6d7e8f9001122334455667788990aabbccddeeff001122",
+  "decision": "needs_approval",
+  "targets": [
+    "onprem"
+  ],
+  "failover_allowed": false,
+  "requires": [
+    {
+      "id": "human_review_pii",
+      "hint": "해당 칼럼이 개인정보인지 사람이 확인",
+      "hint_i18n": {
+        "ja": "該当カラムが個人情報かどうかを人が確認"
+      },
+      "rule_id": "R3",
+      "allowed_targets": [
+        "onprem"
+      ]
+    }
+  ],
+  "rules": [
+    {
+      "id": "R1",
+      "result": "not_matched"
+    },
+    {
+      "id": "R2",
+      "result": "not_matched"
+    },
+    {
+      "id": "R3",
+      "result": "matched",
+      "reason": "확신 없는 개인정보 후보(todos.note, free_text_maybe_address): src/routes/todos.js:41",
+      "reason_i18n": {
+        "ja": "確信のない個人情報候補（todos.note、free_text_maybe_address）：src/routes/todos.js:41"
+      }
+    },
+    {
+      "id": "R4",
+      "result": "matched",
+      "reason": "개인정보(contact, phone) 발견: src/routes/signup.js:24; 개인정보(note, free_text_maybe_address) 발견: src/routes/todos.js:41",
+      "reason_i18n": {
+        "ja": "個人情報（contact、phone）を検出：src/routes/signup.js:24; 個人情報（note、free_text_maybe_address）を検出：src/routes/todos.js:41"
+      }
+    },
+    {
+      "id": "R5",
+      "result": "not_matched"
+    },
+    {
+      "id": "R6",
+      "result": "not_matched"
+    },
+    {
+      "id": "R7",
+      "result": "not_matched"
+    }
+  ],
+  "plan_hash": "29aec1d7f9c41033e11039df831557032cf5dbc900be084f318b014bb0efc92e"
+}

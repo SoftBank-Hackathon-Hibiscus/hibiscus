@@ -1,0 +1,4 @@
+# policy/ 아래 텍스트 파일은 항상 LF 로 저장·체크아웃한다.
+# core.autocrlf=true 인 Windows 체크아웃이나 git archive 에서 contracts/ 생성 결과와
+# 저장된 파일이 줄바꿈만 달라 "contracts 가 오래됨" 테스트가 실패하던 문제를 막는다.
+* text=auto eol=lf
