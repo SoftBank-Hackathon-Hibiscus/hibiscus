@@ -17,6 +17,9 @@
 바인딩 등 환경 원인 분석은 주영님 영역이며, 이 모듈은 실패 단계와 검사 결과를 전달합니다.
 빌드·최초 실행, AI 수정 후 새 이미지 빌드·실행, digest 기록은 주영님이 맡습니다.
 조건별 재생성은 윤선님의 `docker_ops.recreate`를 사용하고, `run_id`는 파이프라인에서 받습니다.
+`test`의 기본 조건은 `none,restart,replace`이며, 주영님 파이프라인 호출에도 세 조건을 명시하기로 했습니다.
+로컬 개별 검사에서는 조건을 골라 실행할 수 있지만 Policy 제출에는 세 조건 모두 필요합니다.
+기존 `demo.sh`·`demo.ps1`은 두 조건을 명시하는 개별 데모로 유지하며 Policy 제출용으로 쓰지 않습니다.
 
 ## 최초 실행을 맡은 쪽에서 전달할 정보
 
@@ -90,6 +93,22 @@ stage / commit / image / passed / facts / replay / mismatches
 원본 result·env_report·facts·evidence는 보존합니다. 주영님의 `env_report`·`evidence`·`handoff_bundle`을
 보존하는 방향도 합의됐지만, 현재 이 문서에서 대조한 실제 `env_report` 예시는 아직 없습니다.
 
+### 류진님 PR #12에서 전달받은 구현·검증 보고
+
+출처: [PR #12](https://github.com/SoftBank-Hackathon-Hibiscus/hibiscus/pull/12)에 관한 류진님 공유 내용.
+아래는 **팀원이 보고한 상태**이며, 이 문서 갱신 중 PR 소스를 직접 검토하거나 검증 명령을 실행하지 않았습니다.
+
+- 정규화는 구현됐고 원본 `passed`·facts를 보존합니다. 조건 결과가 없는 legacy 입력에만 기존 `passed` fallback을 적용합니다.
+- `none` 불일치는 `block / fix_tests`, `restart` 불일치는 `block / fix_restart_failure`로 처리합니다.
+- `replace`만 실패하면 SQLite·로컬 파일 사실로 설명 가능한 경우 기존 R5/R6로 처리하고, 설명되지 않으면 `block / investigate_replace_failure`로 처리합니다.
+- 알 수 없는 조건, 전체 요청 0개, 수치·failed·불일치 개수의 불일치, 중단된 검사는 허용하지 않습니다. `--handoff`와 `--test` 입력에 같은 불변 조건을 적용합니다.
+- 레지스트리 digest가 있으면 metadata와 일치를 검사합니다. 로컬 이미지 ID와 `metadata.digest`가 같으면 경고합니다.
+- `npm` 테스트 266개, 타입 검사·contracts 검사를 통과했고 두 입력 경로의 결과가 같았다는 보고를 받았습니다.
+- PR #10 `b0a2c50`의 `meeting_result.json` 사본은 `block`과 `fix_restart_failure`, `managed_db`, `object_storage`로 처리됐다고 합니다.
+
+따라서 변환기와 조건별 판정 규칙을 여전히 미구현·미정이라고 보지 않습니다. 주영님 실제 `env_report`는
+제공 예정이며 아직 받지 않았고, 실제 빌드 metadata를 포함한 전체 파이프라인 연결은 별도 확인이 필요합니다.
+
 자동 생성하는 `result.diagnostics.json`은 로컬 연결용 보조 파일입니다. 공통 계약으로 확정한 스키마가 아닙니다.
 
 | 필드 | 뜻 |
@@ -125,7 +144,7 @@ python scripts/demo_meeting.py
 
 1. 샘플 앱 이미지 한 번 빌드 → 사용 기록 20개 수집.
 2. 초기 상태에서 두 번 재생해 노이즈 규칙 생성.
-3. 기본 CLI로 none/restart/replace 실행. 10번 요청 뒤 조건 적용.
+3. CLI에 none/restart/replace를 명시해 실행. 10번 요청 뒤 조건 적용.
 4. 동일한 이미지와 동일한 기준 파일로 한 번 더 실행해 결과의 재현성 확인.
 5. 원본 결과·해시·진단·실행 로그를 보존하고 자체 컨테이너 정리.
 
@@ -138,11 +157,11 @@ replace에서 16번 업로드 목록 조회가 추가로 달라져야 합니다.
 
 윤선이 터미널에서 전체 `python -m unittest`를 실행하고 최종 `OK`를 확인했습니다.
 최신 테스트 개수는 별도로 전달되지 않아 적지 않습니다. 이전의 124개를 이번 실행 개수로 쓰지 않습니다.
-이 표는 조건별 로그 표시·문서 정리 이전의 실행 결과입니다. 조건 표시 수정 후 검증 결과까지
-포함한 것으로 해석하지 않습니다. 표시 수정 확인 명령은 다음과 같습니다.
+이 표는 조건별 로그 표시·문서 정리와 기본 조건 3개 적용 이전의 실행 결과입니다.
+이후 변경에 대한 재실행 결과로 해석하지 않습니다. 기본 조건과 조건 표시 확인 명령은 다음과 같습니다.
 
 ```text
-python -m unittest tests.test_conditions tests.test_replace_condition -v
+python -m unittest tests.test_execution tests.test_conditions tests.test_replace_condition -v
 ```
 
 `scripts/demo_meeting.py` 실행 ID: `meeting-20260930-173237-f746f560b3`.
@@ -182,12 +201,12 @@ JSON 값은 원본 그대로 보존했습니다. 두 파일은 결함을 넣은 
 
 | # | 안건 | 합의·현재 구현 | 남은 확인 |
 |---|---|---|---|
-| 1 | `result.json` + `env_report` → Policy 입력 | 류진님이 Policy 앞 변환기를 맡음. 윤선 원본 결과·진단의 실제 예시는 `examples/meeting_result*`에 있음 | 주영님 실제 `env_report` 예시를 받아 변환기와 함께 실행. 예시 공유는 아직 약속 단계 |
+| 1 | `result.json` + `env_report` → Policy 입력 | 류진님 변환기 구현 및 두 입력 경로 검증 보고를 받음(PR #12). 윤선 원본 결과·진단은 `examples/meeting_result*`에 있음 | 주영님 실제 `env_report`를 받아 함께 실행. 아직 수신 전이며 파이프라인 E2E도 미검증 |
 | 2 | 원본 `facts/evidence` 보존 위치 | 원본 result·env_report·evidence 보존에 합의. 윤선 전체 원본은 위 `records/meeting/<run_id>/`, 공유 사본은 `examples/`. 주영님은 `env_report`·`evidence`·`handoff_bundle` 보존 | 파이프라인에서 두 파트의 산출물을 전달·보관하는 최종 경로 연결 |
-| 3 | `facts.db`, `facts.writes_local_file` 정규화 | 류진님 변환기 담당. 윤선 `{kind, path, storage, evidence}` 원본 형식 유지 | 실제 두 파트 출력으로 정규화 결과 대조 |
-| 4 | `none/restart/replace` 결과 형식 | 윤선 `replay[]`의 조건명·전체 수·일치 수와 `mismatches[]`를 그대로 보존. 세 조건의 실제 결과 확보 | 주영 `env_report`와 함께 공통 입력으로 변환한 예시 확인 |
-| 5 | 전체 실패와 환경 제약 사실 구분 | 윤선 원본 판정은 불일치 시 `passed=false` 유지. 실행 오류도 통과로 바꾸지 않음 | 어떤 조건 실패를 환경 제약으로 해석할지 세부 재분류 규칙은 미합의 |
-| 6 | replace 유실과 저장 사실로 Policy 판단 | 원본 불일치 + 저장 방식 사실을 함께 전달하고, 배포 대상·해결 조건은 Policy가 판단하는 방향에 합의. 16번 업로드 유실 원본 확보 | 해당 결과를 넣었을 때 실제 target·requires가 기대대로 나오는지 확인 |
+| 3 | `facts.db`, `facts.writes_local_file` 정규화 | 류진님이 구현·검증 보고(PR #12). 윤선 `{kind, path, storage, evidence}` 원본 형식 유지 | 실제 env_report와 빌드 metadata를 더한 연결 결과 대조 |
+| 4 | `none/restart/replace` 결과 형식 | 윤선 `replay[]`·`mismatches[]` 원본 유지. 기본값과 파이프라인 호출은 세 조건, Policy 제출에도 세 조건 필수 | 실제 파이프라인에서 세 조건 결과가 모두 전달되는지 확인 |
+| 5 | 전체 실패와 환경 제약 사실 구분 | 원본 `passed` 보존. PR #12 보고상 none/restart 실패는 각각 fix_tests/fix_restart_failure로 차단하고, replace-only 실패는 관측 사실로 설명 가능한지 구분 | 직접 소스 검토·실제 파이프라인 실행은 미확인. 규칙 구현 자체가 미정인 것은 아님 |
+| 6 | replace 유실과 저장 사실로 Policy 판단 | PR #12 보고상 설명 가능한 replace-only 실패는 R5/R6, 나머지는 investigate_replace_failure로 차단. 현재 샘플은 restart도 실패해 block 및 fix_restart_failure·managed_db·object_storage | 실제 env_report와 함께 target·requires 결과 확인 |
 | 7 | `run_id/source_revision/digest` 전달 | 파이프라인 run_id·앱 Git SHA·레지스트리 digest 사용에 합의. 주영님이 빌드·digest 기록. 외부 값을 원본과 묶는 `parity.handoff`는 구현된 제안 도구 | 레지스트리 위치 미정. 실제 값 전달·이미지와의 연결 미검증. 기존 result 키에 임의 필드를 추가하지 않음 |
 | 8 | `Policy.requires`를 AI 수정 목표로 사용 | MVP 자동화 범위는 목요일 오후 논의 예정 | AI 수정 → 같은 기준 재검증 → Policy 재평가를 어디까지 자동화할지 결정 |
 

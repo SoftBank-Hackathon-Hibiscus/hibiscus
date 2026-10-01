@@ -30,6 +30,7 @@ python scripts/demo_meeting.py
 
 이 스크립트의 기존 실측은 두 회차 모두 `none: 20/20, restart: 14/20, replace: 13/20`입니다.
 `demo.sh`·`demo.ps1`의 2조건 결과와 구분합니다. 실행 범위와 원본은 [MEETING.md](MEETING.md)에 있습니다.
+기존 두 스크립트는 `none,restart`를 명시하는 개별 데모이며 **Policy 제출용 결과가 아닙니다**.
 
 > ⚠️ 데모와 `noise`/`test` 명령은 `--container`로 지정한 컨테이너를 **지우고 다시 만듭니다**(`docker rm -f` → `docker run`). 운영 중인 컨테이너를 지정하면 안 됩니다.
 
@@ -53,6 +54,11 @@ python -m parity test --record records/session.jsonl --target http://localhost:8
 # 이 샘플의 기대 요약: "none: 20/20, restart: 14/20, replace: 13/20, 불일치 13건"
 python -m parity summary result.json
 ```
+
+`test`에서 `--conditions`를 생략하면 **`none,restart,replace` 세 조건을 모두 실행**합니다.
+주영님이 호출하는 파이프라인에서도 세 조건을 명시하기로 했습니다. 로컬 개별 검사에서는
+`--conditions none` 같은 부분 선택이 가능하지만, **Policy에 제출할 결과는 세 조건 모두 필요**합니다.
+회의 데모는 계속 세 조건을 명시하며, 기존 실측은 이번 기본값 변경 후 재실행 결과가 아닙니다.
 
 재시작·교체 지점 고르기 (`test`의 옵션, 요청 번호는 1부터이며 두 조건에 같은 옵션 적용):
 
@@ -94,6 +100,10 @@ python -m parity verify --record records/session.jsonl --target https://guestboo
 기존 2조건 데모 결과는 [`examples/demo_result.json`](examples/demo_result.json), 회의 3조건 실측은
 [`examples/meeting_result.json`](examples/meeting_result.json)과 [진단 파일](examples/meeting_result.diagnostics.json)에 있습니다.
 이 파일을 공유한 것과 정책·승인·서명까지 연결해 실행한 것은 구분합니다.
+류진님의 [PR #12 보고](https://github.com/SoftBank-Hackathon-Hibiscus/hibiscus/pull/12)에서는
+이 원본 샘플의 정규화와 정책 입력 두 경로를 확인했고, `block` 및 `fix_restart_failure`, `managed_db`,
+`object_storage`를 받았다고 합니다. 이는 팀원이 공유한 검증 보고이며, 여기서 PR 소스를 직접 검토하거나
+파이프라인 전체를 실행한 결과는 아닙니다. 세부 판정과 남은 연결은 [MEETING.md](MEETING.md)에 구분했습니다.
 
 | 필드 | 타입 | 뜻 |
 |---|---|---|

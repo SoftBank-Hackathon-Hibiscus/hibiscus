@@ -8,6 +8,8 @@
 
 기본 경로의 역할은 확정됐습니다. 주영님이 빌드·최초 실행·AI 수정 후 새 이미지 실행·digest 기록을 맡고,
 윤선님은 같은 기록으로 `test`를 실행합니다. 재생성은 윤선님의 `recreate`, Policy 앞 변환기는 류진님 담당입니다.
+`test` 기본값과 Policy 제출 조건은 `none,restart,replace`입니다. 주영님 파이프라인도 세 조건을 명시합니다.
+명시적인 부분 조건은 로컬 개별 검사에만 사용하며 기존 두 조건 데모를 Policy 제출용으로 쓰지 않습니다.
 이 역할 합의와 실제 AI 수정·정책·서명까지의 연결 실행 완료는 구분합니다. 회의 안건 8개의 현황은
 [MEETING.md](MEETING.md)의 「테스트 → 정책: 회의 안건 8개 현황」에 정리했습니다.
 
@@ -113,8 +115,15 @@ DB 문제는 샘플 앱이 시작할 때 테이블을 지우도록 만든 결함
 주영님의 `env_report`·`evidence`·`handoff_bundle`도 보존하기로 했습니다. 실제 env_report 예시는 아직 공유 약속 단계입니다.
 윤선님이 이 세 파일을 자동 병합하는 새 계약이나 변환기를 별도로 만들기로 한 것은 아닙니다.
 
+류진님의 [PR #12 보고](https://github.com/SoftBank-Hackathon-Hibiscus/hibiscus/pull/12)에 따르면 정규화와
+조건별 판정은 구현됐으며 `--handoff`·`--test`에 같은 불변 조건을 적용합니다. 원본 `passed`는 보존하고,
+none/restart 실패는 차단하며 replace-only 실패는 SQLite·로컬 파일 사실로 설명 가능한지에 따라 구분합니다.
+266개 테스트·타입 검사·contracts 검사 통과와 두 입력 경로의 동일 결과는 **류진님이 공유한 검증 보고**입니다.
+여기서 PR 소스를 직접 검토하거나 명령을 실행한 것은 아닙니다. 상세 규칙과 샘플 결과는 [MEETING.md](MEETING.md)에 기록했습니다.
+
 별도 인계 파일 생성 도구를 추가했습니다. **팀에서 합의한 공통 계약이 아니라 제안 형식**입니다.
-정책 CLI에 바로 넣지 말고, 원본과 메타데이터를 보존하는 입력 후보로 검토합니다.
+류진님은 PR #12에서 `--handoff` 입력 경로를 검증했다고 보고했습니다. 이것을 실제 빌드 metadata가 연결됐거나
+전체 파이프라인이 검증됐다는 의미로 해석하지 않습니다.
 
 ```text
 python -m parity.handoff --result result.json --run-id <실행ID> --app guestbook --source-revision <앱의커밋SHA> --digest sha256:<레지스트리digest> --out records/handoff.json
@@ -145,8 +154,8 @@ digest를 쓰기로 한 것은 합의됐습니다. 레지스트리 위치와 실
 
 - 기본 CLI 경로: 주영님이 AI 수정 후 새 이미지로 컨테이너를 실행하고, 윤선님 `test`로 같은 기준 재검사. 담당은 확정됐으며 실제 전달·실행 확인이 남아 있음.
 - 별도 어댑터 경로를 사용할 경우에만 `ParityReplayPort` loader 연결이 필요함.
-- 류진님 변환기에 실제 result·env_report·evidence 연결. 실패 데모는 차단 경로부터 확인하고, 서명 경로는 실제 통과 샘플로 별도 확인.
-- `none/restart/replace` 원본과 저장 방식 사실을 유지하고 대상·해결 조건은 Policy가 판단하는 방향은 합의됨. 조건 실패를 전체 실패와 환경 제약으로 재분류하는 세부 규칙은 미합의.
+- 류진님 변환기는 구현·검증 보고를 받았음(PR #12). 다음 확인은 주영님 실제 env_report·evidence 연결이며 아직 예시 수신 전. 서명 경로는 실제 통과 샘플로 별도 확인.
+- `none/restart/replace` 원본·passed·저장 사실 유지. 조건별 차단과 replace-only 실패 해석 규칙도 PR #12에 구현됐다는 보고를 받았으며, 실제 파이프라인 실행과 직접 소스 검토는 미확인.
 - 레지스트리 위치 결정, 주영님이 기록한 실제 digest·앱 SHA와 파이프라인 run_id 전달·결속 확인.
 - 공통 원본을 JSON Schema로 삼는 방향은 확정. 최종 변환 입력을 공통 계약에 반영하고 두 파트의 실제 파일로 검증하는 작업은 별도 확인.
 - `Policy.requires`를 AI 수정 목표로 읽고 재검증·Policy 재평가까지 자동화할 MVP 범위는 목요일 오후 논의 예정.
@@ -156,7 +165,7 @@ digest를 쓰기로 한 것은 합의됐습니다. 레지스트리 위치와 실
 
 이전 어댑터 작업 당시 검증 기록은 `python -m unittest` **122개 통과**입니다. 현재 전체 개수로 사용하지 않습니다.
 이후 회의 연결 작업에서는 윤선님이 전체 unittest의 최종 `OK`와 3조건 데모 두 회차를 확인했으며,
-그 원본은 [MEETING.md](MEETING.md)에 기록했습니다. 이 이력은 조건 로그 표시·문서 정리 이전 결과이며,
-표시 수정 후 검증까지 포함하지 않습니다. 표시 수정 확인 명령은 `python -m unittest tests.test_conditions tests.test_replace_condition -v`입니다.
+그 원본은 [MEETING.md](MEETING.md)에 기록했습니다. 이 이력은 조건 로그 표시·문서 정리와 기본 조건 3개 적용 이전 결과이며,
+이후 변경의 재검증까지 포함하지 않습니다. 기본 조건과 표시 확인 명령은 `python -m unittest tests.test_execution tests.test_conditions tests.test_replace_condition -v`입니다.
 HTTPS 검증은 자체 서명 인증서를 사용하는 로컬 프로세스 테스트이며,
 위 Docker 연결 데모는 HTTP입니다.

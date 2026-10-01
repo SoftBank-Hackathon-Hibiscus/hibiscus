@@ -186,8 +186,8 @@ def build_parser():
     p = sub.add_parser("test", help="조건별 재생 → result.json")
     p.add_argument("--record", required=True)
     _add_target_options(p)
-    p.add_argument("--conditions", default="none,restart",
-                   help=f"쉼표로 구분 (지원: {', '.join(conditions_mod.SUPPORTED)})")
+    p.add_argument("--conditions", default="none,restart,replace",
+                   help=f"쉼표로 구분 (기본: %(default)s; 지원: {', '.join(conditions_mod.SUPPORTED)})")
     group = p.add_mutually_exclusive_group()
     group.add_argument("--restart-after", help="이 요청 번호들 뒤에 재시작 (예: 3,7)")
     group.add_argument("--restart-every", action="store_true", help="모든 요청 사이에 재시작")

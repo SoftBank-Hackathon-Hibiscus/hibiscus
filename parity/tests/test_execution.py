@@ -76,7 +76,10 @@ class ExecutionTests(unittest.TestCase):
     def run_cli(self, conditions="none", extra=(), out=None):
         arguments = ["test", "--record", str(self.record_path), "--noise", str(self.noise_path),
                      "--target", "http://127.0.0.1:8080", "--container", "guestbook-test",
-                     "--conditions", conditions, "--out", str(out or self.out), *extra]
+                     "--out", str(out or self.out)]
+        if conditions is not None:
+            arguments.extend(["--conditions", conditions])
+        arguments.extend(extra)
         self.stdout, self.stderr = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(self.stdout), contextlib.redirect_stderr(self.stderr):
             return main(arguments)
@@ -126,6 +129,30 @@ class ExecutionTests(unittest.TestCase):
         self.assertFalse(result["passed"])
         self.assertEqual(result["replay"], [{"condition": "none", "total": 2, "matched": 1}])
         self.assertEqual(len(result["mismatches"]), 1)
+        self.assertEqual(result["mismatches"][0]["index"], 1)
+        self.assertEqual(result["mismatches"][0]["related_fact"], "/app/data/data.db")
+        self.assertEqual(self.diagnostics()["status"], "completed")
+
+    def test_default_conditions_detect_replace_only_mismatch(self):
+        self.replay.side_effect = [
+            ReplayResult(self.responses),
+            ReplayResult(self.responses),
+            ReplayResult([response([]), self.responses[1]]),
+        ]
+        # --conditions를 생략해도 교체 조건을 실행하고 그 실패를 숨기지 않는다.
+        self.assertEqual(self.run_cli(conditions=None), 1)
+        result = self.result()
+        self.assertFalse(result["passed"])
+        self.assertEqual(result["replay"], [
+            {"condition": "none", "total": 2, "matched": 2},
+            {"condition": "restart", "total": 2, "matched": 2},
+            {"condition": "replace", "total": 2, "matched": 1},
+        ])
+        self.assertEqual([call.kwargs["hooks"][0].name for call in self.replay.call_args_list],
+                         ["none", "restart", "replace"])
+        self.assertEqual(self.recreate.call_count, 3)
+        self.assertEqual(len(result["mismatches"]), 1)
+        self.assertEqual(result["mismatches"][0]["condition"], "replace")
         self.assertEqual(result["mismatches"][0]["index"], 1)
         self.assertEqual(result["mismatches"][0]["related_fact"], "/app/data/data.db")
         self.assertEqual(self.diagnostics()["status"], "completed")
