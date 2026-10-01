@@ -5,6 +5,7 @@
 - **구현 원본(source of generation)** 은 각 파트의 zod 스키마다 (`policy/src/schema.ts`, `signer/src/schema.ts`). 각 파트가 `npm run contracts` 로 JSON Schema 를 생성한다.
 - **이 폴더는 그 생성물의 공개본**이다. 담당 파트 폴더의 파일을 바이트 그대로 복사해 둔다. 여기서 손으로 고치지 않는다.
 - 형식은 JSON Schema draft 2020-12. TypeScript 는 ajv(`Ajv2020`), Python 은 `jsonschema.Draft202012Validator` 로 검증할 수 있다.
+- **이 폴더에는 파트 경계를 넘는 JSON만 둔다.** 파트 안에서만 쓰는 파일(예: PiiReport, Approval)은 각 파트 폴더에 둔다.
 
 ## 계약 목록
 
@@ -29,35 +30,41 @@
 
 | 값 | 규칙 | 비고 |
 |---|---|---|
-| `run_id` | `^[A-Za-z0-9._-]{1,64}$` | 테스트 파트가 정하고 끝까지 그대로 전달 |
-| `digest` | `^sha256:[0-9a-f]{64}$` | 컨테이너 이미지 지문. 테스트한 이미지 = 결정한 이미지 = 서명·배포할 이미지 |
-| `source_revision` | `^[0-9a-f]{7,40}$`, 선택 | 테스트한 소스의 커밋 SHA. 입력에 있을 때만 출력에 실린다 |
+| `run_id` | `^[A-Za-z0-9._-]{1,64}$` | 파이프라인 실행 1회당 1개. 실행 시작 시 백엔드가 만들어 모든 단계에 전달하고, 각 파트는 받은 값을 그대로 쓴다 |
+| `digest` | `^sha256:[0-9a-f]{64}$` | 컨테이너 이미지 지문. 테스트한 이미지 = 결정한 이미지 = 서명·배포할 이미지. 레지스트리에 올린 이미지의 digest (로컬 image ID 아님) |
+| `source_revision` | `^[0-9a-f]{7,40}$` | 테스트한 소스의 커밋 SHA. 이 폴더의 계약에서는 모두 선택이고, 입력에 있을 때만 출력에 실린다. 입력 계약인 RollbackRequest 는 `"unknown"` 도 받으며 정책에서는 값 없음으로 취급한다 |
 | `plan_hash` | `^[0-9a-f]{64}$` | 접두어 없는 hex 64자. `sha256:` 을 붙이지 않는다 |
-| `targets` | `string[]` | 현재 enum 없음. 사용 값은 `onprem`, `cloud_run` 뿐이며 `policy/policy.yaml` 의 `known_targets` 가 정한다 |
+| `targets` | `string[]` | 현재 스키마는 enum 없는 문자열 배열. 현재 시스템에서 쓰는 배포 대상은 `onprem`, `cloud_run`. enum 강제는 다음 단계에서 적용 예정 (정책은 실행 중에 `policy/policy.yaml` 의 `known_targets` 로 이 값을 제한한다) |
 | `time`, `signed_at`, `approved_at` | string | ISO 8601 시각. 패턴 검사는 없다 |
 
 ## 아직 없는 계약
 
-| 계약 | 올라오는 조건 |
-|---|---|
-| TestResult (test_result.json) | PR #12 (policy/parity-adapter) 머지 후. `facts.conditions` 가 거기서 바뀐다. 그 전까지는 [`policy/contracts/TestResult.schema.json`](../policy/contracts/TestResult.schema.json) 참고 |
-| deploy_result | PR #9 (deploy/cloudrun-coordinator) 머지와 필드 확정 후 |
-| parity handoff (인계 묶음) | 제안 형식. 레지스트리 digest 전달 방식이 정해지면 |
-| env_report | 지금은 premortem 모듈 내부 계약 (`parity/premortem/schemas/`). 변환기 입력으로 쓰기로 하면 |
-| 온프레 job/result | 조율기와 온프레 에이전트의 연결 방식이 정해지면 |
+| 계약 | 만드는 쪽 → 쓰는 쪽 | 올릴 사람 | 올라오는 조건 |
+|---|---|---|---|
+| TestResult (test_result.json) | parity → policy | 류진 | PR #12 (policy/parity-adapter) 머지 후. `facts.conditions` 가 거기서 바뀐다. 그 전까지는 [`policy/contracts/TestResult.schema.json`](../policy/contracts/TestResult.schema.json) 참고 |
+| parity handoff (인계 묶음) | parity → policy | 윤선 | 형식 확정 후 (레지스트리 digest 전달 방식 포함) |
+| env_report | parity → policy | 주영 | 정책 입력으로 실제 쓰기로 하면. 지금은 premortem 모듈 내부 계약 (`parity/premortem/schemas/`) |
+| deploy_result | deploy → backend | 준하 | PR #9 (deploy/cloudrun-coordinator) 머지와 필드 확정 후 |
+
+온프레 job/result(배포 조율기 ↔ 온프레 에이전트)는 배포 파트 내부라 여기 올리지 않는다. 다른 파트가 직접 읽게 되면 그때 올린다.
 
 ## 기존 경로 안내
 
 - 서명 파트는 당분간 `policy/contracts/Plan.schema.json` 을 런타임에 직접 읽는다 (`signer/src/plan.ts`, `--plan-schema` 로 바꿀 수 있음). 그 파일이 없으면 서명하지 않는다.
-- 그래서 각 파트 폴더의 `contracts/` 는 지우지 않는다. 이 폴더와 내용이 같다는 것을 테스트가 확인한다 (`policy/tests/root-contracts.test.ts`).
+- 그래서 각 파트 폴더의 `contracts/` 는 지우지 않는다. 정책 소유 4개(Plan, DecisionLog, RollbackRequest, RollbackPlan)는 `policy/tests/root-contracts.test.ts` 가 원본과 같은지 확인한다. 서명 파트 2개(SignResult, SignLog)는 자동 검사가 없다.
 
 ## 바꿀 때 절차
 
-1. 담당 파트의 zod 스키마를 고친다.
-2. 그 파트에서 `npm run contracts` 로 생성한다 (파트 테스트가 생성물이 최신인지 확인한다).
-3. 생성된 파일을 이 폴더에 바이트 그대로 복사한다.
-4. PR 을 올린다. 커밋 scope 는 `contracts` (예: `feat(contracts): add kind sign to DecisionLog`).
-5. Slack 채널에 무엇이 바뀌었고 어느 파트가 영향을 받는지 공유한다.
+1. 계약을 만드는 파트(producer)가 자기 구현 원본(zod 또는 JSON Schema)을 고친다.
+2. 생성기가 있으면 계약 파일을 생성한다.
+3. 파트 간 공개 계약이면 같은 PR 에서 루트 `contracts/` 도 바이트 그대로 갱신하고, 이 README 의 계약 표와 변경 기록도 고친다.
+4. `contracts/` 변경은 루트 관리자(류진)가 공통 규칙·호환성을 확인한다.
+   - 류진이 작성자가 아닌 PR 이면 리뷰어로 류진을 추가한다.
+   - 류진이 작성한 PR 이면 다른 팀원이 리뷰한다.
+5. 다른 파트가 읽는 형식이 바뀌면, 그 파트(consumer)와 먼저 형식을 맞춘 뒤 올린다.
+6. Slack 채널에 무엇이 바뀌었고 어느 파트가 영향을 받는지 공유한다.
+
+커밋 scope 는 `contracts` 다 (예: `feat(contracts): add kind sign to DecisionLog`).
 
 ## 호환성 원칙
 
