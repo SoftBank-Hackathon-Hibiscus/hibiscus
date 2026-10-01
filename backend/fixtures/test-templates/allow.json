@@ -1,0 +1,9 @@
+{
+  "run_id": "",
+  "app": "",
+  "digest": "",
+  "passed": true,
+  "match": { "total": 20, "matched": 20 },
+  "failures": [],
+  "facts": { "db": "postgres" }
+}
