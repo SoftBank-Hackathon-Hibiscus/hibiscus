@@ -31,7 +31,7 @@ npx tsx src/cli.ts --test test_result.json --pii pii.json --policy policy.yaml -
 입력 파일 형식이 틀리면 어떤 필드가 왜 틀렸는지 출력하고 종료 코드 1로 끝난다. 결정 결과(`block` 포함)는 정상 처리이므로 종료 코드 0이다.
 
 ```bash
-npm test        # vitest: fixtures 4세트 + run_id 불일치 + 결정성 + 정책 스키마
+npm test        # vitest: fixtures 4세트 + parity 실측(방명록) 변환·판정 + run_id 불일치 + 결정성 + 정책 스키마
 npm run demo    # fixtures 4세트를 모두 돌려 out/ 에 plan 과 decisions.jsonl 생성
 npm run typecheck
 ```
@@ -56,7 +56,28 @@ npm run typecheck
 
 `source_revision`(선택)은 테스트한 소스의 **커밋 SHA**로, 소문자 hex 7~40자다. 백엔드가 webhook의 커밋 SHA를 고정해서 넘긴다. 아직 선택이며 `"unknown"`은 없는 것으로 취급한다. 값이 있으면 `plan.json`과 결정 기록에 그대로 전달되고 `plan_hash`에도 반영된다. 없으면 출력에 필드 자체가 없어 기존 `plan_hash`가 바뀌지 않는다.
 
-`facts`는 정책이 읽는 키만 타입이 정해져 있다. `db`는 `sqlite` | `postgres` | `mysql` | `none`(소문자), `writes_local_file`은 문자열 배열, `migration`은 파괴적 마이그레이션 판정 `{ destructive, backward_compatible, findings }`이다 (없으면 보안 단계 실행기가 채운다). 그 밖의 키는 자유롭게 넣을 수 있고 그대로 보존된다. 규칙이 정의되지 않은 facts 키를 읽으면 정책을 불러올 때 경고가 난다. 규칙이 실제로 읽는 경로 목록은 [contracts/README.md](contracts/README.md)의 "정책이 읽는 필드"에 자동 생성된다.
+`facts`는 정책이 읽는 키만 타입이 정해져 있다. `db`는 `sqlite` | `postgres` | `mysql` | `none`(소문자), `writes_local_file`은 문자열 배열, `migration`은 파괴적 마이그레이션 판정 `{ destructive, backward_compatible, findings }`이다 (없으면 보안 단계 실행기가 채운다). `db`는 관찰하지 못했으면 키를 생략한다 (`none`은 DB가 없다는 것을 확인했을 때만. 외부 DB를 못 본 것을 DB 없음으로 적으면 안 된다). 그 밖의 키는 자유롭게 넣을 수 있고 그대로 보존된다.
+
+`facts.conditions`와 `facts.storage`는 parity 변환기([아래](#parity-변환기-srcadapters))가 넣는 조건별 재생 결과와 저장 사실이다.
+
+```json
+"facts": {
+  "db": "sqlite",
+  "writes_local_file": ["/app/uploads"],
+  "conditions": [
+    { "name": "none",    "total": 20, "matched": 20, "failed": false, "mismatches": [] },
+    { "name": "restart", "total": 20, "matched": 14, "failed": true,
+      "mismatches": [ { "index": 11, "request": "GET /me" },
+                      { "index": 13, "request": "GET /posts", "related_fact": "/app/data/data.db", "related_storage": "container_layer", "related_kind": "sqlite" } ] },
+    { "name": "replace", "total": 20, "matched": 13, "failed": true, "mismatches": [ "..." ] }
+  ],
+  "storage": [ { "kind": "sqlite", "path": "/app/data/data.db", "storage": "container_layer" } ]
+}
+```
+
+- `conditions[]`: 조건(`none` 기준선 / `restart` 재시작 / `replace` 컨테이너 교체)마다 `{ name, total, matched, failed, mismatches[] }`. `mismatches[]`의 `related_*`는 테스트 파트가 붙인 관련 사실 힌트(`related_fact` = path)를 원본 facts에서 찾아 옮긴 조회값이다. 없는 값은 `null`이 아니라 **키를 생략**한다 (조건 문법의 `exists`가 `null`도 있음으로 보기 때문).
+- `storage[]`: 테스트 파트 facts 원본의 `kind, path, storage`. 보존·설명용이다.
+- **`passed`의 의미**: `facts.conditions`가 있는 입력에서는 `passed`는 parity 원본의 종합값을 보존하는 필드이고, 정책 판단(R1, R1b, R1c)은 조건별 사실을 읽는다. 그래서 `passed: false`인데 `allow`가 나올 수 있다 (예: replace에서만 업로드 유실이 나고 그 원인이 `local_upload` 저장 사실로 설명될 때는 R6가 위치 제한으로 다룬다). `facts.conditions`가 없는 구형 입력에서만 R1이 `passed`를 fallback으로 본다. `match`는 `conditions`가 있으면 기준 조건 `none`의 결과다. 규칙이 정의되지 않은 facts 키를 읽으면 정책을 불러올 때 경고가 난다. 규칙이 실제로 읽는 경로 목록은 [contracts/README.md](contracts/README.md)의 "정책이 읽는 필드"에 자동 생성된다.
 
 ### `pii.json` (개인정보 후보. 지금은 가짜 파일, 나중에 AI 판정 결과)
 
@@ -114,7 +135,9 @@ default:
 
 | id | 조건 | 효과 | 해결 조건 |
 |---|---|---|---|
-| R1 | `test.passed = false` | block | fix_tests: 재생 불일치 요청을 고친 뒤 다시 테스트 |
+| R1 | `facts.conditions`가 있으면 `none` 조건 실패, 없으면 `test.passed = false` | block | fix_tests: 재생 불일치 요청을 고친 뒤 다시 테스트 |
+| R1b | `restart` 조건 실패 | block | fix_restart_failure: 재시작 후 상태·초기화 동작을 수정 (예: 시작할 때 데이터 삭제, 메모리에만 두는 세션) |
+| R1c | `none`·`restart`는 통과했는데 `replace` 불일치 중 `related_kind`가 sqlite / local_upload / local_file이 아닌 것(관련 사실 없음 포함)이 있음 | block | investigate_replace_failure: 교체 뒤에만 어긋난 요청의 원인 조사 |
 | R2 | `test.run_id ≠ pii.run_id` | block (입력 불일치) | rerun_same_run: 같은 run_id로 테스트와 개인정보 판정을 다시 실행 |
 | R3 | 확신 없는 개인정보 후보 있음 | needs_approval | human_review_pii: 해당 칼럼이 개인정보인지 사람이 확인 |
 | R4 | 개인정보 후보 있음 | targets [onprem], failover 금지 | |
@@ -122,6 +145,8 @@ default:
 | R6 | `test.facts.writes_local_file`에 `/tmp/`, `*.log`, DB 파일(`*.db`, `*.sqlite`, `*.sqlite3`, 대소문자 무시) 제외 원소 있음 | targets [onprem] | object_storage: 로컬 폴더에 쓰는 파일을 오브젝트 스토리지로 이전 |
 | R7 | `test.facts.migration.destructive = true` (DROP/RENAME/타입 변경/DEFAULT 없는 NOT NULL 추가/SET NOT NULL/TRUNCATE) | block | two_phase_migration: 파괴적 변경을 확장→전환→정리 2단계 배포로 나누기 (먼저 새 구조를 추가하고, 옛 구조는 다음 배포에서 제거) |
 | default | | targets [onprem, cloud_run], failover 허용 | |
+
+R1·R1b·R1c의 이유 (parity 조건의 뜻은 `parity/parity/conditions.py`): `none`은 조건 없는 기준선이라 여기서 어긋나면 서비스 기능 자체의 실패다. `restart`는 컨테이너 파일을 지우지 않으므로 재시작 뒤 어긋난 요청은 저장 방식으로 설명되지 않는 상태·초기화 결함이다 (방명록 샘플의 "시작할 때 DROP TABLE", "메모리 세션"). `replace`는 컨테이너를 새로 만들어 container_layer 파일이 사라지므로 클라우드 인스턴스 교체와 같은 사건이다. 여기서만 어긋났고 관련 저장 사실이 sqlite / local_upload / local_file이면 차단하지 않고 R5·R6가 배포 위치를 제한하며, 관련 사실이 없거나 모르는 종류면 원인 미상이라 R1c가 차단한다. "replace에서만"은 조건 단위다 (none과 restart가 모두 통과). 요청 번호 단위 비교와 원인 세분화(예: 세션 저장소)는 env_report·원인 분석이 들어오는 v2에서 다룬다.
 
 R5의 이유: 클라우드에서는 인스턴스가 교체되면 SQLite 파일이 사라진다. R6도 같은 이유로, 로컬 폴더에 쓰는 파일은 인스턴스 교체나 스케일아웃 때 사라지거나 갈라진다. 무시할 경로는 규칙의 `where`에 `@`(원소 자체)와 `starts_with` / `matches`로 적는다. DB 파일은 R5가 담당하므로 R6는 `.db`, `.sqlite`, `.sqlite3`을 무시해 해결 조건이 겹치지 않는다 (SQLite 앱이 `/app/data.db`만 쓰면 managed_db 하나만 나온다). cloud_run이 빠지므로 failover도 자동으로 false가 된다.
 
@@ -193,13 +218,14 @@ npx tsx src/stage.ts --src samples/signup-contact --test fixtures/01-allow/test_
 | 옵션 | 설명 |
 |---|---|
 | `--plan` | 설명할 결정서 (필수) |
+| `--test` | 결정에 들어간 `test_result.json` (배포 결정서만). `facts.conditions`가 있으면 결론 아래에 조건별 재생 결과 한 줄을 넣는다 |
 | `--rollback` | 입력이 rollback_plan.json임을 표시 |
 | `--lang` | `ko`(기본) / `ja` |
 | `--out` | 파일로 저장. 없으면 stdout |
 
 보안 단계 실행기에 `--explain`을 주면 out-dir에 `explain.ko.md`와 `explain.ja.md`를 함께 쓴다.
 
-구성은 결론 한 줄(허용·승인 필요·차단과 배포 위치), failover를 쉬운 말로, 이유(걸린 규칙의 reason, 차단 뒤에 걸린 규칙은 따로), 해결 조건(무엇을, 어디에서), 결정 지문(plan_hash 앞 12자)과 이미지 digest 앞 12자 순이다. 결정서에 `source_revision`이 있으면 맨 아래 줄에 커밋 앞 7자리를 표시한다 (`커밋 \`9f8e7d6\`` / `コミット\`9f8e7d6\``). 규칙 id는 괄호로만 보조 표시한다. 대상 이름은 `onprem` → 온프레(사내) / オンプレ（社内）, `cloud_run` → Cloud Run이다. 규칙의 reason과 hint는 결정서의 `reason_i18n` / `hint_i18n`에 해당 언어가 있으면 그것을 쓰고, 없으면 ko로 대체한다. reason이나 hint 안에 sha256 digest 전체가 들어 있어도 앞 12자로 줄인다. 일본어 출력은 단어 사이 공백 없이, 괄호는 전각（）으로 쓴다.
+구성은 결론 한 줄(허용·승인 필요·차단과 배포 위치), failover를 쉬운 말로, (test_result에 `facts.conditions`가 있으면) 조건별 재생 결과 한 줄(`재생 결과: none 20/20, restart 14/20, replace 13/20` / `再生結果：none 20/20、restart 14/20、replace 13/20`), 이유(걸린 규칙의 reason, 차단 뒤에 걸린 규칙은 따로), 해결 조건(무엇을, 어디에서), 결정 지문(plan_hash 앞 12자)과 이미지 digest 앞 12자 순이다. 결정서에 `source_revision`이 있으면 맨 아래 줄에 커밋 앞 7자리를 표시한다 (`커밋 \`9f8e7d6\`` / `コミット\`9f8e7d6\``). 규칙 id는 괄호로만 보조 표시한다. 대상 이름은 `onprem` → 온프레(사내) / オンプレ（社内）, `cloud_run` → Cloud Run이다. 규칙의 reason과 hint는 결정서의 `reason_i18n` / `hint_i18n`에 해당 언어가 있으면 그것을 쓰고, 없으면 ko로 대체한다. reason이나 hint 안에 sha256 digest 전체가 들어 있어도 앞 12자로 줄인다. 일본어 출력은 단어 사이 공백 없이, 괄호는 전각（）으로 쓴다.
 
 **예시 (ko)** — fixtures/02-block-test-failed
 
@@ -297,6 +323,47 @@ npx tsx src/migration/cli.ts --src samples/migration-prisma --since 202401010000
 
 **샘플**: `samples/migration-safe`(NULL 허용 칼럼, 인덱스, NOT NULL + DEFAULT → 안전), `samples/migration-destructive`(DROP COLUMN, RENAME COLUMN, DEFAULT 없는 NOT NULL), `samples/migration-tricky`(주석과 문자열 안에만 위험 키워드 → 안전), `samples/migration-prisma`(Prisma 형식, RENAME TABLE).
 
+## parity 변환기 (`src/adapters/`)
+
+테스트 파트(parity)의 인계 묶음을 `test_result.json`으로 바꾼다. 묶음은 테스트 파트가 `python -m parity.handoff --result result.json --run-id … --app … --source-revision … --digest … --out handoff.json`으로 만들며(형식 `parity-handoff-v1-proposal`), 원본 `result.json` 전체와 파이프라인이 준 식별자(run_id, 앱 커밋 SHA, 레지스트리 digest)를 함께 담는다. 실제 예시는 [`fixtures/parity/`](fixtures/parity/README.md)에 있다 (방명록 실측, PR #10 사본).
+
+```bash
+npx tsx src/adapters/cli.ts --handoff handoff.json --diagnostics result.diagnostics.json --out test_result.json
+npx tsx src/stage.ts --src <앱 폴더> --handoff handoff.json --diagnostics result.diagnostics.json --policy policy.yaml --out-dir out/<run_id> --explain
+```
+
+| 옵션 | 설명 |
+|---|---|
+| `--handoff` | 인계 묶음 (필수) |
+| `--diagnostics` | `parity test`가 `result.json` 옆에 쓰는 실행 진단 `result.diagnostics.json` (선택). 있으면 status와 digest를 대조한다 |
+| `--out` | 출력할 `test_result.json` (필수) |
+
+**변환기는 관찰된 사실만 옮기고 판단하지 않는다.** 어느 조건의 불일치가 앱 결함이고 어느 것이 저장 방식의 환경 제약인지는 `policy.yaml`의 R1 / R1b / R1c / R5 / R6가 정한다.
+
+| test_result 필드 | 출처 |
+|---|---|
+| `run_id`, `app`, `digest`, `source_revision` | 묶음의 `metadata` 그대로. 원본의 `commit`(도구 저장소 HEAD)과 `image`(이름 또는 로컬 image ID)는 쓰지 않는다 |
+| `passed` | 원본 `passed` 그대로 (의미를 바꾸지 않는다) |
+| `match` | 기준 조건 `none`의 `total` / `matched` |
+| `failures` | 원본 `mismatches` 그대로 |
+| `facts.db` | 원본 facts에 `kind: sqlite`가 있을 때만 `"sqlite"`. 없으면 키 생략 (`none`으로 쓰지 않는다) |
+| `facts.writes_local_file` | `kind`가 `local_upload` / `local_file`인 `path` (sqlite 경로는 R5 담당이라 제외) |
+| `facts.conditions[]` | `replay[]`마다 `{ name, total, matched, failed: matched < total, mismatches[] }`. `mismatches[]`는 `{ index, request, related_fact?, related_storage?, related_kind? }`로, `related_storage`·`related_kind`는 `related_fact`(path)로 원본 facts를 찾은 값. 없는 값은 키 생략 |
+| `facts.storage[]` | 원본 facts의 `kind, path, storage` |
+| `facts.migration` | 넣지 않는다 (보안 단계 실행기가 채운다) |
+
+**변환을 거부하는 경우** (종료 코드 1, 정책 판단 전에 멈춤):
+- 재생이 중단된 조건이 있다 (`replay[].error`, 예: `NOT_EXECUTED`, `prepare: DockerError`)
+- `--diagnostics`의 `status`가 `completed`가 아니다
+- `--diagnostics`의 `registry_digest`가 있는데 `metadata.digest`와 다르다
+- 기준 조건 `none`이 없거나, 조건별 불일치 수가 `total - matched`와 맞지 않는다, `stage`가 `test`가 아니다 (`verify`는 배포 후 확인이라 받지 않는다)
+
+**경고만 하는 경우**: `metadata.digest`가 `--diagnostics`의 `local_image_id`와 같다. 레지스트리 digest 자리에 로컬 image ID를 넣었을 가능성이 크지만, 레지스트리 위치가 아직 정해지지 않아 지금은 막지 않는다. **레지스트리가 확정되면 오류로 전환할 예정이다.**
+
+방명록 실측(`fixtures/parity/`)을 넣은 결과: `none 20/20, restart 14/20, replace 13/20` → `block`, 해결 조건 `fix_restart_failure`(R1b) + `managed_db`(R5) + `object_storage`(R6). restart에서 어긋난 요청이 있으므로 "replace에서만"이 아니라 R1c는 걸리지 않고, none이 통과했으므로 `fix_tests`도 없다. 같은 묶음에서 replace의 16번(`GET /uploads`, `local_upload`)만 어긋나게 바꾸면 `allow`, `targets [onprem]`, `managed_db` + `object_storage`가 된다 (`tests/parity-adapter.test.ts`).
+
+지금은 묶음 하나만 받는다. 환경 실행기(premortem)의 `env_report`·`evidence`는 실제 예시가 오면 v2에서 연결한다.
+
 ## 보안 단계 실행기 (`src/stage.ts`)
 
 개인정보 판정과 정책 결정을 명령 하나로 실행한다. CI에서 바로 쓰도록 결정을 종료 코드로 알린다.
@@ -308,7 +375,9 @@ npx tsx src/stage.ts --src samples/signup-contact --test fixtures/01-allow/test_
 | 옵션 | 설명 |
 |---|---|
 | `--src` | 분석할 앱 소스 폴더 (필수) |
-| `--test` | `test_result.json` (필수). `run_id`를 여기서 가져와 개인정보 판정에도 같은 값을 쓴다 |
+| `--test` | `test_result.json`. `--handoff`와 둘 중 하나만 (둘 다 주면 실행 오류). `run_id`를 여기서 가져와 개인정보 판정에도 같은 값을 쓴다 |
+| `--handoff` | parity 인계 묶음. [변환기](#parity-변환기-srcadapters)로 `test_result`를 만들어 넣는다. 변환된 파일은 out-dir의 `test_result.json`으로 남는다 |
+| `--diagnostics` | parity 실행 진단 (`--handoff`와 함께만). `completed`가 아니거나 `registry_digest`가 다르면 실행 오류 |
 | `--policy` | 정책 YAML (필수) |
 | `--out-dir` | `pii.json`과 `plan.json`을 쓸 폴더 (필수) |
 | `--classifier` | `heuristic`(기본) / `llm` / `replay` |
@@ -319,7 +388,7 @@ npx tsx src/stage.ts --src samples/signup-contact --test fixtures/01-allow/test_
 | `--source-revision` | 커밋 SHA (소문자 hex 7~40자). `test_result.source_revision`보다 우선한다. 둘 다 있는데 서로 다르면 실행 오류(종료 코드 1). `"unknown"`은 받지 않는다 |
 | `--json` | 사람이 읽는 출력 대신 한 줄 JSON 요약을 stdout에 출력 |
 
-순서는 test_result 검증 → policy 로드 → 마이그레이션 판정 → 개인정보 판정 → 정책 결정 → 파일 저장 → 결정 기록이다. 마이그레이션 판정은 항상 실행기가 직접 계산한다. test_result에 `facts.migration`이 있으면 그 값을 쓰되 `destructive`가 실행기 계산과 다르면 두 값을 보여주며 실행 오류로 멈춘다. `--since`로 준 이름을 마이그레이션 목록에서 찾지 못하면 실행 오류다(잘못된 이름이 검사 범위를 조용히 바꾸지 않게). 앱 폴더 안의 symlink는 따라가지 않고 건너뛰며 그 경로를 알린다. 중간에 실패하면 `오류 [단계: test_result] ...`처럼 어느 단계에서 왜 실패했는지 출력한다. out-dir에는 `pii.json`, `plan.json`과 함께 정책에 실제로 들어간 `test_result.json`이 남고, 마이그레이션을 실행기가 판정했으면 `migration.json`도 남는다. 남은 `test_result.json`으로 `src/cli.ts`를 돌리면 같은 plan_hash가 나온다.
+순서는 test_result 검증(또는 `--handoff` 변환) → policy 로드 → 마이그레이션 판정 → 개인정보 판정 → 정책 결정 → 파일 저장 → 결정 기록이다. 변환기의 경고(예: digest가 로컬 image ID와 같음)는 `!` 줄로 출력된다. 마이그레이션 판정은 항상 실행기가 직접 계산한다. test_result에 `facts.migration`이 있으면 그 값을 쓰되 `destructive`가 실행기 계산과 다르면 두 값을 보여주며 실행 오류로 멈춘다. `--since`로 준 이름을 마이그레이션 목록에서 찾지 못하면 실행 오류다(잘못된 이름이 검사 범위를 조용히 바꾸지 않게). 앱 폴더 안의 symlink는 따라가지 않고 건너뛰며 그 경로를 알린다. 중간에 실패하면 `오류 [단계: test_result] ...`처럼 어느 단계에서 왜 실패했는지 출력한다. out-dir에는 `pii.json`, `plan.json`과 함께 정책에 실제로 들어간 `test_result.json`이 남고, 마이그레이션을 실행기가 판정했으면 `migration.json`도 남는다. 남은 `test_result.json`으로 `src/cli.ts`를 돌리면 같은 plan_hash가 나온다.
 
 | 결과 | 종료 코드 |
 |---|---|
@@ -492,6 +561,9 @@ src/stage.ts         보안 단계 실행기 CLI (개인정보 판정 + 정책 �
 src/stage-runner.ts  runStage(): 실행기의 본체 (단계별 오류 표시)
 src/explainer.ts     explainPlan / explainRollbackPlan: 결정서 -> 사람이 읽는 Markdown (ko, ja)
 src/explain.ts       결정 설명 CLI
+src/adapters/parity.ts parity 인계 묶음 -> test_result (순수 함수, 사실만 옮김)
+src/adapters/load.ts   묶음·진단 파일 읽기 + 변환 (CLI 와 실행기가 공유)
+src/adapters/cli.ts    변환 CLI (npm run adapt)
 src/pii/select.ts    --classifier 에 따른 판정기 선택 (pii CLI 와 실행기가 공유)
 src/migration/analyzer.ts 파괴적 마이그레이션 탐지 (순수 함수: 주석·문자열 제거, 문장 분리, 패턴)
 src/migration/loader.ts   migrations/ 와 prisma/migrations/ 파일 찾기, --since
@@ -512,7 +584,7 @@ src/pii/replay.ts    녹화 재생 판정기
 src/pii/prompt.md    LLM 프롬프트
 src/pii/cli.ts       앱 폴더 -> pii.json
 policy.yaml          규칙 (가상 회사 예시)
-fixtures/            정책 엔진 입력 예시 4세트, fixtures/rollback/ 롤백 요청 예시 6개
+fixtures/            정책 엔진 입력 예시 4세트, fixtures/rollback/ 롤백 요청 예시 6개, fixtures/parity/ parity 실측 사본 (방명록, PR #10)
 samples/             판정기 샘플 앱 5개 + 마이그레이션 샘플 4개 (실행하지 않는 코드 조각)
 recordings/          저장된 LLM 응답 (replay 용)
 tests/engine.test.ts 정책 엔진 테스트
@@ -522,13 +594,14 @@ tests/facts.test.ts  facts 키 타입, 정책 경로 수집, 모르는 키 경�
 tests/stage.test.ts  보안 단계 실행기 (종료 코드, 파일 생성, 세 CLI 와 동일성)
 tests/migration.test.ts 파괴적 마이그레이션 판정 (탐지, 샘플, --since, CLI, R7, 실행기 연결)
 tests/explain.test.ts 결정 설명 (모든 결정서, 결론 문장, 차단 후 구분, 일본어, 결정성, CLI)
+tests/parity-adapter.test.ts parity 변환기 (사실 옮기기, R1/R1b/R1c 결과, 거부·경고, CLI, 실행기 --handoff, 설명 줄)
 tests/pii.test.ts    판정기 테스트 + 끝에서 끝
 scripts/demo.mjs     fixtures 일괄 실행
 ```
 
 ## 다른 모듈과의 연결
 
-- **입력**: 테스트 파트의 `test_result.json`, 이 저장소의 `src/pii/cli.ts`가 만드는 `pii.json`
+- **입력**: 테스트 파트의 `test_result.json` (또는 parity 인계 묶음을 `src/adapters/`로 변환), 이 저장소의 `src/pii/cli.ts`가 만드는 `pii.json`
 - **출력**: `plan.json` → 서명 파트 (사람 승인은 `decision: needs_approval`일 때), → 배포 파트 (`targets`, `failover_allowed`), → AI 수정 파트 (`requires`: 무엇을 고쳐야 다른 대상에 갈 수 있는지)
 - 전체 흐름 `parity → policy → signer → deploy`에서 이 폴더는 두 번째 단계다. `parity/`가 만든 `test_result.json`을 받아 `plan.json`을 내고, `signer/`가 그 계획을 승인·서명하며 `deploy/`가 배포와 트래픽 전환을 실행한다. 파트 사이는 JSON 파일로만 주고받는다.
 - 외부 의존성은 `zod`, `yaml`, 그리고 LLM 호출용 `@anthropic-ai/sdk`뿐이다.
