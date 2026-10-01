@@ -24,6 +24,10 @@ REFERENCE_BLOCKERS = [
     "계약: 류진님 contracts와 정식 변환기 미연결. 정책 입력(test_result)을 만들지 않음",
     "이미지: registry digest 없음. 로컬 image ID만 확인",
 ]
+PARITY_BLOCKERS = [
+    "계약: 류진님 변환기가 아직 env_report를 읽지 않음. 정책 입력(test_result)을 만들지 않음",
+    "이미지: registry digest 없음. 로컬 image ID만 확인",
+]
 
 
 def log(message: str) -> None:
@@ -57,7 +61,8 @@ def execute_run(scenario, source_dir: Path, stage: str, parent_run_id: Optional[
     source = {"commit": git_commit_for(source_dir, commit_runner), "tree_sha256": snapshot.tree_sha256,
               "excludes": list(snapshot.excludes)}
 
-    tag = f"premortem-demo/{scenario.name}:{snapshot.tree_sha256[:12]}"
+    team = replay_port.backend == "parity"  # 윤선님 재생기로 실제 앱을 검사하는 실행. 아니면 개발용 샘플
+    tag = f"{'premortem' if team else 'premortem-demo'}/{scenario.name}:{snapshot.tree_sha256[:12]}"
     log(f"[{run_id}] 이미지 빌드: {tag}")
     image_id = docker.build(str(snapshot.root), tag, {OWNER_LABEL_KEY: OWNER_LABEL_VALUE,
                                                       "premortem.source_tree_sha256": snapshot.tree_sha256})
@@ -75,7 +80,9 @@ def execute_run(scenario, source_dir: Path, stage: str, parent_run_id: Optional[
         "settings": {"profile": "core", "required_conditions": required, "fault_after": fault_after,
                      "storage_mode": "ephemeral", "baseline_integrity_verified": True,
                      "seed_descriptor": {"mode": "empty", "reference": None, "sha256": None}},
-        "note": f"개발용 샘플({scenario.name})을 이 모듈의 신뢰된 데모 빌더로 빌드해 실제 Docker로 실행. 팀 앱이 아님.",
+        "note": (f"{scenario.name} 소스를 이 모듈의 빌더로 빌드해 실제 Docker로 실행. 재생·비교는 윤선님 parity 재생기."
+                 if team else
+                 f"개발용 샘플({scenario.name})을 이 모듈의 신뢰된 데모 빌더로 빌드해 실제 Docker로 실행. 팀 앱이 아님."),
     }
     validate("run-manifest", manifest)
     write_json_atomic(run_dir / "run_manifest.json", manifest)
@@ -103,7 +110,7 @@ def execute_run(scenario, source_dir: Path, stage: str, parent_run_id: Optional[
     except PremortemError:
         baseline_ok = False
     overall = overall_status(required, conditions) if baseline_ok else "error"
-    manifest_blockers = list(REFERENCE_BLOCKERS)
+    manifest_blockers = list(PARITY_BLOCKERS if team else REFERENCE_BLOCKERS)
     if overall != "passed":
         manifest_blockers.append(f"판정: {overall}. 필수 조건이 모두 통과하지 않음")
     if not baseline_ok:
@@ -115,12 +122,14 @@ def execute_run(scenario, source_dir: Path, stage: str, parent_run_id: Optional[
     env_report = {
         "schema_version": "1.0", "run_id": run_id, "parent_run_id": parent_run_id, "stage": stage,
         "execution_mode": "real", "replay_backend": replay_port.backend,
-        "team_parity_integrated": False, "team_contract_validated": False,
+        "team_parity_integrated": team, "team_contract_validated": False,
         "baseline_integrity_verified": baseline_ok, "source": source, "baseline": baseline, "image": image,
         "required_conditions": required, "conditions": conditions, "overall_status": overall,
         "gate": {"test_passed": overall == "passed", "handoff_ready": False, "handoff_blockers": manifest_blockers},
         "artifacts": artifacts,
-        "note": "개발용 샘플 앱을 실제 Docker로 실행한 결과. reference 재생기 결과이며 팀 연동 결과가 아님.",
+        "note": ("실제 Docker로 실행한 결과. 재생·비교는 윤선님 parity 재생기, 컨테이너 조건과 증거는 이 모듈."
+                 if team else
+                 "개발용 샘플 앱을 실제 Docker로 실행한 결과. reference 재생기 결과이며 팀 연동 결과가 아님."),
     }
     validate("env-report", env_report)
     write_json_atomic(run_dir / "env_report.json", env_report)
