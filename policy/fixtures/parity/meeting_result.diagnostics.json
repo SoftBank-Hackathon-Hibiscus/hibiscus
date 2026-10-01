@@ -1,0 +1,32 @@
+{
+  "format": "parity-execution-v1",
+  "status": "completed",
+  "phase": "complete",
+  "container": "parity-meeting-20260930-173237-f746f560b3",
+  "target": "http://127.0.0.1:61466",
+  "local_image_id": "sha256:934426a4fca9d1be654d703e62fbb9e1d55ce20cbb61427bbcb43865cb10d26f",
+  "registry_digest": null,
+  "target_binding_verified": false,
+  "source_revision": null,
+  "baseline_sha256": {
+    "record": "80f748d027145509d1f99ad0b0c4dede8901cc2dc3db663d76fa5cf21b98bdb0",
+    "noise": "dd15746805d747bb72762a3bf5ffad7806a59085d54e3facd92fd21958c60d85"
+  },
+  "baseline_unchanged": true,
+  "facts_collected": true,
+  "conditions": [
+    {
+      "condition": "none",
+      "executed": 20
+    },
+    {
+      "condition": "restart",
+      "executed": 20
+    },
+    {
+      "condition": "replace",
+      "executed": 20
+    }
+  ],
+  "error": null
+}
