@@ -1,0 +1,4 @@
+# deploy 파트 전용 (루트 .gitignore에 없는 것만)
+.wrangler/
+.dev.vars
+out/
