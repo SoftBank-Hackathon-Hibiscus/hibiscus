@@ -158,6 +158,13 @@ signer 도 신원을 확인하지 않으므로 인증된 id 를 넘기는 것은
 - 중앙 감사 로그, 산출물 보관 (GCS)
 - 정책 입력을 `--test` 에서 `--handoff` 로 교체 (PR #12 머지 후). 테스트 stub 을 실제 parity 호출로 교체
 
+TODO (알고 있지만 아직 손대지 않은 것):
+
+- 수동 실행 중복 방지 (idempotency). webhook 붙일 때 같이
+- Windows cmd.exe 인자 처리에서 `%`, `!` 같은 특수문자 완전 대응 (`src/command-runner.ts` 의 `quoteForCmd`)
+- 시간 초과 시 Windows 에서 npm 의 자식 프로세스(tsx, node)까지 정리되는지 확인
+- `src_path`, `policy_path` 사용자 입력 경로 제한. 인증·앱 설정 붙일 때
+
 ## 폴더
 
 ```
