@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { npmCommand, parseLastJsonLine, quoteForCmd } from "../src/command-runner.js";
+import { npmCommand, parseLastJsonLine, quoteForCmd } from "../src/infrastructure/command-runner.js";
 import { BACKEND_ROOT, ConfigError, loadConfig } from "../src/config.js";
-import { resolveSourceRevision, RevisionMismatchError, RevisionUnavailableError } from "../src/git.js";
-import type { DeploymentRun } from "../src/models.js";
-import { RunPaths } from "../src/paths.js";
-import { realDeployBlockedReason } from "../src/stages/deploy.js";
-import { realSignBlockedReason } from "../src/stages/sign.js";
-import { placeholderDigest } from "../src/stages/test-stub.js";
+import { resolveSourceRevision, RevisionMismatchError, RevisionUnavailableError } from "../src/infrastructure/git.js";
+import type { DeploymentRun } from "../src/pipeline/models.js";
+import { RunPaths } from "../src/pipeline/paths.js";
+import { realDeployBlockedReason } from "../src/pipeline/stages/deploy.js";
+import { realSignBlockedReason } from "../src/pipeline/stages/sign.js";
+import { placeholderDigest } from "../src/pipeline/stages/test-stub.js";
 import { FakeCommandRunner, HEAD, gitHandler } from "./helpers.js";
 
 const baseRun: DeploymentRun = {

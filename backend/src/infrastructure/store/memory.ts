@@ -1,5 +1,5 @@
 /** 메모리 저장소. 프로세스가 끝나면 사라진다 (개발·테스트용) */
-import type { DeploymentApp, DeploymentRun, StageExecution } from "../models.js";
+import type { DeploymentApp, DeploymentRun, StageExecution } from "../../pipeline/models.js";
 import type { Store } from "./store.js";
 
 export class NotFoundInStore extends Error {}

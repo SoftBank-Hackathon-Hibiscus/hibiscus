@@ -1,7 +1,7 @@
 import { serve } from "@hono/node-server";
-import { createApp } from "./app.js";
-import { buildService } from "./build.js";
+import { buildService } from "./bootstrap/build.js";
 import { loadConfig } from "./config.js";
+import { createApp } from "./http/app.js";
 
 const config = loadConfig();
 const service = buildService(config);

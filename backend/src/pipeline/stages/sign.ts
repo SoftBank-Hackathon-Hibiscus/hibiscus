@@ -9,7 +9,7 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { npmCommand } from "../command-runner.js";
+import { npmCommand } from "../../infrastructure/command-runner.js";
 import { contractViolation } from "../contracts.js";
 import type { DeploymentRun } from "../models.js";
 import { type PlanLike, readPlan } from "./policy.js";

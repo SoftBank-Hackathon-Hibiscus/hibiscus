@@ -1,14 +1,14 @@
 /** 기본 구성으로 서비스를 조립한다. 테스트는 runner 나 store 를 바꿔 끼운다 */
-import { StubApprovalProvider } from "./approval/stub.js";
-import { type CommandRunner, RealCommandRunner } from "./command-runner.js";
-import type { Config } from "./config.js";
-import { PipelineService } from "./pipeline.js";
-import { DeployStage } from "./stages/deploy.js";
-import { PolicyStage } from "./stages/policy.js";
-import { SignStage } from "./stages/sign.js";
-import { TestStubStage } from "./stages/test-stub.js";
-import { MemoryStore } from "./store/memory.js";
-import type { Store } from "./store/store.js";
+import type { Config } from "../config.js";
+import { type CommandRunner, RealCommandRunner } from "../infrastructure/command-runner.js";
+import { MemoryStore } from "../infrastructure/store/memory.js";
+import type { Store } from "../infrastructure/store/store.js";
+import { StubApprovalProvider } from "../pipeline/approval/stub.js";
+import { PipelineService } from "../pipeline/service.js";
+import { DeployStage } from "../pipeline/stages/deploy.js";
+import { PolicyStage } from "../pipeline/stages/policy.js";
+import { SignStage } from "../pipeline/stages/sign.js";
+import { TestStubStage } from "../pipeline/stages/test-stub.js";
 
 export interface BuildOverrides {
   runner?: CommandRunner;

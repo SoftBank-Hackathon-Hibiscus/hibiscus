@@ -1,11 +1,11 @@
 /** HTTP API (Hono). 입력은 zod 로 검사하고, 서비스 오류를 상태 코드로 바꾼다 */
 import { Hono } from "hono";
 import type { ZodType } from "zod";
-import { ApprovalRefusedError } from "./approval/provider.js";
-import { ConflictError, NotFoundError, ValidationError } from "./errors.js";
-import { RevisionMismatchError, RevisionUnavailableError } from "./git.js";
-import { ApproveInputSchema, CreateAppInputSchema, CreateRunInputSchema } from "./models.js";
-import type { PipelineService } from "./pipeline.js";
+import { ConflictError, NotFoundError, ValidationError } from "../errors.js";
+import { RevisionMismatchError, RevisionUnavailableError } from "../infrastructure/git.js";
+import { ApprovalRefusedError } from "../pipeline/approval/provider.js";
+import { ApproveInputSchema, CreateAppInputSchema, CreateRunInputSchema } from "../pipeline/models.js";
+import type { PipelineService } from "../pipeline/service.js";
 
 class BadRequest extends Error {
   constructor(

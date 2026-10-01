@@ -1,5 +1,5 @@
 /** 저장소 인터페이스. 지금은 메모리 구현만 있고, 관리형 DB 구현은 다음 단계 */
-import type { DeploymentApp, DeploymentRun, StageExecution } from "../models.js";
+import type { DeploymentApp, DeploymentRun, StageExecution } from "../../pipeline/models.js";
 
 export interface Store {
   createApp(app: DeploymentApp): Promise<DeploymentApp>;

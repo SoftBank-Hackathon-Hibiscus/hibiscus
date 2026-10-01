@@ -5,16 +5,16 @@
 import { randomUUID } from "node:crypto";
 import { statSync } from "node:fs";
 import { resolve } from "node:path";
+import type { CommandRunner } from "../infrastructure/command-runner.js";
+import { resolveSourceRevision } from "../infrastructure/git.js";
+import { ConflictError, NotFoundError, ValidationError } from "../errors.js";
+import type { Config } from "../config.js";
 import { type ApprovalProvider, ApprovalRefusedError } from "./approval/provider.js";
-import type { CommandRunner } from "./command-runner.js";
-import type { Config } from "./config.js";
-import { ConflictError, NotFoundError, ValidationError } from "./errors.js";
-import { resolveSourceRevision } from "./git.js";
 import type { ApproveInput, CreateAppInput, CreateRunInput, DeploymentApp, DeploymentRun, StageExecution, StageName } from "./models.js";
 import { RunPaths } from "./paths.js";
 import { placeholderDigest } from "./stages/test-stub.js";
 import type { StageContext, StageOutcome, StageRunner } from "./stages/types.js";
-import type { Store } from "./store/store.js";
+import type { Store } from "../infrastructure/store/store.js";
 
 export interface PipelineDeps {
   config: Config;

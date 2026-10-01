@@ -80,7 +80,7 @@ StageExecution 의 `status` 는 `pending | running | succeeded | failed | skippe
 | `digest_source` | `"registry"` 요청에 digest 를 넣었음 / `"placeholder"` 없어서 백엔드가 자리표시자를 만듦 (`sha256(placeholder:<run_id>)`, 형식만 맞춘 값) |
 | `source_revision_verified` | 앱 소스가 git 저장소여서 HEAD 로 확정했고 커밋 안 된 변경이 없을 때만 `true` |
 
-### source_revision 확정 규칙 (`src/git.ts`)
+### source_revision 확정 규칙 (`src/infrastructure/git.ts`)
 
 | 상황 | 결과 |
 |---|---|
@@ -110,7 +110,7 @@ verified=false 면 real 서명·real 배포는 거부된다.
 | `SIGNER_MODE` | `dry` (기본) | signer 를 `--dry-run` 으로 호출. `signature_ref` 가 `dry-run:` 으로 시작. stub 승인 허용 |
 | | `real` | cosign 으로 실제 서명 (`SIGNER_COSIGN_KEY`, `COSIGN_PASSWORD` 는 signer 가 읽음). `digest_source=registry` 이고 `source_revision_verified=true` 일 때만 허용, 아니면 서명 단계가 오류로 멈춘다. stub 승인은 403 |
 | `DEPLOY_MODE` | `off` (기본) | deploy 단계를 `skipped` 로 기록, `deployment_performed=false` |
-| | `dry`, `real` | 아직 미구현. 단계가 "미구현" 오류로 끝난다. real 금지 규칙(dry-run 서명, verified=false, placeholder digest)은 `src/stages/deploy.ts` 에 미리 있다 |
+| | `dry`, `real` | 아직 미구현. 단계가 "미구현" 오류로 끝난다. real 금지 규칙(dry-run 서명, verified=false, placeholder digest)은 `src/pipeline/stages/deploy.ts` 에 미리 있다 |
 
 | `HOST` | `127.0.0.1` (기본) | bind 주소. 바깥에 열려면 명시적으로 `0.0.0.0` |
 
@@ -140,13 +140,13 @@ Cloud Run 에서는 인스턴스가 바뀌면 로컬 파일이 사라지므로 �
 | 서명 | allow: `npm run sign -- --plan <plan.json> --requester <id> --image-repo <repo> --out <run>/sign/sign_result.json --log <run>/decisions.jsonl [--dry-run]` (signer/). needs_approval: 승인 뒤 `npm run approve -- --plan … --requester … --approver … --out approval.json` 다음 `sign … --approval approval.json`. 그 사이에 plan.json 을 다시 쓰지 않는다 (approval 이 plan 파일 해시에 묶임). 종료 코드 0 서명 / 1 거절 / 2 오류 |
 | 배포 | 없음 (`DEPLOY_MODE=off`) |
 
-Windows 에서는 npm 을 `npm.cmd` 로, cmd.exe 를 거쳐 실행한다 (`src/command-runner.ts`). 외부 명령은 `CommandRunner` 로 감싸 테스트에서 가짜로 바꾼다.
+Windows 에서는 npm 을 `npm.cmd` 로, cmd.exe 를 거쳐 실행한다 (`src/infrastructure/command-runner.ts`). 외부 명령은 `CommandRunner` 로 감싸 테스트에서 가짜로 바꾼다.
 
 ## 신원 (TBD)
 
 `requester` 와 `approver` 는 **요청 본문의 id 를 그대로 쓴다. 아직 인증하지 않는다.**
 signer 도 신원을 확인하지 않으므로 인증된 id 를 넘기는 것은 백엔드 책임인데, 어떻게 인증할지(GitHub 로그인, webhook 의 push 작성자 등)는 아직 정하지 않았다.
-그래서 stub 승인 제공자(`src/approval/stub.ts`)는 `SIGNER_MODE=dry` 에서만 동작한다. 본인 승인은 signer 가 거절한다.
+그래서 stub 승인 제공자(`src/pipeline/approval/stub.ts`)는 `SIGNER_MODE=dry` 에서만 동작한다. 본인 승인은 signer 가 거절한다.
 
 ## 아직 안 된 것
 
@@ -161,25 +161,35 @@ signer 도 신원을 확인하지 않으므로 인증된 id 를 넘기는 것은
 TODO (알고 있지만 아직 손대지 않은 것):
 
 - 수동 실행 중복 방지 (idempotency). webhook 붙일 때 같이
-- Windows cmd.exe 인자 처리에서 `%`, `!` 같은 특수문자 완전 대응 (`src/command-runner.ts` 의 `quoteForCmd`)
+- Windows cmd.exe 인자 처리에서 `%`, `!` 같은 특수문자 완전 대응 (`src/infrastructure/command-runner.ts` 의 `quoteForCmd`)
 - 시간 초과 시 Windows 에서 npm 의 자식 프로세스(tsx, node)까지 정리되는지 확인
 - `src_path`, `policy_path` 사용자 입력 경로 제한. 인증·앱 설정 붙일 때
 
 ## 폴더
 
+```text
+src/
+├── server.ts                 서버 시작
+├── config.ts                 환경변수 → 설정
+├── errors.ts                 공통 HTTP·검증 오류
+├── bootstrap/
+│   └── build.ts              저장소·단계·파이프라인 의존성 조립
+├── http/
+│   └── app.ts                Hono API와 오류 응답
+├── pipeline/
+│   ├── service.ts            run 생성, 단계 순서, 상태 기록, 승인 이어가기
+│   ├── models.ts             실행 모델과 API 입력 스키마
+│   ├── paths.ts              run별 실행 폴더
+│   ├── contracts.ts          단계 산출물 스키마 검사
+│   ├── approval/             승인 제공자 인터페이스와 stub
+│   └── stages/               test-stub, policy, sign, deploy
+└── infrastructure/
+    ├── command-runner.ts     외부 명령 실행
+    ├── git.ts                source_revision 확정
+    └── store/                저장소 인터페이스와 메모리 구현
+
+fixtures/test-templates/      테스트 stub 템플릿
+tests/                        상태 전이, 규칙 단위, CLI 통합 테스트
 ```
-src/server.ts          서버 시작
-src/app.ts             HTTP API (Hono)
-src/pipeline.ts        run 생성, 단계 순서, 상태 기록, 승인 이어가기
-src/build.ts           기본 조립 (메모리 저장소, 실제 명령 실행기, stub 승인)
-src/config.ts          환경변수 → 설정
-src/models.ts          DeploymentApp, DeploymentRun, StageExecution, API 입력 스키마
-src/paths.ts           run 별 실행 폴더
-src/git.ts             source_revision 확정
-src/command-runner.ts  외부 명령 실행 (실제 / 주입 가능)
-src/store/             저장소 인터페이스 + 메모리 구현
-src/stages/            test-stub, policy, sign, deploy
-src/approval/          승인 제공자 인터페이스 + stub
-fixtures/test-templates/  테스트 stub 템플릿
-tests/                 상태 전이(가짜 명령), 규칙 단위 테스트, 실제 CLI 통합 테스트
-```
+
+Agent, Gateway, Routing, Tunnel은 파이프라인과 수명주기가 다르다. 구현할 때 `src/agent/`, `src/gateway/`, `src/routing/`, `src/tunnel/` 독립 모듈로 둔다.

@@ -8,7 +8,7 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { npmCommand, parseLastJsonLine } from "../command-runner.js";
+import { npmCommand, parseLastJsonLine } from "../../infrastructure/command-runner.js";
 import { contractViolation } from "../contracts.js";
 import type { Decision, DeploymentRun } from "../models.js";
 import { type StageContext, type StageOutcome, type StageRunner, tail } from "./types.js";

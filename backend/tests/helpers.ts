@@ -3,12 +3,12 @@ import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, write
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { Hono } from "hono";
-import { createApp } from "../src/app.js";
-import { buildService } from "../src/build.js";
-import type { CommandResult, CommandRunner, CommandSpec } from "../src/command-runner.js";
+import { buildService } from "../src/bootstrap/build.js";
 import { BACKEND_ROOT, loadConfig } from "../src/config.js";
-import type { Decision } from "../src/models.js";
-import type { PipelineService } from "../src/pipeline.js";
+import { createApp } from "../src/http/app.js";
+import type { CommandResult, CommandRunner, CommandSpec } from "../src/infrastructure/command-runner.js";
+import type { Decision } from "../src/pipeline/models.js";
+import type { PipelineService } from "../src/pipeline/service.js";
 
 export type Handler = (spec: CommandSpec) => CommandResult | undefined | Promise<CommandResult | undefined>;
 

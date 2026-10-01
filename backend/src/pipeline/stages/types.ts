@@ -1,6 +1,6 @@
 /** 단계 공통 인터페이스. 오케스트레이터는 이 모양만 보고 단계를 차례로 부른다 */
-import type { CommandRunner } from "../command-runner.js";
-import type { Config } from "../config.js";
+import type { CommandRunner } from "../../infrastructure/command-runner.js";
+import type { Config } from "../../config.js";
 import type { DeploymentApp, DeploymentRun, StageName } from "../models.js";
 import type { RunPaths } from "../paths.js";
 

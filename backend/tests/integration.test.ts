@@ -7,9 +7,9 @@ import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { createApp } from "../src/app.js";
-import { buildService } from "../src/build.js";
+import { buildService } from "../src/bootstrap/build.js";
 import { BACKEND_ROOT, loadConfig } from "../src/config.js";
+import { createApp } from "../src/http/app.js";
 import { APP_INPUT, get, post, stageOf } from "./helpers.js";
 
 const config = loadConfig({ WORK_DIR: mkdtempSync(join(tmpdir(), "hibiscus-backend-it-")), SIGNER_MODE: "dry", DEPLOY_MODE: "off" }, BACKEND_ROOT);
