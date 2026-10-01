@@ -1,0 +1,6 @@
+{"job_id": "run-20261001-001-candidate-01", "run_id": "run-20261001-001", "action": "candidate",
+ "result": "ok",
+ "candidate": {"digest": "sha256:d90d6bd2d450675086139ab4448e851b26d2e28b4132dcc90ad0f2b7719babc5", "container": "app-d90d6bd2d450", "url": "http://127.0.0.1:18081"},
+ "check": {"run_id": "run-20261001-001", "target": "onprem", "mode": "candidate", "pass": true,
+           "url": "http://127.0.0.1:18081", "checks": [{"name": "health", "pass": true, "ms": 40}]},
+ "finished_at": "2026-10-01T18:00:35+09:00"}
