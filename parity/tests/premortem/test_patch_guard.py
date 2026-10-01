@@ -104,6 +104,12 @@ class GuardTest(unittest.TestCase):
         self.assertNotEqual(result.source_tree_sha256, result.patched_tree_sha256)
         self.assertEqual(result.changed_files, ("app.py",))
 
+    def test_crlf_source_is_patched_without_joining_lines(self):
+        (self.root / "app.py").write_bytes(APP.replace("\n", "\r\n").encode("utf-8"))
+        result = apply_to_copy(self.root, self.check([FIX]), Path(self.tmp.name) / "patched")
+        expected = APP.replace('HOST = "127.0.0.1"', 'HOST = "0.0.0.0"').replace("\n", "\r\n")
+        self.assertEqual((result.patched_root / "app.py").read_bytes(), expected.encode("utf-8"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -32,7 +32,7 @@ def apply_to_copy(source_root: Path, planned: list, destination: Path) -> PatchR
     diffs = []
     for path, edits in sorted(by_file.items()):
         target = destination / path
-        original = target.read_text(encoding="utf-8")
+        original = target.read_bytes().decode("utf-8")  # read_text()는 CRLF를 LF로 바꿔 guard의 offset과 어긋난다
         text = original
         for edit in sorted(edits, key=lambda e: e.offset, reverse=True):  # 뒤에서부터 바꿔야 앞 offset이 유지된다
             text = text[: edit.offset] + edit.after + text[edit.offset + len(edit.before):]

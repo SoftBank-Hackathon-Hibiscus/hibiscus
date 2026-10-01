@@ -59,7 +59,9 @@ def build_input(run_dir: Path, report: dict, allowed_edit_paths: tuple, requires
 
 def check_output(output: dict, analysis_input: dict) -> None:
     """형식과 근거를 검사한다. 없는 증거·파일·줄, 허용하지 않은 경로, 모르는 requires는 거부한다."""
-    validate("analysis-output", output)
+    if validate("analysis-output", output) != "checked":
+        raise PremortemError("SCHEMA_UNCHECKED",
+                             "jsonschema가 없어 AI 출력 형식을 검사할 수 없음 (parity/에서 pip install -r requirements.txt)")
     evidence_ids = {e["evidence_id"] for e in analysis_input["evidence"]}
     sources = {s["path"]: s for s in analysis_input["sources"]}
     for finding in output["findings"]:

@@ -153,6 +153,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
+    for stream in (sys.stdout, sys.stderr):  # Windows 기본(cp949)과 상관없이 --json 출력을 UTF-8로 고정
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     parser = build_parser()
     args = parser.parse_args(argv)
     try:

@@ -58,6 +58,34 @@ describe("extractor", () => {
     expect(html.text).toContain('type="tel"');
   });
 
+  it("Python 소스: 문자열 안의 CREATE TABLE 에서 칼럼을 찾고, 문자열 밖의 것은 무시한다", () => {
+    const cands = extract(loadSources(sample("python-contact")));
+    const users = cands.filter((c) => c.table === "users").map((c) => `${c.column}:${c.type}`);
+    expect(users).toEqual(["id:INTEGER", "name:TEXT", "contact:TEXT", "created_at:TEXT"]);
+    const contact = cands.find((c) => c.column === "contact")!;
+    expect(contact.definition).toMatchObject({ file: "app.py", line: 19 });
+    // 문자열 키 "contact", 딕셔너리 키, 식별자 모두 근거 조각으로 모인다
+    const lines = contact.usages.map((u) => u.text);
+    expect(lines).toContainEqual('contact = data.get("contact")');
+    expect(lines.some((l) => l.includes('{"name": name, "contact": contact}'))).toBe(true);
+    expect(lines.some((l) => l.includes("PHONE_RE.match(contact)"))).toBe(true);
+
+    // 여러 종류의 문자열(""" ''' " ')과 접두어(r, f) 를 지원하고, 주석·식별자 속 CREATE TABLE 은 정의가 아니다
+    const py = [
+      "# CREATE TABLE fake_comment (x TEXT)",
+      "TRIPLE = '''CREATE TABLE a (a_col TEXT, a_num INTEGER);'''",
+      'SINGLE = "CREATE TABLE b (b_col TEXT)"',
+      "RAW = r'CREATE TABLE c (c_col TEXT)'",
+      "PREFIX = f\"\"\"CREATE TABLE d (d_col TEXT)\"\"\"",
+      "create_table_e = 'not sql'",
+      "BROKEN = 'CREATE TABLE f (f_col TEXT'",
+    ].join("\n");
+    const found = extract([{ path: "m.py", content: py }]).map((c) => `${c.table}.${c.column}`);
+    expect(found).toEqual(["a.a_col", "a.a_num", "b.b_col", "c.c_col", "d.d_col"]);
+    // .py 가 아닌 파일에서는 문자열 안의 CREATE TABLE 을 보지 않는다 (기존 동작 유지)
+    expect(extract([{ path: "m.js", content: 'const SCHEMA = "CREATE TABLE z (z_col TEXT)";' }])).toEqual([]);
+  });
+
   it("근거 조각의 비밀값을 가린다", () => {
     const cands = extract(loadSources(sample("ambiguous")));
     const all = cands.flatMap((c) => [c.definition, ...c.usages]).map((s) => s.context).join("\n");
@@ -91,6 +119,72 @@ describe("HeuristicClassifier: 샘플별 기대 결과", () => {
 
   it("decoys → contact_count(정수), ticket_no(숫자 문자열) 는 잡히지 않는다", async () => {
     expect(await heuristic("decoys")).toEqual([]);
+  });
+
+  it("python-contact → contact 는 phone, confident=true (이름 + 정규식 검증 + SMS 키워드 인자)", async () => {
+    const result = await heuristic("python-contact");
+    expect(result.map(brief)).toEqual([{ table: "users", column: "contact", kind: "phone", confident: true, source: "heuristic" }]);
+    expect(result[0]!.evidence).toBe("app.py:53, app.py:57");
+  });
+
+  it("python-decoy → contact_count(정수), ticket_no(TICKET_RE 검증) 는 잡히지 않는다", async () => {
+    expect(await heuristic("python-decoy")).toEqual([]);
+  });
+
+  it("Python 쓰임새 신호는 그 칼럼에 대한 것만 센다 (.get / 딕셔너리 키 / 정규식 / SMS 인자)", async () => {
+    const classifyWith = async (columns: string, lines: string[]) => {
+      const schema = `SCHEMA = """CREATE TABLE users (id INTEGER PRIMARY KEY, ${columns});"""`;
+      const files = [{ path: "app.py", content: [schema, ...lines].join("\n") }];
+      return (await new HeuristicClassifier().classify(extract(files))).map(brief);
+    };
+    const classify = (...lines: string[]) => classifyWith("contact TEXT, memo TEXT, other TEXT", lines);
+    const phone = { table: "users", column: "contact", kind: "phone", confident: true, source: "heuristic" };
+
+    // 문자열 키로 읽어 온 값을 그 줄에서 검증: 정규식 상수 이름(PHONE_RE) 또는 인라인 리터럴
+    expect(await classify('if not PHONE_RE.match(request.json.get("contact")): abort(400)')).toEqual([phone]);
+    expect(await classify('phone_pattern.fullmatch(request.form["contact"])')).toEqual([phone]);
+    expect(await classify('re.match(r"^01[016789]-?\\d{3,4}-?\\d{4}$", contact)')).toEqual([phone]);
+    // SMS 발송 함수의 첫 인자 또는 to= 키워드 인자
+    expect(await classify("send_sms(contact, text)")).toEqual([phone]);
+    expect(await classify('client.messages.create(body="hi", from_=SENDER, to=contact)')).toEqual([phone]);
+    // 이메일도 같은 방식 (Python 문자열 정규식)
+    expect(await classifyWith("mail TEXT", ['if not re.fullmatch(r"[^@]+@[^@]+\\.[^@]+", data["mail"]): abort(400)'])).toEqual([
+      { table: "users", column: "mail", kind: "email", confident: true, source: "heuristic" },
+    ]);
+
+    // 신호가 아닌 것: 키로 읽기만 함 (이름 신호만 남아 confident=false)
+    const nameOnly = { ...phone, confident: false };
+    expect(await classify('contact = data.get("contact")', 'row = {"contact": contact}')).toEqual([nameOnly]);
+    // 검증 신호는 검증된 칼럼(memo)의 것이지 contact 의 것이 아니다
+    expect(await classify('PHONE_RE.match(data.get("memo"))')).toEqual([nameOnly, { table: "users", column: "memo", kind: "phone", confident: false, source: "heuristic" }]);
+    // 개인정보 단어가 아닌 정규식 상수, SMS 호출의 두 번째 인자(수신자가 아님), 읽기·로그만 하는 줄은 신호가 아니다
+    expect(await classifyWith("other TEXT", ['TICKET_RE.match(data.get("other"))', "send_sms(SENDER, other)"])).toEqual([]);
+    expect(await classifyWith("other TEXT", ['other = data.get("other")', 'log.info("saved %s", other)', 'row = {"other": other}'])).toEqual([]);
+    // Python 전용 검증 신호는 .py 파일에서만 (JS 의 named.match 는 세지 않는다)
+    const js = [{ path: "schema.sql", content: "CREATE TABLE users (contact TEXT);" }, { path: "a.js", content: "PHONE_RE.match(contact)" }];
+    expect((await new HeuristicClassifier().classify(extract(js))).map(brief)).toEqual([{ ...phone, confident: false }]);
+  });
+
+  it("Python 앱에 개인정보 칼럼이 없으면 결과가 없다 (게시판: author, message)", async () => {
+    // 팀 데모 앱(sample-app/app.py)과 같은 모양을 여기서 재현한다. 다른 파트 폴더에 의존하지 않는다
+    const app = [
+      'SCHEMA = """',
+      "DROP TABLE IF EXISTS posts;",
+      "CREATE TABLE posts (",
+      "    id         INTEGER PRIMARY KEY,",
+      "    author     TEXT NOT NULL,",
+      "    message    TEXT NOT NULL,",
+      "    created_at TEXT NOT NULL",
+      ");",
+      '"""',
+      'FILENAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,100}$")',
+      'author, message = data.get("author"), data.get("message")',
+      'conn.execute("INSERT INTO posts (author, message, created_at) VALUES (?, ?, ?)", (author, message, created_at))',
+      'return self.send_json(201, {"id": post_id, "author": author, "message": message, "created_at": created_at})',
+    ].join("\n");
+    const cands = extract([{ path: "app.py", content: app }]);
+    expect(cands.map((c) => `${c.table}.${c.column}`)).toEqual(["posts.id", "posts.author", "posts.message", "posts.created_at"]);
+    expect(await new HeuristicClassifier().classify(cands)).toEqual([]);
   });
 
   it("injection → 주석의 지시문과 무관하게 signup-contact 와 같은 결과", async () => {

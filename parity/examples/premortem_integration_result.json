@@ -1,0 +1,197 @@
+{
+  "format": "parity-premortem-integration-demo-v1",
+  "run_id": "parity-77c4a3585936",
+  "replay_backend": "parity",
+  "local_image_id": "sha256:616b99cd71e839fc4930d4f5659017ed801fbab0af74410f0046bf2175e8e5f7",
+  "registry_digest": null,
+  "source_revision": null,
+  "baseline_sha256": {
+    "session.jsonl": "7166b9aa4b919a2ea29065ce0ae8aae918eab55a13e5ec1b0f43bcecf2ce6a89",
+    "session.noise.json": "dd15746805d747bb72762a3bf5ffad7806a59085d54e3facd92fd21958c60d85"
+  },
+  "baseline_unchanged": true,
+  "passed": false,
+  "facts": [
+    {
+      "kind": "sqlite",
+      "path": "/app/data/data.db",
+      "storage": "container_layer",
+      "evidence": "docker diff A /app/data/data.db; header 'SQLite format 3'"
+    },
+    {
+      "kind": "local_upload",
+      "path": "/app/uploads",
+      "storage": "container_layer",
+      "evidence": "docker diff: 2 file(s) written under /app/uploads"
+    }
+  ],
+  "facts_observed_at": "recording_container_before_removal",
+  "conditions": [
+    {
+      "name": "none",
+      "status": "passed",
+      "expected_count": 20,
+      "executed_count": 20,
+      "matched_count": 20,
+      "mismatches": [],
+      "evidence_ids": [
+        "none-lifecycle-na",
+        "none-file_change-na"
+      ],
+      "reason": null
+    },
+    {
+      "name": "restart",
+      "status": "failed",
+      "expected_count": 20,
+      "executed_count": 20,
+      "matched_count": 14,
+      "mismatches": [
+        {
+          "request_index": 11,
+          "kind": "status",
+          "summary": "요청 #11: 상태코드 예상 200, 실제 401",
+          "evidence_ids": [
+            "restart-http_mismatch-11"
+          ]
+        },
+        {
+          "request_index": 12,
+          "kind": "body",
+          "summary": "요청 #12: 응답 본문 불일치 (1개 필드)",
+          "evidence_ids": [
+            "restart-http_mismatch-12"
+          ]
+        },
+        {
+          "request_index": 13,
+          "kind": "body",
+          "summary": "요청 #13: 응답 본문 불일치 (10개 필드)",
+          "evidence_ids": [
+            "restart-http_mismatch-13"
+          ]
+        },
+        {
+          "request_index": 14,
+          "kind": "status",
+          "summary": "요청 #14: 상태코드 예상 200, 실제 404",
+          "evidence_ids": [
+            "restart-http_mismatch-14"
+          ]
+        },
+        {
+          "request_index": 17,
+          "kind": "status",
+          "summary": "요청 #17: 상태코드 예상 200, 실제 401",
+          "evidence_ids": [
+            "restart-http_mismatch-17"
+          ]
+        },
+        {
+          "request_index": 20,
+          "kind": "body",
+          "summary": "요청 #20: 응답 본문 불일치 (10개 필드)",
+          "evidence_ids": [
+            "restart-http_mismatch-20"
+          ]
+        }
+      ],
+      "evidence_ids": [
+        "restart-lifecycle-na",
+        "restart-lifecycle-10",
+        "restart-readiness-10",
+        "restart-http_mismatch-11",
+        "restart-http_mismatch-12",
+        "restart-http_mismatch-13",
+        "restart-http_mismatch-14",
+        "restart-http_mismatch-17",
+        "restart-http_mismatch-20",
+        "restart-file_change-na"
+      ],
+      "reason": "6건 불일치 (14/20 일치)"
+    },
+    {
+      "name": "replace",
+      "status": "failed",
+      "expected_count": 20,
+      "executed_count": 20,
+      "matched_count": 13,
+      "mismatches": [
+        {
+          "request_index": 11,
+          "kind": "status",
+          "summary": "요청 #11: 상태코드 예상 200, 실제 401",
+          "evidence_ids": [
+            "replace-http_mismatch-11"
+          ]
+        },
+        {
+          "request_index": 12,
+          "kind": "body",
+          "summary": "요청 #12: 응답 본문 불일치 (1개 필드)",
+          "evidence_ids": [
+            "replace-http_mismatch-12"
+          ]
+        },
+        {
+          "request_index": 13,
+          "kind": "body",
+          "summary": "요청 #13: 응답 본문 불일치 (10개 필드)",
+          "evidence_ids": [
+            "replace-http_mismatch-13"
+          ]
+        },
+        {
+          "request_index": 14,
+          "kind": "status",
+          "summary": "요청 #14: 상태코드 예상 200, 실제 404",
+          "evidence_ids": [
+            "replace-http_mismatch-14"
+          ]
+        },
+        {
+          "request_index": 16,
+          "kind": "body",
+          "summary": "요청 #16: 응답 본문 불일치 (2개 필드)",
+          "evidence_ids": [
+            "replace-http_mismatch-16"
+          ]
+        },
+        {
+          "request_index": 17,
+          "kind": "status",
+          "summary": "요청 #17: 상태코드 예상 200, 실제 401",
+          "evidence_ids": [
+            "replace-http_mismatch-17"
+          ]
+        },
+        {
+          "request_index": 20,
+          "kind": "body",
+          "summary": "요청 #20: 응답 본문 불일치 (10개 필드)",
+          "evidence_ids": [
+            "replace-http_mismatch-20"
+          ]
+        }
+      ],
+      "evidence_ids": [
+        "replace-lifecycle-na",
+        "replace-file_change-10",
+        "replace-lifecycle-10",
+        "replace-readiness-10",
+        "replace-http_mismatch-11",
+        "replace-http_mismatch-12",
+        "replace-http_mismatch-13",
+        "replace-http_mismatch-14",
+        "replace-http_mismatch-16",
+        "replace-http_mismatch-17",
+        "replace-http_mismatch-20",
+        "replace-file_change-na"
+      ],
+      "reason": "7건 불일치 (13/20 일치)"
+    }
+  ],
+  "policy_contract_validated": false,
+  "ready_for_signing": false,
+  "demo_expectations_met": true
+}
