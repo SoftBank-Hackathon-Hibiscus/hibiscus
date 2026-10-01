@@ -8,6 +8,8 @@ export type SignerMode = "dry" | "real";
 export type DeployMode = "off" | "dry" | "real";
 
 export interface Config {
+  /** bind 주소. 기본 127.0.0.1 (webhook·인증이 붙기 전에는 외부 공개용이 아님) */
+  host: string;
   port: number;
   /** 실행 산출물 폴더 (절대 경로) */
   workDir: string;
@@ -37,6 +39,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, backendRoot: st
   const port = Number(env.PORT || 8080);
   if (!Number.isInteger(port) || port <= 0) throw new ConfigError(`PORT 가 올바르지 않습니다: ${env.PORT}`);
   return {
+    host: env.HOST || "127.0.0.1",
     port,
     workDir,
     repoRoot,

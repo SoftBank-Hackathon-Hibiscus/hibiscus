@@ -25,6 +25,8 @@ npm run typecheck
 필요한 것: Node 22.9 이상, `policy/`, `signer/` 에 `npm install` 되어 있을 것, 앱 소스 폴더가 git 저장소 안에 있으면 `git`.
 cosign, gcloud, Docker 는 필요 없다 (dry·off 모드).
 
+서버는 기본으로 `127.0.0.1` 에만 열린다 (`HOST` 로 바꿀 수 있음). **webhook·인증이 붙기 전에는 외부 공개용이 아니다.**
+
 한 바퀴 돌려 보기:
 
 ```bash
@@ -98,6 +100,8 @@ verified=false 면 real 서명·real 배포는 거부된다.
 | | `real` | cosign 으로 실제 서명 (`SIGNER_COSIGN_KEY`, `COSIGN_PASSWORD` 는 signer 가 읽음). `digest_source=registry` 이고 `source_revision_verified=true` 일 때만 허용, 아니면 서명 단계가 오류로 멈춘다. stub 승인은 403 |
 | `DEPLOY_MODE` | `off` (기본) | deploy 단계를 `skipped` 로 기록, `deployment_performed=false` |
 | | `dry`, `real` | 아직 미구현. 단계가 "미구현" 오류로 끝난다. real 금지 규칙(dry-run 서명, verified=false, placeholder digest)은 `src/stages/deploy.ts` 에 미리 있다 |
+
+| `HOST` | `127.0.0.1` (기본) | bind 주소. 바깥에 열려면 명시적으로 `0.0.0.0` |
 
 그 밖의 변수는 [.env.example](.env.example) 에 있다.
 
