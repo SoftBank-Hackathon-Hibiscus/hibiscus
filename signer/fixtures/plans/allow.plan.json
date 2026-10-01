@@ -1,0 +1,50 @@
+{
+  "run_id": "r-001",
+  "app": "todo",
+  "digest": "sha256:a1b2c3d4e5f60718293a4b5c6d7e8f9001122334455667788990aabbccddeeff",
+  "decision": "allow",
+  "targets": [
+    "onprem",
+    "cloud_run"
+  ],
+  "failover_allowed": true,
+  "rules": [
+    {
+      "id": "R1",
+      "result": "not_matched"
+    },
+    {
+      "id": "R2",
+      "result": "not_matched"
+    },
+    {
+      "id": "R3",
+      "result": "not_matched"
+    },
+    {
+      "id": "R4",
+      "result": "not_matched"
+    },
+    {
+      "id": "R5",
+      "result": "not_matched"
+    },
+    {
+      "id": "R6",
+      "result": "not_matched"
+    },
+    {
+      "id": "R7",
+      "result": "not_matched"
+    },
+    {
+      "id": "default",
+      "result": "matched",
+      "reason": "개인정보 없음, 테스트 통과: 하이브리드 배포 허용",
+      "reason_i18n": {
+        "ja": "個人情報なし、テスト合格：ハイブリッドデプロイを許可"
+      }
+    }
+  ],
+  "plan_hash": "7142ff914e5a7a755bde2a95e6bbe83ee11909540b091a383ada79c8b5697c1f"
+}
