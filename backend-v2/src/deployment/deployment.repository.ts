@@ -1,0 +1,238 @@
+import { Injectable } from '@nestjs/common';
+import { and, asc, desc, eq, sql } from 'drizzle-orm';
+import { DatabaseService } from '../database/database.service.js';
+import {
+  deployments,
+  policyResults,
+  stageExecutions,
+  deploymentArtifacts,
+  deploymentAuditLogs,
+  type DeploymentArtifact,
+  type DeploymentAuditLog,
+  type Deployment,
+  type PolicyResult,
+  type StageExecution,
+} from '../database/schema.js';
+
+@Injectable()
+export class DeploymentRepository {
+  constructor(private readonly database: DatabaseService) {}
+
+  create(values: Omit<Deployment, 'version'>): Deployment {
+    return this.database.db.transaction((tx) => {
+      const latest = tx
+        .select({ version: deployments.version })
+        .from(deployments)
+        .where(eq(deployments.applicationId, values.applicationId))
+        .orderBy(desc(deployments.version))
+        .limit(1)
+        .get();
+      const deployment = { ...values, version: (latest?.version ?? 0) + 1 };
+      tx.insert(deployments).values(deployment).run();
+      return deployment;
+    });
+  }
+
+  find(id: string): Deployment | undefined {
+    return this.database.db
+      .select()
+      .from(deployments)
+      .where(eq(deployments.id, id))
+      .get();
+  }
+
+  list(applicationId: string): Deployment[] {
+    return this.database.db
+      .select()
+      .from(deployments)
+      .where(eq(deployments.applicationId, applicationId))
+      .orderBy(desc(deployments.version))
+      .all();
+  }
+
+  getView(id: string) {
+    const deployment = this.find(id);
+    if (!deployment) return undefined;
+    const stages = this.database.db
+      .select()
+      .from(stageExecutions)
+      .where(eq(stageExecutions.deploymentId, id))
+      .orderBy(asc(stageExecutions.sequence), asc(stageExecutions.attempt))
+      .all();
+    const policyResult = this.database.db
+      .select()
+      .from(policyResults)
+      .where(eq(policyResults.deploymentId, id))
+      .get();
+    const artifacts = this.listArtifacts(id);
+    const auditLogs = this.database.db
+      .select()
+      .from(deploymentAuditLogs)
+      .where(eq(deploymentAuditLogs.deploymentId, id))
+      .orderBy(
+        asc(deploymentAuditLogs.createdAt),
+        asc(sql`${deploymentAuditLogs}.rowid`),
+      )
+      .all();
+    return {
+      deployment,
+      stages,
+      policyResult: policyResult ?? null,
+      artifacts,
+      auditLogs,
+    };
+  }
+
+  listArtifacts(
+    deploymentId: string,
+    successfulOnly = false,
+  ): DeploymentArtifact[] {
+    return this.database.db
+      .select({ artifact: deploymentArtifacts })
+      .from(deploymentArtifacts)
+      .innerJoin(
+        stageExecutions,
+        eq(deploymentArtifacts.stageExecutionId, stageExecutions.id),
+      )
+      .where(
+        successfulOnly
+          ? and(
+              eq(deploymentArtifacts.deploymentId, deploymentId),
+              eq(stageExecutions.status, 'succeeded'),
+            )
+          : eq(deploymentArtifacts.deploymentId, deploymentId),
+      )
+      .orderBy(
+        asc(stageExecutions.sequence),
+        asc(stageExecutions.attempt),
+        asc(deploymentArtifacts.relativePath),
+      )
+      .all()
+      .map((row) => row.artifact);
+  }
+
+  checkpoint(
+    artifacts: DeploymentArtifact[],
+    logs: DeploymentAuditLog[],
+    commit: (artifactIds: Record<string, string>) => void,
+  ): void {
+    this.database.db.transaction(() => {
+      for (const artifact of artifacts)
+        this.database.db.insert(deploymentArtifacts).values(artifact).run();
+      for (const log of logs)
+        this.database.db.insert(deploymentAuditLogs).values(log).run();
+      const artifactIds = Object.fromEntries(
+        artifacts.map((artifact) => [artifact.name, artifact.id]),
+      );
+      commit(artifactIds);
+    });
+  }
+
+  findQueued(): Deployment | undefined {
+    return this.database.db
+      .select()
+      .from(deployments)
+      .where(eq(deployments.status, 'queued'))
+      .orderBy(asc(deployments.createdAt))
+      .limit(1)
+      .get();
+  }
+
+  claim(id: string): boolean {
+    return (
+      this.database.db
+        .update(deployments)
+        .set({ status: 'running', updatedAt: new Date().toISOString() })
+        .where(and(eq(deployments.id, id), eq(deployments.status, 'queued')))
+        .run().changes === 1
+    );
+  }
+
+  requeueInterrupted(): void {
+    this.database.db
+      .update(deployments)
+      .set({ status: 'queued', updatedAt: new Date().toISOString() })
+      .where(eq(deployments.status, 'running'))
+      .run();
+  }
+
+  update(id: string, patch: Partial<typeof deployments.$inferInsert>): void {
+    this.database.db
+      .update(deployments)
+      .set({ ...patch, updatedAt: new Date().toISOString() })
+      .where(eq(deployments.id, id))
+      .run();
+  }
+
+  approve(id: string, approver: string): boolean {
+    return (
+      this.database.db
+        .update(deployments)
+        .set({
+          approver,
+          status: 'queued',
+          updatedAt: new Date().toISOString(),
+        })
+        .where(
+          and(
+            eq(deployments.id, id),
+            eq(deployments.status, 'awaiting_approval'),
+          ),
+        )
+        .run().changes === 1
+    );
+  }
+
+  nextAttempt(deploymentId: string, stage: StageExecution['stage']): number {
+    const latest = this.database.db
+      .select({ attempt: stageExecutions.attempt })
+      .from(stageExecutions)
+      .where(
+        and(
+          eq(stageExecutions.deploymentId, deploymentId),
+          eq(stageExecutions.stage, stage),
+        ),
+      )
+      .orderBy(desc(stageExecutions.attempt))
+      .limit(1)
+      .get();
+    return (latest?.attempt ?? 0) + 1;
+  }
+
+  createStage(stage: StageExecution): void {
+    this.database.db.insert(stageExecutions).values(stage).run();
+  }
+
+  updateStage(
+    id: string,
+    patch: Partial<typeof stageExecutions.$inferInsert>,
+  ): void {
+    this.database.db
+      .update(stageExecutions)
+      .set(patch)
+      .where(eq(stageExecutions.id, id))
+      .run();
+  }
+
+  savePolicyResult(result: PolicyResult): void {
+    this.database.db
+      .insert(policyResults)
+      .values(result)
+      .onConflictDoUpdate({
+        target: policyResults.deploymentId,
+        set: {
+          decision: result.decision,
+          planHash: result.planHash,
+          targets: result.targets,
+          failoverAllowed: result.failoverAllowed,
+          requires: result.requires,
+          planPath: result.planPath,
+          piiPath: result.piiPath,
+          planArtifactId: result.planArtifactId,
+          piiArtifactId: result.piiArtifactId,
+          updatedAt: result.updatedAt,
+        },
+      })
+      .run();
+  }
+}
