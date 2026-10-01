@@ -287,7 +287,7 @@ describe("변환 거부 / 경고", () => {
   });
 
   it("조건은 none / restart / replace 가 정확히 한 번씩: 빠지거나 모르는 조건이 있으면 오류", () => {
-    // parity CLI 기본값(none,restart)으로 돌려 replace 를 빼먹은 결과
+    // --conditions 로 조건을 줄여 돌려 replace 를 빼먹은 결과 (parity CLI 기본값은 PR #10 부터 none,restart,replace)
     expect(() => adaptParityHandoff(variant([ALL_PASS[0]!, ALL_PASS[1]!], []))).toThrow(/필요한 조건이 빠졌습니다: replace/);
     expect(() => adaptParityHandoff(variant([ALL_PASS[0]!, ALL_PASS[2]!], []))).toThrow(/필요한 조건이 빠졌습니다: restart/);
     expect(() => adaptParityHandoff(variant([ALL_PASS[1]!, ALL_PASS[2]!], []))).toThrow(/필요한 조건이 빠졌습니다: none/);

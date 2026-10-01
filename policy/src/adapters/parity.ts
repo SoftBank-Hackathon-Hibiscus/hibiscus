@@ -17,7 +17,7 @@
  *
  * 변환을 거부하는 경우 (ParityAdapterError): 재생이 중단된 조건이 있음(replay[].error), 진단 status 가 completed 가 아님,
  * 진단의 registry_digest 가 metadata.digest 와 다름, 조건이 none / restart / replace 정확히 한 번씩이 아님
- * (빠짐·중복·모르는 조건. parity CLI 기본값은 none,restart 라 replace 를 빼먹은 결과가 들어오는 것을 막는다),
+ * (빠짐·중복·모르는 조건. parity CLI 기본값은 PR #10 부터 none,restart,replace 지만, --conditions 로 줄여 돌린 결과가 들어오는 것을 막는다),
  * 조건·불일치 수가 서로 맞지 않음.
  * 경고만 하는 경우: metadata.digest 가 진단의 local_image_id 와 같음 (레지스트리 위치가 정해지면 오류로 바꾼다).
  */
