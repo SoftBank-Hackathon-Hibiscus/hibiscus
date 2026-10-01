@@ -4,7 +4,8 @@
  * 앱 소스에서 "칼럼 정의" 를 찾고, 칼럼마다 근거 조각(정의 위치 + 칼럼 이름이 등장하는 줄)을 모은다.
  * 여기서는 개인정보인지 판단하지 않는다. 판단은 classifier 가 한다.
  *
- * 지원: SQL CREATE TABLE, Prisma model. 나머지 파일(.js/.ts/.html)은 근거 조각 수집에만 쓴다.
+ * 지원: SQL CREATE TABLE, Prisma model, Python 소스의 문자열 안에 든 CREATE TABLE.
+ * 나머지 파일(.js/.ts/.html)은 근거 조각 수집에만 쓴다.
  */
 import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -35,7 +36,7 @@ export interface ColumnCandidate {
   usages: Snippet[];
 }
 
-export const SOURCE_EXTENSIONS = [".sql", ".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".html", ".prisma"];
+export const SOURCE_EXTENSIONS = [".sql", ".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".html", ".prisma", ".py"];
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", ".next", "coverage"]);
 const MAX_USAGES_PER_COLUMN = 40;
 
@@ -101,6 +102,24 @@ function lineOfOffset(content: string, offset: number): number {
   return line;
 }
 
+/** 괄호 깊이 0 인 쉼표로 나눈 조각과 각 조각의 시작 위치 (text 기준) */
+function splitTopLevelCommas(text: string): Array<{ text: string; start: number }> {
+  const parts: Array<{ text: string; start: number }> = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === "(") depth++;
+    else if (ch === ")") depth--;
+    else if (ch === "," && depth === 0) {
+      parts.push({ text: text.slice(start, i), start });
+      start = i + 1;
+    }
+  }
+  parts.push({ text: text.slice(start), start });
+  return parts;
+}
+
 /** 여는 괄호 위치에서 짝이 맞는 닫는 괄호 위치를 찾는다. 없으면 -1 */
 function findClosing(content: string, openIndex: number, open: string, close: string): number {
   let depth = 0;
@@ -128,27 +147,46 @@ interface Definition {
 
 const SQL_CONSTRAINT_PREFIX = /^(?:primary|foreign|unique|constraint|check|index|key|fulltext|spatial)\b/i;
 
-function findSqlDefinitions(file: SourceFile): Definition[] {
+/** file.content 의 [start, end) 구간에서 CREATE TABLE 문을 찾는다. 기본은 파일 전체 */
+function findSqlDefinitions(file: SourceFile, start = 0, end = file.content.length): Definition[] {
   const defs: Definition[] = [];
   const re = /create\s+table\s+(?:if\s+not\s+exists\s+)?[`"']?(\w+)[`"']?\s*\(/gi;
+  re.lastIndex = start;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(file.content)) !== null) {
+  while ((m = re.exec(file.content)) !== null && m.index < end) {
     const table = m[1]!;
     const open = m.index + m[0].length - 1;
     const close = findClosing(file.content, open, "(", ")");
-    if (close < 0) continue;
+    if (close < 0 || close >= end) continue;
     const body = file.content.slice(open + 1, close);
-    let offset = open + 1;
-    for (const rawLine of body.split("\n")) {
-      const lineIndex = lineOfOffset(file.content, offset);
-      offset += rawLine.length + 1;
-      const line = rawLine.replace(/--.*$/, "").trim().replace(/,$/, "").trim();
+    // 칼럼 정의는 괄호 밖의 쉼표로 나뉜다 (한 줄에 여러 칼럼이 있어도, 한 칼럼이 여러 줄이어도 된다).
+    // 주석(-- ...)은 길이를 유지한 채 공백으로 바꿔 위치(줄 번호)가 어긋나지 않게 한다.
+    for (const { text, start } of splitTopLevelCommas(body.replace(/--[^\n]*/g, (c) => " ".repeat(c.length)))) {
+      const line = text.trim();
       if (!line || SQL_CONSTRAINT_PREFIX.test(line)) continue;
+      const lineIndex = lineOfOffset(file.content, open + 1 + start + (text.length - text.trimStart().length));
       const tokens = line.split(/\s+/);
       const column = tokens[0]!.replace(/^[`"']|[`"']$/g, "");
       if (!column || /^[()]/.test(column)) continue;
       defs.push({ table, column, type: (tokens[1] ?? "").replace(/[(),]/g, ""), lineIndex });
     }
+  }
+  return defs;
+}
+
+/**
+ * Python 소스: 문자열 리터럴(""" ''' " ') 안에 든 CREATE TABLE 만 본다.
+ * 문자열 밖의 코드(주석, 식별자)는 테이블 정의가 아니다. 접두어(r, b, f 등)는 무시한다.
+ */
+function findPythonSqlDefinitions(file: SourceFile): Definition[] {
+  const defs: Definition[] = [];
+  const re = /[rRbBuUfF]{0,2}(?:("""|''')([\s\S]*?)\1|"((?:[^"\\\n]|\\.)*)"|'((?:[^'\\\n]|\\.)*)')/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(file.content)) !== null) {
+    const body = m[2] ?? m[3] ?? m[4] ?? "";
+    const quoteLength = m[1] !== undefined ? 3 : 1;
+    const end = m.index + m[0].length - quoteLength;
+    defs.push(...findSqlDefinitions(file, end - body.length, end));
   }
   return defs;
 }
@@ -204,7 +242,9 @@ export function extract(inputFiles: SourceFile[]): ColumnCandidate[] {
       ? findSqlDefinitions(file)
       : file.path.endsWith(".prisma")
         ? findPrismaDefinitions(file)
-        : [];
+        : file.path.endsWith(".py")
+          ? findPythonSqlDefinitions(file)
+          : [];
     for (const def of defs) {
       const pattern = wordPattern(def.column);
       const usages: Snippet[] = [];

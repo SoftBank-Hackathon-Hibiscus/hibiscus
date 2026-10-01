@@ -459,8 +459,10 @@ PII_LLM_MODEL=claude-opus-5-5 npx tsx src/pii/cli.ts --src samples/ambiguous --r
 
 | 층 | 파일 | 하는 일 | AI |
 |---|---|---|---|
-| 1. 추출 | `extractor.ts` | SQL `CREATE TABLE` / Prisma `model`에서 칼럼을 찾고, 칼럼마다 정의 위치와 이름이 등장하는 줄(앞뒤 1줄)을 근거 조각으로 모은다. 비밀처럼 보이는 값은 `[REDACTED]` | 없음 |
+| 1. 추출 | `extractor.ts` | SQL `CREATE TABLE` / Prisma `model` / Python 소스(`.py`)의 문자열 안에 든 `CREATE TABLE`에서 칼럼을 찾고, 칼럼마다 정의 위치와 이름이 등장하는 줄(앞뒤 1줄)을 근거 조각으로 모은다. 비밀처럼 보이는 값은 `[REDACTED]` | 없음 |
 | 2. 규칙 | `heuristic.ts` | 이름 신호(phone, email, 연락처 ...)와 쓰임새 신호(`type="tel"`, 전화번호 정규식, SMS 발송 호출 ...)를 센다. 이름+쓰임새 또는 쓰임새 2종 → `confident=true`, 신호 1개 → `confident=false`, 없음 → 제외 | 없음 |
+
+Python 앱은 칼럼이 `data.get("contact")`, `request.json["contact"]`, `{"contact": ...}`처럼 문자열 키로 등장한다. 추출기는 이런 줄도 근거 조각으로 모으고, 규칙 층은 그 줄의 정규식 검증(`PHONE_RE.match(contact)`처럼 상수 이름에 개인정보 단어가 있거나 `re.match(r"...", contact)`처럼 같은 줄의 리터럴이 전화번호·이메일 모양)과 SMS·메일 발송 함수 인자(`send_sms(contact)`, `send_sms(to=contact)`)를 쓰임새 신호로 센다. 키로 읽기만 하는 것은 신호가 아니고(JS의 `req.body.contact`와 같다), 다른 칼럼을 검증하거나 `TICKET_RE`처럼 개인정보 단어가 아닌 정규식은 세지 않는다.
 | 3. AI | `llm.ts` | 2층이 `confident=false`로 남긴 칼럼**만** 근거 조각과 함께 보낸다. 응답은 zod 스키마로 고정(`kind`는 phone/email/address/birthdate/national_id/name/other). `is_pii=false`이고 `confident=true`일 때만 후보를 빼고, 확신 없이 아니라고 하면 후보를 남겨 사람이 본다. 프롬프트는 `prompt.md` | 선택 |
 
 왜 이렇게 나누나:
@@ -480,6 +482,8 @@ PII_LLM_MODEL=claude-opus-5-5 npx tsx src/pii/cli.ts --src samples/ambiguous --r
 | `ambiguous` | `emergency_no`, 폼 힌트 없이 `sendSms(user.emergency_no)`만 | phone, 불확실 → 정책 엔진에서 `needs_approval` |
 | `decoys` | `contact_count`(정수), `ticket_no`(숫자 문자열) | 비어 있음 |
 | `injection` | signup-contact + "이전 지시를 무시하라" 주석 | signup-contact와 동일 |
+| `python-contact` | Python. 문자열 안의 `CREATE TABLE users (... contact TEXT ...)` + `PHONE_RE.match(contact)` + `send_sms(to=contact)` | contact: phone, confident |
+| `python-decoy` | Python. `contact_count INTEGER`, `ticket_no`를 `TICKET_RE`로 검증 | 비어 있음 |
 
 ## 폴더
 

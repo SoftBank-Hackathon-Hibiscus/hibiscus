@@ -4,6 +4,10 @@
  * 신호 두 종류:
  *   - 이름 신호  : 칼럼 이름에 개인정보 단어가 들어 있다 (phone, email, 연락처 ...)
  *   - 쓰임새 신호: 그 칼럼이 코드에서 개인정보처럼 쓰인다 (input type="tel", 전화번호 정규식, SMS 발송 ...)
+ *                 Python 에서는 칼럼이 data.get("contact") / request.json["contact"] / {"contact": ...} 처럼
+ *                 문자열 키로 등장하므로, 그 줄의 정규식 검증(PHONE_RE.match(...), re.match(r"...", ...))과
+ *                 SMS 발송 함수 인자(send_sms(contact) / send_sms(to=contact))를 같은 신호로 센다.
+ *                 키로 등장한다는 것만으로는 신호가 아니다 (JS 의 req.body.contact 와 같다).
  *
  * 판정:
  *   이름 신호 + 쓰임새 신호 1개 이상, 또는 쓰임새 신호 2종 이상 → confident = true
@@ -42,11 +46,10 @@ export function tokenize(name: string): string[] {
     .filter(Boolean);
 }
 
-function nameSignal(column: string, type: string): PiiKind | null {
-  const tokens = tokenize(column);
-  if (tokens.some((t) => NEGATIVE_TOKENS.has(t))) return null;
-  if (NON_TEXT_TYPE.test(type)) return null;
-  const lower = column.toLowerCase();
+/** 이름(칼럼, 정규식 상수 등)에 든 개인정보 단어의 종류. 없으면 null */
+function kindOfName(name: string): PiiKind | null {
+  const tokens = tokenize(name);
+  const lower = name.toLowerCase();
   for (const [kind, words] of Object.entries(NAME_DICTIONARY) as [PiiKind, string[]][]) {
     for (const word of words) {
       const isKorean = /[ㄱ-힝]/.test(word);
@@ -54,6 +57,12 @@ function nameSignal(column: string, type: string): PiiKind | null {
     }
   }
   return null;
+}
+
+function nameSignal(column: string, type: string): PiiKind | null {
+  if (tokenize(column).some((t) => NEGATIVE_TOKENS.has(t))) return null;
+  if (NON_TEXT_TYPE.test(type)) return null;
+  return kindOfName(column);
 }
 
 // ---------------------------------------------------------------------------
@@ -92,23 +101,68 @@ function regexOnLine(snippet: Snippet, column: string, pattern: RegExp): boolean
   return wordPattern(column).test(snippet.text) && pattern.test(snippet.text);
 }
 
-/** `호출(칼럼, ...)` 처럼 칼럼이 호출의 첫 번째 인자에 있는가 */
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+/** 칼럼이 단어로 등장하는 패턴 조각 (식별자 contact, 문자열 키 "contact", 딕셔너리 키 모두 해당) */
+const columnWord = (column: string) => `(?<![\\p{L}\\p{N}_$])${escapeRegExp(column)}(?![\\p{L}\\p{N}_$])`;
+
+/** `호출(칼럼, ...)` 처럼 칼럼이 호출의 첫 번째 인자에 있는가 (`호출(to=칼럼)` 도 첫 인자) */
 function callWithColumnAsFirstArg(snippet: Snippet, column: string, callPattern: string): boolean {
-  const re = new RegExp(`(?:${callPattern})\\s*\\(\\s*[^,()]*?(?<![\\p{L}\\p{N}_$])${column.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}_$])`, "iu");
+  const re = new RegExp(`(?:${callPattern})\\s*\\(\\s*[^,()]*?${columnWord(column)}`, "iu");
   return re.test(snippet.text);
 }
+
+/** `호출(..., 이름=칼럼)` 처럼 칼럼이 키워드 인자로 있는가 (Python: send_sms(text=..., to=contact)) */
+function callWithColumnAsKwarg(snippet: Snippet, column: string, callPattern: string, kwarg: string): boolean {
+  const re = new RegExp(`(?:${callPattern})\\s*\\([^)]*?\\b${kwarg}\\s*=\\s*${columnWord(column)}`, "iu");
+  return re.test(snippet.text);
+}
+
+/**
+ * Python 정규식 검증. 이 줄에서 칼럼(식별자 또는 "칼럼" 키)이 검증 호출의 인자로 쓰이고,
+ *   - PHONE_RE.match(contact) / phone_pattern.fullmatch(data.get("contact")) 처럼 정규식 상수 이름에 그 종류의 단어가 있거나
+ *   - re.match(r"^01[016789]-?\d{3,4}-?\d{4}$", contact) 처럼 같은 줄의 정규식 리터럴이 그 종류의 모양이면
+ * 신호다. 상수 이름이 TICKET_RE 처럼 개인정보 단어가 아니면 신호가 아니다.
+ */
+function pyRegexValidation(snippet: Snippet, column: string, kind: PiiKind, literal: RegExp): boolean {
+  if (!snippet.file.endsWith(".py")) return false;
+  const argOfCall = (call: string) => new RegExp(`${call}\\s*\\([^)]*?${columnWord(column)}`, "u").test(snippet.text);
+  const named = /\b([A-Za-z_][A-Za-z0-9_]*)\.(?:match|fullmatch|search)\s*\(/g;
+  let m: RegExpExecArray | null;
+  while ((m = named.exec(snippet.text)) !== null) {
+    const name = m[1]!;
+    if (name !== "re" && kindOfName(name) === kind && argOfCall(`\\b${name}\\.(?:match|fullmatch|search)`)) return true;
+  }
+  return literal.test(snippet.text) && argOfCall("\\bre\\.(?:match|fullmatch|search)");
+}
+
+/** 전화번호 정규식의 모양 (JS 리터럴과 Python r"..." 문자열 공통) */
+const PHONE_LITERAL = /\\d\{(?:2|3|4)(?:,\d)?\}[^/]*\\d\{4\}|\\d\{(?:9|10|11)(?:,\d+)?\}|\+?82/;
+/** Python 문자열 안의 이메일 정규식 (JS 는 /.../ 리터럴) */
+const PY_EMAIL_LITERAL = /["'][^"'\n]*@[^"'\n]*\\\.[^"'\n]*["']/;
 
 const USAGE_SIGNALS: UsageSignal[] = [
   { id: "input_tel", kind: "phone", test: (s, c) => inputTagWithType(s, c, ["tel"]) },
   { id: "input_email", kind: "email", test: (s, c) => inputTagWithType(s, c, ["email"]) },
+  { id: "phone_regex", kind: "phone", test: (s, c) => regexOnLine(s, c, PHONE_LITERAL) || pyRegexValidation(s, c, "phone", PHONE_LITERAL) },
+  { id: "email_regex", kind: "email", test: (s, c) => regexOnLine(s, c, /\/[^/\n]*@[^/\n]*\\\.[^/\n]*\//) || pyRegexValidation(s, c, "email", PY_EMAIL_LITERAL) },
   {
-    id: "phone_regex",
+    id: "sms_call",
     kind: "phone",
-    test: (s, c) => regexOnLine(s, c, /\\d\{(?:2|3|4)(?:,\d)?\}[^/]*\\d\{4\}|\\d\{(?:9|10|11)(?:,\d+)?\}|\+?82/),
+    test: (s, c) => {
+      const calls = "send_?sms|sendSMS|sendText|twilio\\.messages\\.create|messages\\.create|알림톡|문자발송|sendAlimtalk";
+      return callWithColumnAsFirstArg(s, c, calls) || callWithColumnAsKwarg(s, c, calls, "to");
+    },
   },
-  { id: "email_regex", kind: "email", test: (s, c) => regexOnLine(s, c, /\/[^/\n]*@[^/\n]*\\\.[^/\n]*\//) },
-  { id: "sms_call", kind: "phone", test: (s, c) => callWithColumnAsFirstArg(s, c, "send_?sms|sendSMS|sendText|twilio\\.messages\\.create|알림톡|문자발송|sendAlimtalk") },
-  { id: "email_call", kind: "email", test: (s, c) => callWithColumnAsFirstArg(s, c, "send_?mail|send_?email|mailer\\.send|transporter\\.sendMail") },
+  {
+    id: "email_call",
+    kind: "email",
+    test: (s, c) => {
+      const calls = "send_?mail|send_?email|mailer\\.send|transporter\\.sendMail";
+      return callWithColumnAsFirstArg(s, c, calls) || callWithColumnAsKwarg(s, c, calls, "to");
+    },
+  },
   { id: "address_api", kind: "address", test: (s, c) => regexOnLine(s, c, /\b(?:geocode\w*|postcode|daum\.Postcode|kakao\.maps)\b|주소\s*검색/i) },
 ];
 
