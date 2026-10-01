@@ -17,6 +17,8 @@ export interface Config {
   repoRoot: string;
   policyDir: string;
   signerDir: string;
+  /** 루트 contracts/ (Plan, SignResult 스키마) */
+  contractsDir: string;
   /** 테스트 stub 템플릿 폴더 */
   templatesDir: string;
   signerMode: SignerMode;
@@ -45,6 +47,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, backendRoot: st
     repoRoot,
     policyDir: resolve(repoRoot, "policy"),
     signerDir: resolve(repoRoot, "signer"),
+    contractsDir: resolve(repoRoot, "contracts"),
     templatesDir: resolve(backendRoot, "fixtures", "test-templates"),
     signerMode: pick(env.SIGNER_MODE, ["dry", "real"] as const, "SIGNER_MODE", "dry"),
     deployMode: pick(env.DEPLOY_MODE, ["off", "dry", "real"] as const, "DEPLOY_MODE", "off"),

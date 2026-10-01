@@ -194,6 +194,63 @@ describe("수동 실행 한 바퀴 (가짜 명령)", () => {
   });
 });
 
+describe("파트 경계 검증: 산출물이 지금 run 을 가리키는지", () => {
+  const OTHER_DIGEST = "sha256:" + "f".repeat(64);
+
+  it("plan.run_id 가 다르면 policy failed", async () => {
+    const h = makeHarness([gitHandler(), policyHandler("allow", { plan: { run_id: "someone-else" } }), signerHandler()]);
+    const { view } = await runOnce(h);
+    expect(view!.run.status).toBe("failed");
+    expect(stageOf(view!, "policy").status).toBe("failed");
+    expect(view!.run.error).toContain("plan.run_id=someone-else");
+    expect(view!.run.decision).toBeUndefined();
+    expect(h.runner.npmCalls("sign")).toHaveLength(0);
+  });
+
+  it("plan.digest 가 다르면 policy failed", async () => {
+    const h = makeHarness([gitHandler(), policyHandler("allow", { plan: { digest: OTHER_DIGEST } }), signerHandler()]);
+    const { view } = await runOnce(h);
+    expect(view!.run.status).toBe("failed");
+    expect(view!.run.error).toContain(`plan.digest=${OTHER_DIGEST}`);
+    expect(view!.run.error).toContain(`run.digest=${view!.run.digest}`);
+  });
+
+  it("plan.decision 이 종료 코드와 다르거나 계약 형식이 틀리면 policy failed", async () => {
+    const wrongDecision = makeHarness([gitHandler(), policyHandler("allow", { plan: { decision: "block" } }), signerHandler()]);
+    const a = await runOnce(wrongDecision);
+    expect(a.view!.run.status).toBe("failed");
+    expect(a.view!.run.error).toMatch(/decision/);
+
+    const badShape = makeHarness([gitHandler(), policyHandler("allow", { plan: { plan_hash: "not-a-hash" } }), signerHandler()]);
+    const b = await runOnce(badShape);
+    expect(b.view!.run.status).toBe("failed");
+    expect(b.view!.run.error).toContain("Plan.schema.json");
+  });
+
+  it("sign_result.digest 가 다르면 sign failed", async () => {
+    const h = makeHarness([gitHandler(), policyHandler("allow"), signerHandler({ signResult: { digest: OTHER_DIGEST } })]);
+    const { view } = await runOnce(h);
+    expect(view!.run.status).toBe("failed");
+    expect(stageOf(view!, "sign").status).toBe("failed");
+    expect(view!.run.error).toContain(`sign_result.digest=${OTHER_DIGEST}`);
+    expect(stageOf(view!, "deploy")).toBeUndefined();
+  });
+
+  it("sign_result.plan_hash 가 plan 과 다르면 sign failed", async () => {
+    const h = makeHarness([gitHandler(), policyHandler("allow"), signerHandler({ signResult: { plan_hash: "0".repeat(64) } })]);
+    const { view } = await runOnce(h);
+    expect(view!.run.status).toBe("failed");
+    expect(view!.run.error).toContain("sign_result.plan_hash=" + "0".repeat(64));
+  });
+
+  it("sign_result 가 계약 형식과 다르면 sign failed", async () => {
+    const h = makeHarness([gitHandler(), policyHandler("allow"), signerHandler({ signResult: { extra_field: 1 } })]);
+    const { view } = await runOnce(h);
+    expect(view!.run.status).toBe("failed");
+    expect(view!.run.error).toContain("SignResult.schema.json");
+  });
+});
+
 describe("source_revision 확정", () => {
   it("요청 source_revision ≠ HEAD → 400, run 없음", async () => {
     const h = makeHarness([gitHandler(), policyHandler("allow"), signerHandler()]);

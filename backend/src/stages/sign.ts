@@ -5,11 +5,14 @@
  *   block          → 오케스트레이터가 이 단계를 부르지 않는다
  * SIGNER_MODE=real 은 digest_source=registry 이고 source_revision_verified=true 일 때만 허용한다.
  * approve 와 sign 사이에 plan.json 을 다시 쓰지 않는다 (approval 은 plan 파일 해시에 묶임).
+ * 성공하면 sign_result.json 이 contracts/SignResult.schema.json 과 맞는지, 지금 run 과 plan 을 가리키는지 확인한다.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { npmCommand } from "../command-runner.js";
+import { contractViolation } from "../contracts.js";
 import type { DeploymentRun } from "../models.js";
+import { type PlanLike, readPlan } from "./policy.js";
 import { type StageContext, type StageOutcome, type StageRunner, tail } from "./types.js";
 
 export interface SignResult {
@@ -32,6 +35,15 @@ export function realSignBlockedReason(run: DeploymentRun): string | undefined {
   return undefined;
 }
 
+/** sign_result.json 이 지금 run·plan 과 다른 점. 비어 있으면 같은 실행·이미지·계획 */
+export function signResultMismatches(result: SignResult, run: DeploymentRun, plan: PlanLike): string[] {
+  const out: string[] = [];
+  if (result.run_id !== run.run_id) out.push(`sign_result.run_id=${result.run_id} 인데 run.run_id=${run.run_id}`);
+  if (result.digest !== run.digest) out.push(`sign_result.digest=${result.digest} 인데 run.digest=${run.digest}`);
+  if (result.plan_hash !== plan.plan_hash) out.push(`sign_result.plan_hash=${result.plan_hash} 인데 plan.plan_hash=${plan.plan_hash}`);
+  return out;
+}
+
 export class SignStage implements StageRunner {
   readonly name = "sign" as const;
 
@@ -44,7 +56,8 @@ export class SignStage implements StageRunner {
     if (run.decision === "needs_approval" && approval === undefined) {
       return { status: "failed", artifacts, error: "needs_approval 인데 승인 정보가 없음" };
     }
-    if (!existsSync(planPath)) return { status: "failed", artifacts, error: `plan.json 이 없음: ${planPath}` };
+    const read = readPlan(paths.policy);
+    if ("error" in read) return { status: "failed", artifacts, error: read.error };
 
     const dryRun = config.signerMode === "dry";
     if (!dryRun) {
@@ -86,6 +99,13 @@ export class SignStage implements StageRunner {
     } catch (e) {
       return { status: "failed", exit_code: 0, artifacts, error: `sign_result.json 을 읽지 못함: ${e instanceof Error ? e.message : String(e)}` };
     }
+
+    // 파트 경계 검증: 계약 형식 → 같은 실행·이미지·계획인지
+    const violation = contractViolation(join(config.contractsDir, "SignResult.schema.json"), signResult, "sign_result.json");
+    if (violation) return { status: "failed", exit_code: 0, artifacts, error: violation };
+    const mismatches = signResultMismatches(signResult, run, read.plan);
+    if (mismatches.length > 0) return { status: "failed", exit_code: 0, artifacts, error: `sign_result.json 이 지금 run·plan 과 다름: ${mismatches.join("; ")}` };
+
     return {
       status: "succeeded",
       exit_code: 0,

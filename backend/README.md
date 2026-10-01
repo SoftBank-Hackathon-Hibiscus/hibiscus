@@ -92,6 +92,17 @@ StageExecution 의 `status` 는 `pending | running | succeeded | failed | skippe
 
 verified=false 면 real 서명·real 배포는 거부된다.
 
+## 파트 경계 검증
+
+백엔드는 판단을 새로 하지 않는다. 대신 단계 산출물이 **지금 run 과 같은 실행·같은 이미지**를 가리키는지 확인하고, 아니면 그 단계를 failed 로 끝낸다 (`error` 에 어느 값이 어떻게 다른지 적는다).
+
+| 산출물 | 먼저 형식 검사 | 그다음 교차 검증 |
+|---|---|---|
+| `policy/plan.json` | 루트 `contracts/Plan.schema.json` | `run_id == run.run_id`, `digest == run.digest`, `source_revision`(있으면) `== run.source_revision`, `decision ==` CLI 종료 코드로 해석한 decision |
+| `sign/sign_result.json` | 루트 `contracts/SignResult.schema.json` | `run_id == run.run_id`, `digest == run.digest`, `plan_hash == plan.json 의 plan_hash` |
+
+스키마 파일을 읽지 못해도 실패로 본다. 계약 파일은 백엔드가 고치지 않는다 (`contracts/README.md` 의 절차).
+
 ## 모드 스위치
 
 | 변수 | 값 | 동작 |

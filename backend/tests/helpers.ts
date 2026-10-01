@@ -61,8 +61,11 @@ export function gitHandler(opts: { head?: string; dirty?: boolean } = {}): Handl
 const PLAN_HASH = "29aec1d7f9c41033e11039df831557032cf5dbc900be084f318b014bb0efc92e";
 const EXIT_OF: Record<Decision, number> = { allow: 0, needs_approval: 2, block: 3 };
 
-/** policy stage CLI 를 흉내 낸다: plan.json 과 decisions.jsonl 을 쓰고 종료 코드로 결정을 알린다 */
-export function policyHandler(result: Decision | { error: string }): Handler {
+/**
+ * policy stage CLI 를 흉내 낸다: plan.json 과 decisions.jsonl 을 쓰고 종료 코드로 결정을 알린다.
+ * plan 에 override 를 주면 그 값으로 덮어써 "다른 실행의 plan" 을 흉내 낼 수 있다.
+ */
+export function policyHandler(result: Decision | { error: string }, override: { plan?: Record<string, unknown> } = {}): Handler {
   return (spec) => {
     if (!/^npm(\.cmd)?$/.test(spec.command) || spec.args[1] !== "stage") return undefined;
     const echo = "> policy-engine@0.1.0 stage\n> tsx src/stage.ts ...\n\n";
@@ -83,6 +86,7 @@ export function policyHandler(result: Decision | { error: string }): Handler {
       requires: result === "needs_approval" ? [{ id: "human_review_pii", rule_id: "R3", allowed_targets: targets }] : [],
       rules: [],
       plan_hash: PLAN_HASH,
+      ...override.plan,
     };
     const planPath = join(outDir, "plan.json");
     writeJson(planPath, plan);
@@ -105,8 +109,8 @@ export function policyHandler(result: Decision | { error: string }): Handler {
   };
 }
 
-/** signer approve / sign 을 흉내 낸다 */
-export function signerHandler(): Handler {
+/** signer approve / sign 을 흉내 낸다. signResult 에 override 를 주면 sign_result.json 의 그 값을 덮어쓴다 */
+export function signerHandler(override: { signResult?: Record<string, unknown> } = {}): Handler {
   return (spec) => {
     if (!/^npm(\.cmd)?$/.test(spec.command)) return undefined;
     const script = spec.args[1];
@@ -138,7 +142,7 @@ export function signerHandler(): Handler {
       approver = (JSON.parse(readFileSync(approvalPath, "utf8")) as { approver: string }).approver;
     }
     const signatureRef = `${spec.args.includes("--dry-run") ? "dry-run" : "cosign"}:${repo}@${plan.digest}`;
-    writeJson(out, { ...base, targets: plan.targets, failover_allowed: plan.failover_allowed, approver, signature_ref: signatureRef, signed_at: new Date().toISOString() });
+    writeJson(out, { ...base, targets: plan.targets, failover_allowed: plan.failover_allowed, approver, signature_ref: signatureRef, signed_at: new Date().toISOString(), ...override.signResult });
     mkdirSync(dirname(log), { recursive: true });
     appendFileSync(log, JSON.stringify({ kind: "sign", time: new Date().toISOString(), ...base, result: "signed", approver, reason: null, signature_ref: signatureRef }) + "\n");
     return ok(`[signer] 서명함 run_id=${plan.run_id}\n`);
