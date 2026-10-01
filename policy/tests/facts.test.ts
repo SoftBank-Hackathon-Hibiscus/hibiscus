@@ -12,8 +12,19 @@ const base = JSON.parse(readFileSync(join(ROOT, "fixtures", "01-allow", "test_re
 const withFacts = (facts: unknown) => ({ ...base, facts });
 
 describe("test_result.facts: 정책이 읽는 키만 타입 고정", () => {
-  it("정의된 키는 db, migration, writes_local_file", () => {
-    expect([...KNOWN_FACTS_KEYS].sort()).toEqual(["db", "migration", "writes_local_file"]);
+  it("정의된 키는 conditions, db, migration, storage, writes_local_file", () => {
+    expect([...KNOWN_FACTS_KEYS].sort()).toEqual(["conditions", "db", "migration", "storage", "writes_local_file"]);
+  });
+
+  it("facts.conditions / facts.storage: 없는 값은 null 이 아니라 키 생략이어야 한다", () => {
+    const condition = { name: "replace", total: 20, matched: 19, failed: true, mismatches: [{ index: 16, request: "GET /uploads", related_fact: "/app/uploads", related_storage: "container_layer", related_kind: "local_upload" }] };
+    expect(TestResultSchema.safeParse(withFacts({ conditions: [condition] })).success).toBe(true);
+    expect(TestResultSchema.safeParse(withFacts({ conditions: [{ ...condition, mismatches: [{ index: 11, request: "GET /me" }] }] })).success).toBe(true);
+    // null 은 거부 (조건 DSL 의 exists 가 null 을 "있음" 으로 보기 때문에 생략만 허용)
+    expect(TestResultSchema.safeParse(withFacts({ conditions: [{ ...condition, mismatches: [{ index: 11, request: "GET /me", related_fact: null }] }] })).success).toBe(false);
+    expect(TestResultSchema.safeParse(withFacts({ conditions: [{ ...condition, failed: "yes" }] })).success).toBe(false);
+    expect(TestResultSchema.safeParse(withFacts({ storage: [{ kind: "sqlite", path: "/app/data/data.db", storage: "container_layer" }] })).success).toBe(true);
+    expect(TestResultSchema.safeParse(withFacts({ storage: [{ kind: "sqlite", path: "/app/data/data.db" }] })).success).toBe(false);
   });
 
   it('facts.db = "SQLite" (대문자) → 형식 오류', () => {
@@ -61,6 +72,10 @@ describe("정책이 읽는 경로 수집", () => {
     const refs = collectPolicyPaths(policy);
     const deploy = Object.fromEntries(refs.deploy.map((r) => [r.path, r]));
     expect(deploy["test.passed"]?.rules).toEqual(["R1"]);
+    expect(deploy["test.facts.conditions"]?.rules).toEqual(["R1", "R1b", "R1c"]);
+    expect(deploy["test.facts.conditions[].failed"]?.rules).toEqual(["R1", "R1b", "R1c"]);
+    expect(deploy["test.facts.conditions[].mismatches[].related_kind"]?.rules).toEqual(["R1c"]);
+    expect(deploy["test.facts.conditions[].matched"]?.uses).toEqual(["reason"]);
     expect(deploy["test.run_id"]?.rules).toEqual(["R2"]);
     expect(deploy["pii.run_id"]?.rules).toEqual(["R2"]);
     expect(deploy["pii.pii"]?.rules).toEqual(["R3", "R4"]);

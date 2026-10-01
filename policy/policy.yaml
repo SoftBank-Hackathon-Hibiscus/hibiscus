@@ -56,9 +56,31 @@ version: 1
 known_targets: [onprem, cloud_run]
 
 rules:
+  # 테스트 결과 규칙 (R1, R1b, R1c)
+  #   facts.conditions 가 있는 입력(parity 변환기 출력)에서는 passed 는 테스트 파트 원본의 종합값을 보존하는 필드이고,
+  #   판단은 조건별 사실을 읽는다. facts.conditions 가 없는 구형 입력에서만 R1 이 passed 를 fallback 으로 본다.
+  #   조건의 뜻 (parity/parity/conditions.py):
+  #     none    = 아무 조건 없이 재생한 기준선. 여기서 어긋나면 서비스 기능 자체의 실패
+  #     restart = 같은 컨테이너를 docker restart. 파일은 남고 프로세스 메모리만 사라진다.
+  #               여기서 어긋나면 저장 방식으로 설명되지 않는 상태·초기화 결함 (예: 시작할 때 데이터 삭제, 메모리 세션)
+  #     replace = 컨테이너를 지우고 같은 이미지로 새로 만든다. container_layer 파일이 사라진다 (클라우드 인스턴스 교체와 같음).
+  #               여기서만 어긋났고 관련 저장 사실이 sqlite / local_upload / local_file 이면 R5 / R6 가 위치 제한으로 다룬다.
+  #               관련 사실이 없거나 모르는 종류면 원인 미상이라 차단한다 (R1c).
+  #   "replace 에서만" 은 none 과 restart 가 모두 통과했다는 뜻이다 (조건 단위. 요청 번호 단위 비교는 v2).
   - id: R1
-    description: 테스트가 실패한 이미지는 배포하지 않는다
-    if: { path: test.passed, eq: false }
+    description: >-
+      테스트가 실패한 이미지는 배포하지 않는다. facts.conditions 가 있으면 기준 조건 none 의 불일치로,
+      없으면(구형 입력) passed 로 판단한다
+    if:
+      any:
+        - all:
+            - { path: test.facts.conditions, exists: false }
+            - { path: test.passed, eq: false }
+        - some: test.facts.conditions
+          where:
+            all:
+              - { path: name, eq: none }
+              - { path: failed, eq: true }
     then:
       decision: block
       requires:
@@ -67,8 +89,60 @@ rules:
             ko: "재생 불일치 요청을 고친 뒤 다시 테스트"
             ja: "再生結果が一致しないリクエストを修正してから再テスト"
     reason:
-      ko: "테스트 실패 ({test.match.matched}/{test.match.total} 일치)"
-      ja: "テスト失敗（{test.match.matched}/{test.match.total}一致）"
+      ko: "테스트 실패 ({$.test.match.matched}/{$.test.match.total} 일치)"
+      ja: "テスト失敗（{$.test.match.matched}/{$.test.match.total}一致）"
+
+  - id: R1b
+    description: >-
+      restart 는 컨테이너 파일을 지우지 않으므로, 재시작 뒤 어긋난 요청은 저장 방식으로 설명되지 않는
+      상태·초기화 결함이다 (예: 시작할 때 데이터 삭제, 메모리에만 두는 세션). 차단
+    if:
+      some: test.facts.conditions
+      where:
+        all:
+          - { path: name, eq: restart }
+          - { path: failed, eq: true }
+    then:
+      decision: block
+      requires:
+        - id: fix_restart_failure
+          hint:
+            ko: "재시작 후 상태·초기화 동작을 수정 (예: 시작할 때 데이터 삭제, 메모리에만 두는 세션)"
+            ja: "再起動後の状態・初期化動作を修正（例：起動時のデータ削除、メモリのみのセッション）"
+    reason:
+      ko: "재시작 후 불일치 ({matched}/{total} 일치)"
+      ja: "再起動後に不一致（{matched}/{total}一致）"
+
+  - id: R1c
+    description: >-
+      none 과 restart 는 통과했는데 replace 에서 어긋난 요청 중 관련 저장 사실이 없거나 종류를 모르는 것이 있으면
+      원인 미상이라 차단한다. sqlite / local_upload / local_file 로 설명되는 불일치는 여기서 차단하지 않고
+      R5(managed_db) / R6(object_storage) 가 배포 위치 제한으로 다룬다
+    if:
+      all:
+        - not:
+            some: test.facts.conditions
+            where:
+              all:
+                - { path: name, ne: replace }
+                - { path: failed, eq: true }
+        - some: test.facts.conditions
+          where:
+            all:
+              - { path: name, eq: replace }
+              - some: mismatches
+                where:
+                  not: { path: related_kind, in: [sqlite, local_upload, local_file] }
+    then:
+      decision: block
+      requires:
+        - id: investigate_replace_failure
+          hint:
+            ko: "컨테이너 교체 뒤에만 어긋난 요청의 원인을 조사 (관련 저장 사실이 없거나 알 수 없는 종류)"
+            ja: "コンテナ入れ替え後にのみ不一致となったリクエストの原因を調査（関連する保存事実がない、または不明な種類）"
+    reason:
+      ko: "교체 후 불일치 중 저장 방식으로 설명되지 않는 요청 있음 ({matched}/{total} 일치)"
+      ja: "入れ替え後の不一致に保存方式で説明できないリクエストあり（{matched}/{total}一致）"
 
   - id: R2
     description: 테스트 결과와 개인정보 후보가 서로 다른 실행(run_id)이면 입력 불일치로 차단. 입력이 섞였으면 뒤 규칙의 판단이 의미 없으므로 즉시 멈춘다
@@ -112,7 +186,9 @@ rules:
       ja: "個人情報（{column}、{kind}）を検出：{evidence}"
 
   - id: R5
-    description: SQLite 는 로컬 파일이라 클라우드에서 인스턴스가 교체되면 데이터가 사라진다. 관리형 DB 로 바꾸기 전까지 온프레만
+    description: >-
+      SQLite 는 로컬 파일이라 클라우드에서 인스턴스가 교체되면 데이터가 사라진다. 관리형 DB 로 바꾸기 전까지 온프레만.
+      parity 변환기는 facts[] 에 kind=sqlite 가 있을 때만 db=sqlite 를 넣고, 없으면 db 를 생략한다 (none 으로 쓰지 않음)
     if: { path: test.facts.db, eq: sqlite }
     then:
       targets: [onprem]
@@ -128,7 +204,8 @@ rules:
   - id: R6
     description: >-
       로컬 폴더에 파일을 쓰면 클라우드에서는 인스턴스 교체·스케일아웃 시 파일이 사라지거나 갈라진다.
-      /tmp 와 로그 파일은 무시. DB 파일(.db/.sqlite/.sqlite3)은 R5(managed_db)가 담당하므로 여기서는 제외
+      /tmp 와 로그 파일은 무시. DB 파일(.db/.sqlite/.sqlite3)은 R5(managed_db)가 담당하므로 여기서는 제외.
+      parity 변환기는 facts[] 의 local_upload / local_file 경로만 넣고 sqlite 경로는 넣지 않는다
     if:
       some: test.facts.writes_local_file
       where:

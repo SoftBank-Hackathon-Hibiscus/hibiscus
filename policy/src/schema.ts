@@ -70,18 +70,63 @@ export const MigrationReportSchema = z
   .describe("파괴적 DB 마이그레이션 판정. 실행기(src/stage.ts)가 facts.migration 이 없으면 채운다");
 export type MigrationReport = z.infer<typeof MigrationReportSchema>;
 
+// ---------------------------------------------------------------------------
+// 조건별 재생 결과 (facts.conditions) 와 저장 사실 (facts.storage).
+// 테스트 파트(parity)의 원본을 변환기(src/adapters/parity.ts)가 관찰된 사실 그대로 옮긴 것이다.
+// 판단(어느 조건의 불일치가 앱 결함이고 어느 것이 저장 방식의 환경 제약인지)은 policy.yaml 의 규칙이 한다.
+// 없는 값은 null 대신 키를 생략한다: 조건 DSL 의 exists 는 null 도 "있음" 으로 보기 때문이다.
+// ---------------------------------------------------------------------------
+export const ConditionMismatchSchema = z
+  .looseObject({
+    index: z.number().int().positive().describe("기록 파일의 요청 번호 (1부터)"),
+    request: z.string().min(1).describe('요청 한 줄 (예: "GET /posts")'),
+    related_fact: z.string().min(1).optional().describe("관련 있어 보이는 저장 사실의 path (테스트 파트의 힌트. 원인 증명이 아님). 없으면 키를 생략한다"),
+    related_storage: z.string().min(1).optional().describe("related_fact 가 가리키는 사실의 storage (예: container_layer). related_fact 가 없으면 생략"),
+    related_kind: z.string().min(1).optional().describe("related_fact 가 가리키는 사실의 kind (sqlite, local_upload, local_file). R1c 가 읽는다. 없으면 생략"),
+  })
+  .describe("한 조건에서 기록과 어긋난 요청 하나");
+export type ConditionMismatch = z.infer<typeof ConditionMismatchSchema>;
+
+export const ConditionFactSchema = z
+  .looseObject({
+    name: z.string().min(1).describe("조건 이름. none(기준선) / restart(재시작) / replace(컨테이너 교체)"),
+    total: z.number().int().nonnegative().describe("이 조건에서 재생한 요청 수"),
+    matched: z.number().int().nonnegative().describe("응답이 일치한 요청 수"),
+    failed: z.boolean().describe("이 조건에서 어긋난 요청이 하나라도 있는지 (matched < total). R1 / R1b / R1c 가 읽는다"),
+    mismatches: z.array(ConditionMismatchSchema).describe("어긋난 요청 목록. 없으면 빈 배열"),
+  })
+  .describe("조건 하나의 재생 결과");
+export type ConditionFact = z.infer<typeof ConditionFactSchema>;
+
+export const StorageFactSchema = z
+  .looseObject({
+    kind: z.string().min(1).describe("sqlite(파일 헤더로 판별) / local_upload(업로드 폴더) / local_file(그 밖의 파일)"),
+    path: z.string().min(1).describe("컨테이너 안의 경로"),
+    storage: z.string().min(1).describe("저장 위치. container_layer = 재시작으로는 남지만 컨테이너를 새로 만들면 사라진다"),
+  })
+  .describe("컨테이너 안에 남은 상태 하나 (테스트 파트의 facts[] 원본에서 kind, path, storage 만)");
+export type StorageFact = z.infer<typeof StorageFactSchema>;
+
 /**
  * 테스트 파트가 관찰한 사실 중 "정책이 읽는 키" 만 타입을 정한다.
  * 여기 없는 키는 자유롭게 넣을 수 있고 그대로 보존된다 (정책 엔진은 읽지 않는다).
  * 정의된 키에 허용되지 않은 값(예: "SQLite", 숫자)이 오면 형식 오류다.
+ *
+ * conditions 가 있는 입력에서는 passed 는 테스트 파트 원본의 종합값을 보존하는 필드이고,
+ * 정책 판단(R1, R1b, R1c)은 조건별 사실을 읽는다. conditions 가 없는 구형 입력에서만 R1 이 passed 를 본다.
  */
 export const FactsSchema = z
   .looseObject({
-    db: z.enum(["sqlite", "postgres", "mysql", "none"]).optional().describe("앱이 쓰는 DB. 소문자만. R5 가 읽는다"),
+    db: z.enum(["sqlite", "postgres", "mysql", "none"]).optional().describe("앱이 쓰는 DB. 소문자만. R5 가 읽는다. 관찰하지 못했으면 키를 생략한다 (none 은 'DB 없음' 을 확인했을 때만)"),
     writes_local_file: z.array(z.string()).optional().describe("앱이 쓰는 로컬 파일 경로 목록. R6 가 읽는다"),
     migration: MigrationReportSchema.optional(),
+    conditions: z
+      .array(ConditionFactSchema)
+      .optional()
+      .describe("조건별 재생 결과 (none / restart / replace). 있으면 R1 / R1b / R1c 가 이것으로 판단하고 passed 는 원본 종합값 보존용이다. 없으면 R1 이 passed 를 본다"),
+    storage: z.array(StorageFactSchema).optional().describe("컨테이너 안에 남은 상태 목록 (테스트 파트 facts[] 원본의 kind, path, storage). 정책 판단에는 conditions[].mismatches[].related_kind 를 쓰고, 이 목록은 보존·설명용"),
   })
-  .describe("테스트 중 관찰한 사실. 정의된 키(db, writes_local_file, migration)는 타입이 고정되고, 그 밖의 키는 자유");
+  .describe("테스트 중 관찰한 사실. 정의된 키(db, writes_local_file, migration, conditions, storage)는 타입이 고정되고, 그 밖의 키는 자유");
 export type Facts = z.infer<typeof FactsSchema>;
 /** 정책 규칙이 참조해도 되는 facts 키 */
 export const KNOWN_FACTS_KEYS: readonly string[] = Object.keys(FactsSchema.shape);
@@ -92,13 +137,13 @@ export const TestResultSchema = z
     app: z.string().min(1).describe("앱 이름"),
     digest: DigestSchema,
     source_revision: SourceRevisionInputSchema,
-    passed: z.boolean().describe("재생 테스트 통과 여부. false 면 정책 엔진이 차단한다"),
+    passed: z.boolean().describe("재생 테스트 통과 여부 (테스트 파트 원본의 종합값). facts.conditions 가 없으면 R1 이 이 값으로 차단하고, 있으면 조건별 사실로 판단한다"),
     match: z
       .object({
         total: z.number().int().nonnegative().describe("재생한 요청 수"),
         matched: z.number().int().nonnegative().describe("응답이 일치한 요청 수"),
       })
-      .describe("재생 결과 요약"),
+      .describe("재생 결과 요약. facts.conditions 가 있으면 기준 조건 none 의 결과 (조건별 수치는 facts.conditions 에)"),
     failures: z.array(z.unknown()).default([]).describe("실패한 요청 목록. 형식은 테스트 파트가 정한다 (정책 엔진은 내용을 보지 않음)"),
     facts: FactsSchema.default({}),
   })
