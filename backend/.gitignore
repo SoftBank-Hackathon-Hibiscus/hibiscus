@@ -1,0 +1,2 @@
+# backend 전용 (루트 .gitignore 에 없는 것만)
+.work/

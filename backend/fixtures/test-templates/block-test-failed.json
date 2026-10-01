@@ -1,0 +1,13 @@
+{
+  "run_id": "",
+  "app": "",
+  "digest": "",
+  "passed": false,
+  "match": { "total": 20, "matched": 17 },
+  "failures": [
+    { "request": "GET /posts", "expected_status": 200, "actual_status": 500, "note": "restart 후 sqlite 파일 유실" },
+    { "request": "POST /posts", "expected_status": 201, "actual_status": 500 },
+    { "request": "DELETE /posts/1", "expected_status": 204, "actual_status": 404 }
+  ],
+  "facts": { "writes_local_file": ["/app/data/data.db"], "db": "sqlite" }
+}
