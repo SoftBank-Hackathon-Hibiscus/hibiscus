@@ -1,0 +1,4 @@
+# contracts/ 아래 텍스트 파일은 항상 LF 로 저장·체크아웃한다.
+# 각 파트가 생성한 스키마를 바이트 그대로 복사해 두므로, core.autocrlf=true 인 Windows 체크아웃에서
+# 줄바꿈만 달라져 원본과 다르게 보이는 일을 막는다.
+* text=auto eol=lf
