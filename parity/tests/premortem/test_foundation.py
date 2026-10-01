@@ -19,7 +19,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 class CliTest(unittest.TestCase):
     def run_cli(self, *args):
         return subprocess.run([sys.executable, "-m", "premortem", *args], cwd=REPO_ROOT,
-                              capture_output=True, text=True, timeout=60)
+                              capture_output=True, text=True, encoding="utf-8", timeout=60)
 
     def test_help_lists_commands(self):
         result = self.run_cli("--help")
@@ -36,7 +36,7 @@ class CliTest(unittest.TestCase):
     def test_doctor_never_prints_key_value(self):
         env = dict(os.environ, ANTHROPIC_API_KEY="test-only-secret-value")
         result = subprocess.run([sys.executable, "-m", "premortem", "doctor", "--json"], cwd=REPO_ROOT,
-                                capture_output=True, text=True, timeout=60, env=env)
+                                capture_output=True, text=True, encoding="utf-8", timeout=60, env=env)
         self.assertNotIn("test-only-secret-value", result.stdout + result.stderr)
         self.assertEqual(json.loads(result.stdout)["checks"]["ai_credentials"]["status"], "available")
 

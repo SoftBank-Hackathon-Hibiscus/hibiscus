@@ -1,0 +1,72 @@
+{
+  "run_id": "r-002",
+  "app": "todo",
+  "digest": "sha256:b2c3d4e5f60718293a4b5c6d7e8f9001122334455667788990aabbccddeeff00",
+  "decision": "block",
+  "targets": [],
+  "failover_allowed": false,
+  "requires": [
+    {
+      "id": "fix_tests",
+      "hint": "재생 불일치 요청을 고친 뒤 다시 테스트",
+      "hint_i18n": {
+        "ja": "再生結果が一致しないリクエストを修正してから再テスト"
+      },
+      "rule_id": "R1",
+      "allowed_targets": [
+        "onprem"
+      ]
+    },
+    {
+      "id": "managed_db",
+      "hint": "SQLite를 PostgreSQL로 전환",
+      "hint_i18n": {
+        "ja": "SQLiteをPostgreSQLへ移行"
+      },
+      "rule_id": "R5",
+      "allowed_targets": [
+        "onprem",
+        "cloud_run"
+      ]
+    }
+  ],
+  "rules": [
+    {
+      "id": "R1",
+      "result": "matched",
+      "reason": "테스트 실패 (17/20 일치)",
+      "reason_i18n": {
+        "ja": "テスト失敗（17/20一致）"
+      }
+    },
+    {
+      "id": "R2",
+      "result": "not_matched"
+    },
+    {
+      "id": "R3",
+      "result": "not_matched"
+    },
+    {
+      "id": "R4",
+      "result": "not_matched"
+    },
+    {
+      "id": "R5",
+      "result": "matched_after_block",
+      "reason": "SQLite 사용 (sqlite): 관리형 DB로 전환하기 전까지 클라우드 배포 제외",
+      "reason_i18n": {
+        "ja": "SQLiteを使用（sqlite）：マネージドDBへ移行するまでクラウドデプロイを除外"
+      }
+    },
+    {
+      "id": "R6",
+      "result": "not_matched"
+    },
+    {
+      "id": "R7",
+      "result": "not_matched"
+    }
+  ],
+  "plan_hash": "f7ca5eb254fe5797a0c7a822065a1789ac7a02e9ae663c8dd05cefe8d38ada36"
+}

@@ -17,6 +17,7 @@ parity 안에서 배포 환경 조건을 재현하고, AI 수정안을 같은 �
 ## 실행
 
 `parity/`에서 실행합니다. Docker가 필요한 건 demo와 `--docker` 시험뿐입니다.
+AI 수정 기능은 jsonschema가 있어야 AI 출력을 받아들입니다: `pip install -r requirements.txt`
 
 ```sh
 python -m premortem doctor
