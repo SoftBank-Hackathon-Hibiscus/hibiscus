@@ -63,6 +63,7 @@ flowchart LR
 | `test.facts.conditions[].failed` | R1, R1b, R1c | 조건 |
 | `test.facts.conditions[].matched` | R1b, R1c | reason |
 | `test.facts.conditions[].mismatches` | R1c | 조건 |
+| `test.facts.conditions[].mismatches[].related_fact` | R1c | 조건 |
 | `test.facts.conditions[].mismatches[].related_kind` | R1c | 조건 |
 | `test.facts.conditions[].name` | R1, R1b, R1c | 조건 |
 | `test.facts.conditions[].total` | R1b, R1c | reason |
@@ -152,9 +153,9 @@ flowchart LR
 | `facts.conditions[].mismatches[].index` | integer | 필수 | 기록 파일의 요청 번호 (1부터) |
 | `facts.conditions[].mismatches[].request` | string | 필수 | 요청 한 줄 (예: "GET /posts") |
 | `facts.conditions[].mismatches[].related_fact` | string | 선택 | 관련 있어 보이는 저장 사실의 path (테스트 파트의 힌트. 원인 증명이 아님). 없으면 키를 생략한다 |
-| `facts.conditions[].mismatches[].related_storage` | string | 선택 | related_fact 가 가리키는 사실의 storage (예: container_layer). related_fact 가 없으면 생략 |
-| `facts.conditions[].mismatches[].related_kind` | string | 선택 | related_fact 가 가리키는 사실의 kind (sqlite, local_upload, local_file). R1c 가 읽는다. 없으면 생략 |
-| `facts.storage` | object[] | 선택 | 컨테이너 안에 남은 상태 목록 (테스트 파트 facts[] 원본의 kind, path, storage). 정책 판단에는 conditions[].mismatches[].related_kind 를 쓰고, 이 목록은 보존·설명용 |
+| `facts.conditions[].mismatches[].related_storage` | string | 선택 | related_fact 가 가리키는 사실의 storage (예: container_layer). related_fact 가 없으면 생략. 있으면 facts.storage 에 같은 path·kind·storage 항목이 있어야 한다 |
+| `facts.conditions[].mismatches[].related_kind` | string | 선택 | related_fact 가 가리키는 사실의 kind (sqlite, local_upload, local_file). R1c 가 읽는다. 없으면 생략. 있으면 facts.storage 에 같은 path·kind·storage 항목이 있어야 하고, sqlite 면 facts.db 가 sqlite, local_upload / local_file 이면 facts.writes_local_file 에 그 path 가 있어야 한다 |
+| `facts.storage` | object[] | 선택 | 컨테이너 안에 남은 상태 목록 (테스트 파트 facts[] 원본의 kind, path, storage). 정책 판단에는 conditions[].mismatches[].related_kind 를 쓰고, 이 목록은 related_* 의 근거(같은 path·kind·storage 항목이 있어야 한다)와 설명용 |
 | `facts.storage[].kind` | string | 필수 | sqlite(파일 헤더로 판별) / local_upload(업로드 폴더) / local_file(그 밖의 파일) |
 | `facts.storage[].path` | string | 필수 | 컨테이너 안의 경로 |
 | `facts.storage[].storage` | string | 필수 | 저장 위치. container_layer = 재시작으로는 남지만 컨테이너를 새로 만들면 사라진다 |
@@ -307,7 +308,7 @@ flowchart LR
       "result": "not_matched"
     }
   ],
-  "plan_hash": "5e775198215216907297f8350ca33785a7c2823bad1f205978145f3332ce141b"
+  "plan_hash": "e85e5fd18c6609aceb5ea9b1a5b504a6cbf35f6ac0567e5df7b1e76e65e2ab52"
 }
 ```
 
@@ -504,6 +505,6 @@ flowchart LR
   "rule_ids": [
     "R4"
   ],
-  "plan_hash": "5e775198215216907297f8350ca33785a7c2823bad1f205978145f3332ce141b"
+  "plan_hash": "e85e5fd18c6609aceb5ea9b1a5b504a6cbf35f6ac0567e5df7b1e76e65e2ab52"
 }
 ```

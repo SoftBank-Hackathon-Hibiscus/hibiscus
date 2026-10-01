@@ -18,7 +18,7 @@
  * 변환을 거부하는 경우 (ParityAdapterError): 재생이 중단된 조건이 있음(replay[].error), 진단 status 가 completed 가 아님,
  * 진단의 registry_digest 가 metadata.digest 와 다름, 조건이 none / restart / replace 정확히 한 번씩이 아님
  * (빠짐·중복·모르는 조건. parity CLI 기본값은 PR #10 부터 none,restart,replace 지만, --conditions 로 줄여 돌린 결과가 들어오는 것을 막는다),
- * 조건·불일치 수가 서로 맞지 않음.
+ * 조건·불일치 수가 서로 맞지 않음, 같은 조건 안에 같은 요청 번호가 두 번 있음.
  * 경고만 하는 경우: metadata.digest 가 진단의 local_image_id 와 같음 (레지스트리 위치가 정해지면 오류로 바꾼다).
  */
 import { z } from "zod";
@@ -28,6 +28,8 @@ import {
   type ConditionMismatch,
   DigestSchema,
   type Facts,
+  LOCAL_FILE_KINDS,
+  SQLITE_KIND,
   SourceRevisionSchema,
   type StorageFact,
   type TestResult,
@@ -41,10 +43,8 @@ export const PARITY_DIAGNOSTICS_FORMAT = "parity-execution-v1";
 export const BASELINE_CONDITION = "none";
 /** 정책 판단(R1 / R1b / R1c)에 필요한 조건 (schema.ts 의 CONDITION_NAMES). 이 세 개가 정확히 한 번씩 있어야 변환한다 */
 export const REQUIRED_CONDITIONS: readonly string[] = CONDITION_NAMES;
-/** facts.db = "sqlite" 가 되는 사실 종류 */
-export const SQLITE_KIND = "sqlite";
-/** facts.writes_local_file 에 들어가는 사실 종류 */
-export const LOCAL_FILE_KINDS: readonly string[] = ["local_upload", "local_file"];
+/** facts.db = "sqlite" 가 되는 사실 종류와 facts.writes_local_file 에 들어가는 사실 종류 (schema.ts 와 공유. 스키마가 같은 기준으로 related_* 를 검증한다) */
+export { LOCAL_FILE_KINDS, SQLITE_KIND };
 
 // ---------------------------------------------------------------------------
 // 입력 형식 (parity/parity/handoff.py 의 검증 규칙과 같은 범위. 모르는 키는 허용)
@@ -196,8 +196,11 @@ export function adaptParityHandoff(handoff: ParityHandoff, diagnostics?: ParityD
     const own = result.mismatches.filter((m) => m.condition === entry.condition);
     const unmatched = entry.total - entry.matched;
     if (own.length !== unmatched) fail(`${entry.condition}: 불일치 ${own.length}건인데 total-matched 는 ${unmatched} 입니다. 원본이 손상됐을 수 있습니다`);
+    const seenIndex = new Set<number>();
     for (const m of own) {
       if (m.index > entry.total) fail(`${entry.condition}: 요청 번호 ${m.index} 가 total(${entry.total})을 넘습니다`);
+      if (seenIndex.has(m.index)) fail(`${entry.condition}: 요청 번호 ${m.index} 가 두 번 있습니다. 원본이 손상됐을 수 있습니다`);
+      seenIndex.add(m.index);
     }
   }
 

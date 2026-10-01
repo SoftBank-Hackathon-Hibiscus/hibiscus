@@ -17,12 +17,17 @@ describe("test_result.facts: 정책이 읽는 키만 타입 고정", () => {
   });
 
   const passAll = (name: string) => ({ name, total: 20, matched: 20, failed: false, mismatches: [] });
-  const replace16 = { name: "replace", total: 20, matched: 19, failed: true, mismatches: [{ index: 16, request: "GET /uploads", related_fact: "/app/uploads", related_storage: "container_layer", related_kind: "local_upload" }] };
+  const uploads = { index: 16, request: "GET /uploads", related_fact: "/app/uploads", related_storage: "container_layer", related_kind: "local_upload" };
+  const posts = { index: 13, request: "GET /posts", related_fact: "/app/data/data.db", related_storage: "container_layer", related_kind: "sqlite" };
+  const replace16 = { name: "replace", total: 20, matched: 19, failed: true, mismatches: [uploads] };
   /** none, restart 통과 + replace 는 주어진 값 */
   const trio = (replace: unknown = replace16) => [passAll("none"), passAll("restart"), replace];
+  /** replace16 의 related_* 를 뒷받침하는 저장 사실 (R6 가 읽는 writes_local_file 포함) */
+  const uploadsEvidence = { storage: [{ kind: "local_upload", path: "/app/uploads", storage: "container_layer" }], writes_local_file: ["/app/uploads"] };
+  const sqliteEvidence = { storage: [{ kind: "sqlite", path: "/app/data/data.db", storage: "container_layer" }], db: "sqlite" };
 
   it("facts.conditions / facts.storage: 없는 값은 null 이 아니라 키 생략이어야 한다", () => {
-    expect(TestResultSchema.safeParse(withFacts({ conditions: trio() })).success).toBe(true);
+    expect(TestResultSchema.safeParse(withFacts({ ...uploadsEvidence, conditions: trio() })).success).toBe(true);
     expect(TestResultSchema.safeParse(withFacts({ conditions: trio({ ...replace16, mismatches: [{ index: 11, request: "GET /me" }] }) })).success).toBe(true);
     // null 은 거부 (조건 DSL 의 exists 가 null 을 "있음" 으로 보기 때문에 생략만 허용)
     expect(TestResultSchema.safeParse(withFacts({ conditions: trio({ ...replace16, mismatches: [{ index: 11, request: "GET /me", related_fact: null }] }) })).success).toBe(false);
@@ -38,7 +43,7 @@ describe("test_result.facts: 정책이 읽는 키만 타입 고정", () => {
     };
 
     it("정상 세 조건 입력은 통과한다", () => {
-      expect(TestResultSchema.safeParse(withFacts({ conditions: trio() })).success).toBe(true);
+      expect(TestResultSchema.safeParse(withFacts({ ...uploadsEvidence, conditions: trio() })).success).toBe(true);
       expect(TestResultSchema.safeParse(withFacts({ conditions: [passAll("replace"), passAll("none"), passAll("restart")] })).success).toBe(true); // 순서는 자유
     });
 
@@ -64,6 +69,69 @@ describe("test_result.facts: 정책이 읽는 키만 타입 고정", () => {
       expect(issues({ conditions: trio({ ...replace16, failed: false }) }).join("\n")).toMatch(/facts\.conditions\.2\.failed/);
       expect(issues({ conditions: trio({ ...passAll("replace"), failed: true }) }).join("\n")).toMatch(/facts\.conditions\.2\.failed/);
       expect(issues({ conditions: trio({ ...passAll("replace"), mismatches: [{ index: 1, request: "GET /" }] }) }).join("\n")).toMatch(/facts\.conditions\.2\.mismatches/);
+    });
+
+    it("같은 조건 안에서 mismatches[].index 가 중복되면 거부, 다른 조건끼리 같은 index 는 허용", () => {
+      const me = (index: number) => ({ index, request: "GET /me" });
+      // replace 안에서 11 이 두 번 (수는 total - matched 와 맞아서 기존 검사로는 잡히지 않는다)
+      const dup = { name: "replace", total: 20, matched: 18, failed: true, mismatches: [me(11), me(11)] };
+      expect(issues({ conditions: trio(dup) }).join("\n")).toMatch(/facts\.conditions\.2\.mismatches\.1\.index: 같은 조건 안에 요청 번호 11 가 두 번/);
+      // 같은 기록을 조건마다 재생하므로 restart 와 replace 가 같은 11 번에서 어긋나는 것은 정상이다
+      const restart11 = { name: "restart", total: 20, matched: 19, failed: true, mismatches: [me(11)] };
+      const replace11 = { name: "replace", total: 20, matched: 19, failed: true, mismatches: [me(11)] };
+      expect(TestResultSchema.safeParse(withFacts({ conditions: [passAll("none"), restart11, replace11] })).success).toBe(true);
+      // none 안의 중복도 독립적으로 잡는다. 기존 "불일치 수 == total - matched" 검사는 그대로다
+      const noneDup = { name: "none", total: 20, matched: 18, failed: true, mismatches: [me(3), me(3)] };
+      expect(issues({ conditions: [noneDup, passAll("restart"), passAll("replace")] }).join("\n")).toMatch(/facts\.conditions\.0\.mismatches\.1\.index/);
+      expect(issues({ conditions: trio({ ...dup, mismatches: [me(11)] }) }).join("\n")).toMatch(/mismatches 는 total - matched \(2\)개여야 하는데 1개/);
+    });
+
+    describe("mismatches[].related_* 는 facts.storage 와 facts.db / facts.writes_local_file 로 뒷받침돼야 한다 (R1c 가 맡긴 것을 R5 / R6 가 읽을 수 있게)", () => {
+      const pii = PiiReportSchema.parse({ run_id: base.run_id, pii: [] });
+
+      it("related_kind=local_upload 인데 storage 와 writes_local_file 근거가 없으면 거부 (근거 없는 related_kind 로 R1c 와 R6 를 모두 피하는 입력)", () => {
+        const out = issues({ conditions: trio() });
+        expect(out.join("\n")).toMatch(/facts\.conditions\.2\.mismatches\.0\.related_fact: facts\.storage 에 path=\/app\/uploads, kind=local_upload, storage=container_layer 인 항목이 없습니다/);
+        expect(out.join("\n")).toMatch(/facts\.conditions\.2\.mismatches\.0\.related_fact: related_kind 가 local_upload 이면 facts\.writes_local_file 에 \/app\/uploads 가 있어야 합니다/);
+        // storage 항목만 있고 writes_local_file 이 없어도 거부 (R6 가 읽는 것은 writes_local_file)
+        expect(issues({ storage: uploadsEvidence.storage, conditions: trio() }).join("\n")).toMatch(/writes_local_file 에 \/app\/uploads 가 있어야/);
+        // writes_local_file 만 있고 storage 항목이 없어도 거부
+        expect(issues({ writes_local_file: ["/app/uploads"], conditions: trio() }).join("\n")).toMatch(/facts\.storage 에 path=\/app\/uploads/);
+        // kind 나 storage 가 storage 항목과 다르면 같은 path 라도 거부
+        expect(issues({ ...uploadsEvidence, storage: [{ kind: "local_file", path: "/app/uploads", storage: "container_layer" }], conditions: trio() }).join("\n")).toMatch(/facts\.storage 에 path=\/app\/uploads, kind=local_upload/);
+        expect(issues({ ...uploadsEvidence, storage: [{ kind: "local_upload", path: "/app/uploads", storage: "volume" }], conditions: trio() }).join("\n")).toMatch(/storage=container_layer 인 항목이 없습니다/);
+      });
+
+      it("related_kind=sqlite 인데 facts.db 가 sqlite 가 아니면 거부", () => {
+        const replace13 = { name: "replace", total: 20, matched: 19, failed: true, mismatches: [posts] };
+        expect(issues({ storage: sqliteEvidence.storage, conditions: trio(replace13) }).join("\n")).toMatch(/facts\.conditions\.2\.mismatches\.0\.related_kind: related_kind 가 sqlite 이면 facts\.db 도 sqlite 여야 합니다 \(현재 \(없음\)\)/);
+        expect(issues({ storage: sqliteEvidence.storage, db: "postgres", conditions: trio(replace13) }).join("\n")).toMatch(/facts\.db 도 sqlite 여야 합니다 \(현재 postgres\)/);
+        expect(issues({ db: "sqlite", conditions: trio(replace13) }).join("\n")).toMatch(/facts\.storage 에 path=\/app\/data\/data\.db, kind=sqlite/);
+      });
+
+      it("대응하는 storage 항목과 db / writes_local_file 이 있으면 통과하고, R5 / R6 가 위치를 제한한다", () => {
+        const both = { name: "replace", total: 20, matched: 18, failed: true, mismatches: [posts, uploads] };
+        const facts = { storage: [...sqliteEvidence.storage, ...uploadsEvidence.storage], db: "sqlite", writes_local_file: ["/app/uploads"], conditions: trio(both) };
+        expect(TestResultSchema.safeParse(withFacts(facts)).success, issues(facts).join("\n")).toBe(true);
+        const plan = decide(TestResultSchema.parse(withFacts(facts)), pii, policy);
+        expect(plan.decision).toBe("allow");
+        expect(plan.targets).toEqual(["onprem"]);
+        expect(plan.requires?.map((x) => x.id)).toEqual(["managed_db", "object_storage"]);
+        // restart 조건의 related_* 도 같은 검증을 받는다 (조건을 가리지 않는다)
+        const restart13 = { name: "restart", total: 20, matched: 19, failed: true, mismatches: [posts] };
+        expect(issues({ ...uploadsEvidence, conditions: [passAll("none"), restart13, replace16] }).join("\n")).toMatch(/facts\.conditions\.1\.mismatches\.0\.related_kind: related_kind 가 sqlite/);
+      });
+
+      it("related_fact 힌트만 있고 kind / storage 가 없는 불일치는 그대로 받는다 (R1c 가 원인 미상으로 차단)", () => {
+        const hintOnly = { name: "replace", total: 20, matched: 19, failed: true, mismatches: [{ index: 13, request: "GET /posts", related_fact: "/app/data/data.db" }] };
+        expect(TestResultSchema.safeParse(withFacts({ conditions: trio(hintOnly) })).success).toBe(true);
+        const plan = decide(TestResultSchema.parse(withFacts({ conditions: trio(hintOnly) })), pii, policy);
+        expect(plan.decision).toBe("block");
+        expect(plan.requires?.map((x) => x.id)).toContain("investigate_replace_failure");
+        // kind 나 storage 중 하나만 있는 반쪽 조회값은 거부
+        expect(issues({ ...sqliteEvidence, conditions: trio({ ...hintOnly, mismatches: [{ ...hintOnly.mismatches[0], related_kind: "sqlite" }] }) }).join("\n")).toMatch(/related_storage: related_kind 나 related_storage 가 있으면 related_fact, related_storage, related_kind 가 모두 있어야/);
+        expect(issues({ ...sqliteEvidence, conditions: trio({ ...hintOnly, mismatches: [{ index: 13, request: "GET /posts", related_storage: "container_layer", related_kind: "sqlite" }] }) }).join("\n")).toMatch(/related_fact: related_kind 나 related_storage 가 있으면/);
+      });
     });
 
     it("conditions 가 없는 기존 fixtures 는 그대로 통과하고 결과도 같다", () => {

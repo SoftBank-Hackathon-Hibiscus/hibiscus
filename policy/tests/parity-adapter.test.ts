@@ -19,7 +19,7 @@ import {
 } from "../src/adapters/parity.js";
 import { decide } from "../src/engine.js";
 import { explainPlan } from "../src/explainer.js";
-import { type Plan, PiiReportSchema, PlanSchema, PolicySchema, type TestResult, TestResultSchema } from "../src/schema.js";
+import { type Condition, type Plan, PiiReportSchema, PlanSchema, PolicySchema, type TestResult, TestResultSchema } from "../src/schema.js";
 import { StageError, runStage } from "../src/stage-runner.js";
 
 const ROOT = join(import.meta.dirname, "..");
@@ -139,6 +139,30 @@ describe("parity 변환기: 사실만 옮긴다", () => {
     expect(b.facts.storage).toEqual([]);
   });
 
+  it("변환 결과의 related_* 는 항상 facts.storage / db / writes_local_file 로 뒷받침된다 (스키마의 related_* 검증을 통과)", () => {
+    const check = (h: ParityHandoff) => {
+      const { test } = adaptParityHandoff(h); // 안에서 TestResultSchema.parse 를 거친다
+      const r = TestResultSchema.safeParse(test);
+      expect(r.success, r.success ? "" : JSON.stringify(r.error.issues)).toBe(true);
+      return test;
+    };
+    const full = check(handoff());
+    const related = full.facts.conditions!.flatMap((c) => c.mismatches).filter((m) => m.related_kind !== undefined);
+    expect(related.length).toBeGreaterThan(0);
+    for (const m of related) {
+      expect(full.facts.storage).toContainEqual({ kind: m.related_kind, path: m.related_fact, storage: m.related_storage });
+      if (m.related_kind === "sqlite") expect(full.facts.db).toBe("sqlite");
+      else expect(full.facts.writes_local_file).toContain(m.related_fact);
+    }
+    // 업로드 유실만 / sqlite + 업로드 / 모르는 kind(cache_dir) / sqlite 사실이 빠진 묶음(related_fact 힌트만 남음) 모두 통과
+    check(withReplace(19, [guestbookMismatch("replace", 16)]));
+    check(withReplace(18, [guestbookMismatch("replace", 13), guestbookMismatch("replace", 16)]));
+    const h = handoff();
+    const cache = { kind: "cache_dir", path: "/app/cache", storage: "container_layer", evidence: "docker diff A /app/cache" };
+    check(withReplace(19, [{ condition: "replace", index: 18, request: "GET /cache/stats", expected: "200 {}", actual: "404 {}", related_fact: "/app/cache" }], { facts: [...h.result.facts, cache] }));
+    check({ ...h, result: { ...h.result, facts: h.result.facts.filter((f) => f.kind !== "sqlite") } });
+  });
+
   it("같은 입력이면 같은 출력 (결정적)", () => {
     expect(adaptParityHandoff(handoff(), diagnostics())).toEqual(adaptParityHandoff(handoff(), diagnostics()));
   });
@@ -252,6 +276,114 @@ describe("조건별 사실로 판단하는 규칙 (R1 / R1b / R1c)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// R1c 가 맡긴 불일치는 R5 / R6 가 실제로 다룰 수 있어야 한다
+// ---------------------------------------------------------------------------
+describe("R1c: local_* 불일치는 R6 가 실제로 다루는 경로일 때만 설명된 실패다 (R6 가 무시하는 경로는 차단)", () => {
+  type Fact = ParityHandoff["result"]["facts"][number];
+  /**
+   * replace 에서만 불일치 1건. 관련 사실(kind, path)을 facts[] 에 넣어 변환기가 storage / db / writes_local_file 근거를 모두 채운다
+   * (스키마의 related_* 검증을 통과하는 "근거는 정상인" 입력). 기본으로 방명록의 sqlite / uploads 사실은 넣지 않는다
+   */
+  const replaceOnly = (kind: string, path: string, extraFacts: Fact[] = []): TestResult => {
+    const fact: Fact = { kind, path, storage: "container_layer", evidence: `docker diff A ${path}` };
+    const mismatch: Mismatch = { condition: "replace", index: 18, request: `GET ${path}`, expected: "200 {}", actual: "404 {}", related_fact: path };
+    return adaptParityHandoff(withReplace(19, [mismatch], { facts: [fact, ...extraFacts] })).test;
+  };
+  const expectInvestigate = (test: TestResult): Plan => {
+    const plan = planOf(test);
+    expect(plan.decision).toBe("block");
+    expect(plan.targets).toEqual([]);
+    expect(requiresOf(plan)).toEqual(["investigate_replace_failure"]);
+    expect(resultOf(plan, "R1c")).toBe("matched");
+    expect(resultOf(plan, "R6")).toBe("not_matched"); // R6 가 무시하는 경로라 R6 는 걸리지 않는다 → R1c 가 맡기면 아무 규칙도 다루지 않게 된다
+    return plan;
+  };
+
+  it("local_file + /tmp/session.dat (storage · writes_local_file 근거 모두 있음) → block, investigate_replace_failure", () => {
+    const test = replaceOnly("local_file", "/tmp/session.dat");
+    expect(test.facts.storage).toEqual([{ kind: "local_file", path: "/tmp/session.dat", storage: "container_layer" }]);
+    expect(test.facts.writes_local_file).toEqual(["/tmp/session.dat"]);
+    expect(test.facts.conditions!.find((c) => c.name === "replace")!.mismatches[0]).toMatchObject({ related_fact: "/tmp/session.dat", related_kind: "local_file" });
+    expectInvestigate(test);
+  });
+
+  it("local_file + /app/app.log → block, investigate_replace_failure", () => {
+    expectInvestigate(replaceOnly("local_file", "/app/app.log"));
+  });
+
+  it("local_file + /app/data.db, sqlite 사실 없음 → block (R6 는 DB 파일을 R5 에 넘기지만 kind 가 sqlite 가 아니라 R5 도 걸리지 않는다)", () => {
+    const test = replaceOnly("local_file", "/app/data.db");
+    expect("db" in test.facts).toBe(false);
+    const plan = expectInvestigate(test);
+    expect(resultOf(plan, "R5")).toBe("not_matched");
+  });
+
+  it("local_upload + /tmp/foo + 근거 모두 있음 → block (related_kind 만 local_upload 로 바꿔도 같은 경로 조건을 받는다)", () => {
+    const test = replaceOnly("local_upload", "/tmp/foo");
+    expect(test.facts.writes_local_file).toEqual(["/tmp/foo"]);
+    expectInvestigate(test);
+  });
+
+  it("local_upload + /app/uploads/a.png → 기존처럼 allow, [onprem], object_storage", () => {
+    const plan = planOf(replaceOnly("local_upload", "/app/uploads/a.png"));
+    expect(plan.decision).toBe("allow");
+    expect(plan.targets).toEqual(["onprem"]);
+    expect(requiresOf(plan)).toEqual(["object_storage"]);
+    expect(resultOf(plan, "R1c")).toBe("not_matched");
+    expect(resultOf(plan, "R6")).toBe("matched");
+  });
+
+  it("sqlite + 정상 sqlite 근거 → 기존처럼 R5 가 처리 (managed_db). 경로 조건은 sqlite 에는 적용하지 않는다", () => {
+    const test = replaceOnly("sqlite", "/app/data/data.db");
+    expect(test.facts.db).toBe("sqlite");
+    const plan = planOf(test);
+    expect(plan.decision).toBe("allow");
+    expect(plan.targets).toEqual(["onprem"]);
+    expect(requiresOf(plan)).toEqual(["managed_db"]);
+    expect(resultOf(plan, "R1c")).toBe("not_matched");
+    expect(resultOf(plan, "R5")).toBe("matched");
+    // 방명록 묶음 그대로는 위 "방명록 그대로 → block, requires 는 fix_restart_failure + managed_db + object_storage" 테스트가 그대로 지킨다
+  });
+
+  it("R6 의 무시 조건과 R1c 의 '설명된 실패' 판단은 같은 의미다: 경로마다 R6 가 걸림 ⇔ R1c 가 걸리지 않음 (local_upload / local_file 둘 다)", () => {
+    const base = TestResultSchema.parse(readJson("fixtures/01-allow/test_result.json"));
+    const r6Handles = (path: string) => resultOf(planOf({ ...base, facts: { writes_local_file: [path] } }), "R6") === "matched";
+    const PATHS = [
+      "/tmp/session.dat", "/tmp/a/b.png", "/var/tmp/x", "/tmpfoo/x", "/tmp",
+      "/app/app.log", "/var/log/APP.LOG", "/app/log/x", "/app/logs/x.log.1",
+      "/app/data.db", "/app/DATA.DB", "/app/main.sqlite", "/x/y.Sqlite3", "/app/export.dbx", "/app/sqlite.backup",
+      "/app/uploads/a.png", "/app/uploads", "/app/data/b.csv",
+    ];
+    for (const path of PATHS) {
+      for (const kind of ["local_upload", "local_file"]) {
+        const r1c = resultOf(planOf(replaceOnly(kind, path)), "R1c");
+        expect(r1c, `${kind} ${path}: R6 ${r6Handles(path) ? "걸림" : "무시"}`).toBe(r6Handles(path) ? "not_matched" : "matched");
+      }
+    }
+    // 양쪽 결과가 다 들어 있어야 의미 있는 비교다
+    expect(PATHS.filter(r6Handles).length).toBeGreaterThan(0);
+    expect(PATHS.filter((p) => !r6Handles(p)).length).toBeGreaterThan(0);
+  });
+
+  it("R1c 와 R6 는 같은 무시 패턴 값을 쓴다 (policy.yaml 의 YAML 앵커 &r6_ignore_*)", () => {
+    /** 조건 트리에서 starts_with / matches 잎을 "연산:값:flags" 로 모은다 (경로는 다르므로 비교하지 않는다) */
+    const patterns = (cond: Condition): string[] => {
+      if ("all" in cond) return cond.all.flatMap(patterns);
+      if ("any" in cond) return cond.any.flatMap(patterns);
+      if ("not" in cond) return patterns(cond.not);
+      if ("some" in cond) return cond.where ? patterns(cond.where) : [];
+      if ("starts_with" in cond) return [`starts_with:${cond.starts_with}`];
+      if ("matches" in cond) return [`matches:${cond.matches}:${cond.flags ?? ""}`];
+      return [];
+    };
+    const rule = (id: string) => policy.rules.find((r) => r.id === id)!.if;
+    const r6 = patterns(rule("R6")).sort();
+    expect(r6).toEqual(["matches:\\.(db|sqlite|sqlite3)$:i", "matches:\\.log$:", "starts_with:/tmp/"]);
+    expect(patterns(rule("R1c")).sort()).toEqual(r6);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 변환 거부와 경고
 // ---------------------------------------------------------------------------
 describe("변환 거부 / 경고", () => {
@@ -303,6 +435,18 @@ describe("변환 거부 / 경고", () => {
     expect(() => adaptParityHandoff(variant([{ condition: "none", total: 20, matched: 19 }, ALL_PASS[1]!, ALL_PASS[2]!], []))).toThrow(/none: 불일치 0건인데 total-matched 는 1/);
     expect(() => adaptParityHandoff(variant(ALL_PASS, [guestbookMismatch("replace", 16)]))).toThrow(/replace: 불일치 1건인데/);
     expect(() => adaptParityHandoff(variant([{ condition: "none", total: 20, matched: 21 }, ALL_PASS[1]!, ALL_PASS[2]!], []))).toThrow(/matched\(21\)가 total\(20\)보다/);
+  });
+
+  it("같은 조건 안에 같은 요청 번호가 두 번 있으면 거부, 다른 조건의 같은 번호는 정상", () => {
+    const me11 = guestbookMismatch("replace", 11);
+    // replace 20/18 에 11 번이 두 번: 불일치 수(2)는 total - matched 와 맞아서 수 검사로는 잡히지 않는다
+    expect(() => adaptParityHandoff(withReplace(18, [me11, me11]))).toThrow(ParityAdapterError);
+    expect(() => adaptParityHandoff(withReplace(18, [me11, me11]))).toThrow(/replace: 요청 번호 11 가 두 번 있습니다/);
+    // 방명록 원본은 restart 와 replace 가 같은 11, 12, 13, 14, 17, 20 번에서 어긋난다 → 정상 변환
+    const { test } = adaptParityHandoff(handoff());
+    const idx = (name: string) => test.facts.conditions!.find((c) => c.name === name)!.mismatches.map((m) => m.index);
+    expect(idx("restart")).toEqual([11, 12, 13, 14, 17, 20]);
+    expect(idx("replace")).toEqual([11, 12, 13, 14, 16, 17, 20]);
   });
 
   it("format 이나 stage 가 다르면 형식 오류 (verify 결과는 받지 않는다)", () => {
@@ -382,6 +526,23 @@ describe("보안 단계 실행기 --handoff", () => {
     const diagOnly = runCli("src/stage.ts", ["--src", sample("no-pii"), "--test", join(ROOT, "fixtures", "01-allow", "test_result.json"), "--diagnostics", DIAGNOSTICS_PATH, "--policy", POLICY, "--out-dir", out]);
     expect(diagOnly.code).toBe(1);
     expect(existsSync(join(out, "plan.json"))).toBe(false);
+  });
+
+  it("runStage --test: related_kind 근거가 없는 직접 입력은 test_result 단계에서 거부된다 (allow 로 진행되지 않음)", async () => {
+    const dir = tmp();
+    const { test } = adaptParityHandoff(withReplace(19, [guestbookMismatch("replace", 16)]));
+    // 변환 결과에서 storage 와 writes_local_file 만 지운 입력: related_kind=local_upload 는 남아 R1c 를 피하지만 R6 가 읽을 사실이 없다
+    const { storage: _s, writes_local_file: _w, ...facts } = test.facts;
+    const forged = join(dir, "forged.json");
+    writeFileSync(forged, JSON.stringify({ ...test, facts }));
+    await expect(runStage({ src: sample("no-pii"), testPath: forged, policyPath: POLICY, outDir: dir })).rejects.toMatchObject({ stage: "test_result" });
+    await expect(runStage({ src: sample("no-pii"), testPath: forged, policyPath: POLICY, outDir: dir })).rejects.toThrow(/writes_local_file 에 \/app\/uploads 가 있어야/);
+    expect(existsSync(join(dir, "plan.json"))).toBe(false);
+    // 변환 결과 그대로면 통과 (allow, onprem)
+    const intact = join(dir, "intact.json");
+    writeFileSync(intact, JSON.stringify(test));
+    const ok = await runStage({ src: sample("no-pii"), testPath: intact, policyPath: POLICY, outDir: dir, logPath: join(dir, "d.jsonl") });
+    expect(ok.summary.decision).toBe("allow");
   });
 
   it("runStage: 변환 거부는 handoff 단계의 StageError, 경고는 notes 에 실린다", async () => {

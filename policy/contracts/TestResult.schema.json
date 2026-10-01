@@ -196,12 +196,12 @@
                       "minLength": 1
                     },
                     "related_storage": {
-                      "description": "related_fact 가 가리키는 사실의 storage (예: container_layer). related_fact 가 없으면 생략",
+                      "description": "related_fact 가 가리키는 사실의 storage (예: container_layer). related_fact 가 없으면 생략. 있으면 facts.storage 에 같은 path·kind·storage 항목이 있어야 한다",
                       "type": "string",
                       "minLength": 1
                     },
                     "related_kind": {
-                      "description": "related_fact 가 가리키는 사실의 kind (sqlite, local_upload, local_file). R1c 가 읽는다. 없으면 생략",
+                      "description": "related_fact 가 가리키는 사실의 kind (sqlite, local_upload, local_file). R1c 가 읽는다. 없으면 생략. 있으면 facts.storage 에 같은 path·kind·storage 항목이 있어야 하고, sqlite 면 facts.db 가 sqlite, local_upload / local_file 이면 facts.writes_local_file 에 그 path 가 있어야 한다",
                       "type": "string",
                       "minLength": 1
                     }
@@ -229,7 +229,7 @@
           "description": "조건별 재생 결과 (none / restart / replace 정확히 한 번씩). 있으면 R1 / R1b / R1c 가 이것으로 판단하고 passed 는 원본 종합값 보존용이다. 없으면 R1 이 passed 를 본다"
         },
         "storage": {
-          "description": "컨테이너 안에 남은 상태 목록 (테스트 파트 facts[] 원본의 kind, path, storage). 정책 판단에는 conditions[].mismatches[].related_kind 를 쓰고, 이 목록은 보존·설명용",
+          "description": "컨테이너 안에 남은 상태 목록 (테스트 파트 facts[] 원본의 kind, path, storage). 정책 판단에는 conditions[].mismatches[].related_kind 를 쓰고, 이 목록은 related_* 의 근거(같은 path·kind·storage 항목이 있어야 한다)와 설명용",
           "type": "array",
           "items": {
             "type": "object",

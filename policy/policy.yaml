@@ -65,7 +65,7 @@ rules:
   #               여기서 어긋나면 저장 방식으로 설명되지 않는 상태·초기화 결함 (예: 시작할 때 데이터 삭제, 메모리 세션)
   #     replace = 컨테이너를 지우고 같은 이미지로 새로 만든다. container_layer 파일이 사라진다 (클라우드 인스턴스 교체와 같음).
   #               여기서만 어긋났고 관련 저장 사실이 sqlite / local_upload / local_file 이면 R5 / R6 가 위치 제한으로 다룬다.
-  #               관련 사실이 없거나 모르는 종류면 원인 미상이라 차단한다 (R1c).
+  #               관련 사실이 없거나 모르는 종류, 또는 local_* 인데 경로가 R6 가 무시하는 것이면 원인 미상이라 차단한다 (R1c).
   #   "replace 에서만" 은 none 과 restart 가 모두 통과했다는 뜻이다 (조건 단위. 요청 번호 단위 비교는 v2).
   - id: R1
     description: >-
@@ -115,9 +115,9 @@ rules:
 
   - id: R1c
     description: >-
-      none 과 restart 는 통과했는데 replace 에서 어긋난 요청 중 관련 저장 사실이 없거나 종류를 모르는 것이 있으면
-      원인 미상이라 차단한다. sqlite / local_upload / local_file 로 설명되는 불일치는 여기서 차단하지 않고
-      R5(managed_db) / R6(object_storage) 가 배포 위치 제한으로 다룬다
+      none 과 restart 는 통과했는데 replace 에서 어긋난 요청 중 저장 방식으로 설명되지 않는 것이 있으면 원인 미상이라 차단한다.
+      설명되는 불일치(related_kind 가 sqlite, 또는 local_upload / local_file 이면서 R6 가 실제로 다루는 경로)는 여기서
+      차단하지 않고 R5(managed_db) / R6(object_storage) 가 배포 위치 제한으로 다룬다
     if:
       all:
         - not:
@@ -130,16 +130,30 @@ rules:
           where:
             all:
               - { path: name, eq: replace }
+              # "설명된 실패" 가 아닌 불일치가 하나라도 있으면 걸린다. 설명된 실패 = 여기서 맡겼을 때 R5 / R6 가 실제로 다루는 것:
+              #   - related_kind 가 sqlite → R5 가 facts.db 로 다룬다 (스키마가 facts.db=sqlite 를 보장)
+              #   - related_kind 가 local_upload / local_file 이고 related_fact 가 R6 가 무시하는 경로가 아님 → R6 가 writes_local_file 로 다룬다
+              # R6 가 무시하는 경로(/tmp/, *.log, DB 파일)를 맡기면 R6 도 걸리지 않아 아무 규칙도 다루지 않게 되므로 설명된 실패가 아니다.
+              # local_upload 도 같은 경로 조건을 받는다 (kind 만 바꿔 우회할 수 없게). 무시 패턴은 앵커(&r6_ignore_*)로 R6 와 같은 값을 쓴다.
               - some: mismatches
                 where:
-                  not: { path: related_kind, in: [sqlite, local_upload, local_file] }
+                  not:
+                    any:
+                      - { path: related_kind, eq: sqlite }
+                      - all:
+                          - { path: related_kind, in: [local_upload, local_file] }
+                          - not:
+                              any:
+                                - { path: related_fact, starts_with: &r6_ignore_tmp "/tmp/" }
+                                - { path: related_fact, matches: &r6_ignore_log "\\.log$" }
+                                - { path: related_fact, matches: &r6_ignore_db "\\.(db|sqlite|sqlite3)$", flags: i }
     then:
       decision: block
       requires:
         - id: investigate_replace_failure
           hint:
-            ko: "컨테이너 교체 뒤에만 어긋난 요청의 원인을 조사 (관련 저장 사실이 없거나 알 수 없는 종류)"
-            ja: "コンテナ入れ替え後にのみ不一致となったリクエストの原因を調査（関連する保存事実がない、または不明な種類）"
+            ko: "컨테이너 교체 뒤에만 어긋난 요청의 원인을 조사 (관련 저장 사실이 없거나 알 수 없는 종류, 또는 /tmp·로그·DB 파일 경로)"
+            ja: "コンテナ入れ替え後にのみ不一致となったリクエストの原因を調査（関連する保存事実がない、不明な種類、または/tmp・ログ・DBファイルのパス）"
     reason:
       ko: "교체 후 불일치 중 저장 방식으로 설명되지 않는 요청 있음 ({matched}/{total} 일치)"
       ja: "入れ替え後の不一致に保存方式で説明できないリクエストあり（{matched}/{total}一致）"
@@ -209,11 +223,12 @@ rules:
     if:
       some: test.facts.writes_local_file
       where:
+        # 무시 패턴은 R1c 의 앵커(&r6_ignore_*) 값을 그대로 쓴다. R1c 는 이 패턴으로 "R6 가 실제로 다루는 경로인가" 를 판단하므로 한쪽만 바꾸지 않는다
         not:
           any:
-            - { path: "@", starts_with: "/tmp/" }
-            - { path: "@", matches: "\\.log$" }
-            - { path: "@", matches: "\\.(db|sqlite|sqlite3)$", flags: i }
+            - { path: "@", starts_with: *r6_ignore_tmp }
+            - { path: "@", matches: *r6_ignore_log }
+            - { path: "@", matches: *r6_ignore_db, flags: i }
     then:
       targets: [onprem]
       requires:

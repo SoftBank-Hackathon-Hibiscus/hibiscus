@@ -75,8 +75,8 @@ npm run typecheck
 }
 ```
 
-- `conditions[]`: 조건(`none` 기준선 / `restart` 재시작 / `replace` 컨테이너 교체)마다 `{ name, total, matched, failed, mismatches[] }`. 있으면 `none` / `restart` / `replace`가 정확히 한 번씩 있어야 하고(다른 이름·누락·중복은 형식 오류), 각 조건은 `total >= 1`, `matched <= total`, `failed == (matched < total)`, `mismatches.length == total - matched`여야 한다. `--handoff`(변환기)와 `--test`(직접 입력) 어느 경로로 들어와도 같은 조건을 스키마가 보장한다. `mismatches[]`의 `related_*`는 테스트 파트가 붙인 관련 사실 힌트(`related_fact` = path)를 원본 facts에서 찾아 옮긴 조회값이다. 없는 값은 `null`이 아니라 **키를 생략**한다 (조건 문법의 `exists`가 `null`도 있음으로 보기 때문).
-- `storage[]`: 테스트 파트 facts 원본의 `kind, path, storage`. 보존·설명용이다.
+- `conditions[]`: 조건(`none` 기준선 / `restart` 재시작 / `replace` 컨테이너 교체)마다 `{ name, total, matched, failed, mismatches[] }`. 있으면 `none` / `restart` / `replace`가 정확히 한 번씩 있어야 하고(다른 이름·누락·중복은 형식 오류), 각 조건은 `total >= 1`, `matched <= total`, `failed == (matched < total)`, `mismatches.length == total - matched`, 같은 조건 안에서 `mismatches[].index`는 한 번씩(다른 조건과 같은 번호는 정상)이어야 한다. `--handoff`(변환기)와 `--test`(직접 입력) 어느 경로로 들어와도 같은 조건을 스키마가 보장한다. `mismatches[]`의 `related_*`는 테스트 파트가 붙인 관련 사실 힌트(`related_fact` = path)를 원본 facts에서 찾아 옮긴 조회값이다. 그래서 `related_kind`·`related_storage`가 있으면 `facts.storage`에 같은 `path`·`kind`·`storage` 항목이 있어야 하고, `related_kind`가 `sqlite`면 `facts.db == "sqlite"`, `local_upload` / `local_file`이면 `facts.writes_local_file`에 그 path가 있어야 한다 (R1c가 차단하지 않고 R5 / R6에 맡기는 불일치는 R5 / R6가 실제로 읽는 사실로 뒷받침돼야 한다. 근거 없는 `related_kind`만 적어 세 규칙을 모두 피하는 입력은 형식 오류). `related_fact` 힌트만 있고 kind가 없는 불일치는 R1c가 원인 미상으로 차단한다. 없는 값은 `null`이 아니라 **키를 생략**한다 (조건 문법의 `exists`가 `null`도 있음으로 보기 때문).
+- `storage[]`: 테스트 파트 facts 원본의 `kind, path, storage`. `related_*`의 근거이자 설명용이다.
 - **`passed`의 의미**: `facts.conditions`가 있는 입력에서는 `passed`는 parity 원본의 종합값을 보존하는 필드이고, 정책 판단(R1, R1b, R1c)은 조건별 사실을 읽는다. 그래서 `passed: false`인데 `allow`가 나올 수 있다 (예: replace에서만 업로드 유실이 나고 그 원인이 `local_upload` 저장 사실로 설명될 때는 R6가 위치 제한으로 다룬다). `facts.conditions`가 없는 구형 입력에서만 R1이 `passed`를 fallback으로 본다. `match`는 `conditions`가 있으면 기준 조건 `none`의 결과다. 규칙이 정의되지 않은 facts 키를 읽으면 정책을 불러올 때 경고가 난다. 규칙이 실제로 읽는 경로 목록은 [contracts/README.md](contracts/README.md)의 "정책이 읽는 필드"에 자동 생성된다.
 
 ### `pii.json` (개인정보 후보. 지금은 가짜 파일, 나중에 AI 판정 결과)
@@ -137,7 +137,7 @@ default:
 |---|---|---|---|
 | R1 | `facts.conditions`가 있으면 `none` 조건 실패, 없으면 `test.passed = false` | block | fix_tests: 재생 불일치 요청을 고친 뒤 다시 테스트 |
 | R1b | `restart` 조건 실패 | block | fix_restart_failure: 재시작 후 상태·초기화 동작을 수정 (예: 시작할 때 데이터 삭제, 메모리에만 두는 세션) |
-| R1c | `none`·`restart`는 통과했는데 `replace` 불일치 중 `related_kind`가 sqlite / local_upload / local_file이 아닌 것(관련 사실 없음 포함)이 있음 | block | investigate_replace_failure: 교체 뒤에만 어긋난 요청의 원인 조사 |
+| R1c | `none`·`restart`는 통과했는데 `replace` 불일치 중 저장 방식으로 설명되지 않는 것이 있음: `related_kind`가 sqlite / local_upload / local_file이 아니거나(관련 사실 없음 포함), local_upload / local_file인데 `related_fact` 경로가 R6가 무시하는 것(`/tmp/`, `*.log`, `*.db`·`*.sqlite`·`*.sqlite3`) | block | investigate_replace_failure: 교체 뒤에만 어긋난 요청의 원인 조사 |
 | R2 | `test.run_id ≠ pii.run_id` | block (입력 불일치) | rerun_same_run: 같은 run_id로 테스트와 개인정보 판정을 다시 실행 |
 | R3 | 확신 없는 개인정보 후보 있음 | needs_approval | human_review_pii: 해당 칼럼이 개인정보인지 사람이 확인 |
 | R4 | 개인정보 후보 있음 | targets [onprem], failover 금지 | |
@@ -146,7 +146,7 @@ default:
 | R7 | `test.facts.migration.destructive = true` (DROP/RENAME/타입 변경/DEFAULT 없는 NOT NULL 추가/SET NOT NULL/TRUNCATE) | block | two_phase_migration: 파괴적 변경을 확장→전환→정리 2단계 배포로 나누기 (먼저 새 구조를 추가하고, 옛 구조는 다음 배포에서 제거) |
 | default | | targets [onprem, cloud_run], failover 허용 | |
 
-R1·R1b·R1c의 이유 (parity 조건의 뜻은 `parity/parity/conditions.py`): `none`은 조건 없는 기준선이라 여기서 어긋나면 서비스 기능 자체의 실패다. `restart`는 컨테이너 파일을 지우지 않으므로 재시작 뒤 어긋난 요청은 저장 방식으로 설명되지 않는 상태·초기화 결함이다 (방명록 샘플의 "시작할 때 DROP TABLE", "메모리 세션"). `replace`는 컨테이너를 새로 만들어 container_layer 파일이 사라지므로 클라우드 인스턴스 교체와 같은 사건이다. 여기서만 어긋났고 관련 저장 사실이 sqlite / local_upload / local_file이면 차단하지 않고 R5·R6가 배포 위치를 제한하며, 관련 사실이 없거나 모르는 종류면 원인 미상이라 R1c가 차단한다. "replace에서만"은 조건 단위다 (none과 restart가 모두 통과). 요청 번호 단위 비교와 원인 세분화(예: 세션 저장소)는 env_report·원인 분석이 들어오는 v2에서 다룬다.
+R1·R1b·R1c의 이유 (parity 조건의 뜻은 `parity/parity/conditions.py`): `none`은 조건 없는 기준선이라 여기서 어긋나면 서비스 기능 자체의 실패다. `restart`는 컨테이너 파일을 지우지 않으므로 재시작 뒤 어긋난 요청은 저장 방식으로 설명되지 않는 상태·초기화 결함이다 (방명록 샘플의 "시작할 때 DROP TABLE", "메모리 세션"). `replace`는 컨테이너를 새로 만들어 container_layer 파일이 사라지므로 클라우드 인스턴스 교체와 같은 사건이다. 여기서만 어긋났고 관련 저장 사실이 sqlite / local_upload / local_file이면 차단하지 않고 R5·R6가 배포 위치를 제한하며, 관련 사실이 없거나 모르는 종류면 원인 미상이라 R1c가 차단한다. local_upload / local_file은 R6가 실제로 다루는 경로일 때만 설명된 실패다: R6가 무시하는 `/tmp/`·`*.log`·DB 파일 경로를 맡기면 R6도 걸리지 않아 아무 규칙도 다루지 않게 되므로 R1c가 차단한다 (무시 패턴은 `policy.yaml`의 YAML 앵커 `&r6_ignore_*`로 R6와 같은 값을 쓴다). "replace에서만"은 조건 단위다 (none과 restart가 모두 통과). 요청 번호 단위 비교와 원인 세분화(예: 세션 저장소)는 env_report·원인 분석이 들어오는 v2에서 다룬다.
 
 R5의 이유: 클라우드에서는 인스턴스가 교체되면 SQLite 파일이 사라진다. R6도 같은 이유로, 로컬 폴더에 쓰는 파일은 인스턴스 교체나 스케일아웃 때 사라지거나 갈라진다. 무시할 경로는 규칙의 `where`에 `@`(원소 자체)와 `starts_with` / `matches`로 적는다. DB 파일은 R5가 담당하므로 R6는 `.db`, `.sqlite`, `.sqlite3`을 무시해 해결 조건이 겹치지 않는다 (SQLite 앱이 `/app/data.db`만 쓰면 managed_db 하나만 나온다). cloud_run이 빠지므로 failover도 자동으로 false가 된다.
 
@@ -357,7 +357,7 @@ npx tsx src/stage.ts --src <앱 폴더> --handoff handoff.json --diagnostics res
 - `--diagnostics`의 `status`가 `completed`가 아니다
 - `--diagnostics`의 `registry_digest`가 있는데 `metadata.digest`와 다르다
 - 조건이 `none` / `restart` / `replace` 정확히 한 번씩이 아니다 (빠짐·중복·모르는 조건. `parity test`의 기본값은 `none,restart`라 `replace`를 빼먹은 결과가 들어오는 것을 막는다. `--conditions none,restart,replace`로 실행할 것)
-- 조건의 `total`이 0이거나 조건별 불일치 수가 `total - matched`와 맞지 않는다, `stage`가 `test`가 아니다 (`verify`는 배포 후 확인이라 받지 않는다)
+- 조건의 `total`이 0이거나 조건별 불일치 수가 `total - matched`와 맞지 않는다, 같은 조건 안에 같은 요청 번호가 두 번 있다, `stage`가 `test`가 아니다 (`verify`는 배포 후 확인이라 받지 않는다)
 
 **경고만 하는 경우**: `metadata.digest`가 `--diagnostics`의 `local_image_id`와 같다. 레지스트리 digest 자리에 로컬 image ID를 넣었을 가능성이 크지만, 레지스트리 위치가 아직 정해지지 않아 지금은 막지 않는다. **레지스트리가 확정되면 오류로 전환할 예정이다.**
 
