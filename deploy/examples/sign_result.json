@@ -1,11 +1,12 @@
 {
   "run_id": "run-20261001-001",
-  "digest": "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
-  "plan_hash": "sha256:2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",
+  "digest": "sha256:d90d6bd2d450675086139ab4448e851b26d2e28b4132dcc90ad0f2b7719babc5",
+  "plan_hash": "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",
+  "source_revision": "0123456789abcdef0123456789abcdef01234567",
   "targets": ["cloud_run", "onprem"],
   "failover_allowed": true,
   "requester": "ryurujxx",
   "approver": "Seungpyo1007",
-  "signature_ref": "projects/hib-hackathon-1004/occurrences/example",
+  "signature_ref": "cosign:asia-northeast3-docker.pkg.dev/hib-hackathon-1004/hib/hello-ma@sha256:d90d6bd2d450675086139ab4448e851b26d2e28b4132dcc90ad0f2b7719babc5",
   "signed_at": "2026-10-01T10:00:00+09:00"
 }
