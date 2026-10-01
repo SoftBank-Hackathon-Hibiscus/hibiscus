@@ -2,6 +2,7 @@
  * 실제 CLI 를 부르는 통합 테스트: policy stage 1회 (fixture 템플릿, sample-app 소스), signer --dry-run 1회.
  * cosign, gcloud, Docker 없이 돈다. policy/ 와 signer/ 에 node_modules 가 있어야 한다.
  */
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,6 +15,13 @@ import { APP_INPUT, get, post, stageOf } from "./helpers.js";
 const config = loadConfig({ WORK_DIR: mkdtempSync(join(tmpdir(), "hibiscus-backend-it-")), SIGNER_MODE: "dry", DEPLOY_MODE: "off" }, BACKEND_ROOT);
 const ready = existsSync(join(config.policyDir, "node_modules")) && existsSync(join(config.signerDir, "node_modules"));
 
+/** 앱 소스가 git 저장소가 아니면 (git archive 로 푼 폴더 등) source_revision 이 필수라서 요청에 넣는다 */
+function runBody(srcPath: string): Record<string, string> {
+  const r = spawnSync("git", ["rev-parse", "HEAD"], { cwd: srcPath, encoding: "utf8" });
+  const inGit = r.status === 0 && /^[0-9a-f]{40}\s*$/.test(r.stdout);
+  return inGit ? { requester: "ryu" } : { requester: "ryu", source_revision: "0000000" };
+}
+
 describe.skipIf(!ready)("실제 policy stage + signer dry-run", () => {
   it("sample-app 으로 한 바퀴: plan.json, sign_result.json(dry-run), run 별 decisions.jsonl", async () => {
     const service = buildService(config);
@@ -21,7 +29,8 @@ describe.skipIf(!ready)("실제 policy stage + signer dry-run", () => {
 
     const created = await post(app, "/apps", APP_INPUT);
     expect(created.status).toBe(201);
-    const started = await post(app, `/apps/${created.json.id}/runs`, { requester: "ryu" });
+    const body = runBody(created.json.src_path);
+    const started = await post(app, `/apps/${created.json.id}/runs`, body);
     expect(started.status, JSON.stringify(started.json)).toBe(202);
     const runId = started.json.run_id as string;
     await service.waitFor(runId);
@@ -32,7 +41,12 @@ describe.skipIf(!ready)("실제 policy stage + signer dry-run", () => {
     expect(run.execution_mode).toBe("skeleton");
     expect(run.digest_source).toBe("placeholder");
     expect(run.deployment_performed).toBe(false);
-    expect(run.source_revision).toMatch(/^[0-9a-f]{40}$/);
+    if ("source_revision" in body) {
+      expect(run.source_revision).toBe(body.source_revision);
+      expect(run.source_revision_verified).toBe(false);
+    } else {
+      expect(run.source_revision).toMatch(/^[0-9a-f]{40}$/);
+    }
 
     // 정책: 실제 CLI 가 plan.json 을 쓰고 종료 코드로 결정을 알린다
     const policy = stageOf(view, "policy");
