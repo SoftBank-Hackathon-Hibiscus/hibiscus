@@ -29,6 +29,8 @@ export interface Config {
   deployDir: string;
   /** 배포 조율기 시간 제한 */
   deployTimeoutMs: number;
+  /** 배포하는 앱 컨테이너가 듣는 포트. backend 자신의 PORT 와 이름이 겹쳐서 따로 받는다 */
+  deployAppPort: string;
 }
 
 export class ConfigError extends Error {}
@@ -59,5 +61,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, backendRoot: st
     signerTimeoutMs: 180_000,
     deployDir: resolve(repoRoot, "deploy"),
     deployTimeoutMs: 600_000,
+    deployAppPort: env.DEPLOY_APP_PORT || "8080",
   };
 }

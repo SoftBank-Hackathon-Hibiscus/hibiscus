@@ -100,6 +100,8 @@ export class DeployStage implements StageRunner {
       args: [join(config.deployDir, "coordinator", "coordinator.py"), join(paths.sign, "sign_result.json"), "--out-dir", paths.deploy],
       cwd: config.repoRoot,
       timeoutMs: config.deployTimeoutMs,
+      // backend 의 PORT(자기 서버 포트)를 그대로 물려주면 앱 포트로 잘못 쓰인다
+      env: { PORT: config.deployAppPort },
     });
 
     const artifacts: Record<string, string> = {};
