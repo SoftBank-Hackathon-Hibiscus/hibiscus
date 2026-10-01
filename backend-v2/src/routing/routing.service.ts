@@ -1,0 +1,200 @@
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
+import { AgentService } from '../agent/agent.service.js';
+import { ApplicationRepository } from '../application/application.repository.js';
+import { DeploymentRepository } from '../deployment/deployment.repository.js';
+import type { RoutingTargetHealth } from '../database/schema.js';
+import type {
+  CreateRoutingTargetDto,
+  UpdateApplicationRouteDto,
+} from './dto/routing.dto.js';
+import { RoutingRepository } from './routing.repository.js';
+import type {
+  RouteSnapshot,
+  RoutingTargetView,
+  TargetHealthObservation,
+} from './types/routing.type.js';
+
+@Injectable()
+export class RoutingService {
+  constructor(
+    private readonly repository: RoutingRepository,
+    private readonly applications: ApplicationRepository,
+    private readonly deployments: DeploymentRepository,
+    private readonly agents: AgentService,
+  ) {}
+
+  createTarget(applicationId: string, input: CreateRoutingTargetDto) {
+    this.requireApplication(applicationId);
+    const deployment = this.deployments.find(input.deployment_id);
+    if (!deployment || deployment.applicationId !== applicationId) {
+      throw new NotFoundException('Deployment not found for application');
+    }
+
+    let agentId: string | null = null;
+    let localPort: number | null = null;
+    let url: string | null = null;
+    if (input.kind === 'onprem') {
+      if (!input.agent_id || input.local_port === undefined) {
+        throw new BadRequestException(
+          'On-prem target requires agent_id and local_port',
+        );
+      }
+      if (input.url !== undefined) {
+        throw new BadRequestException('On-prem target must not include url');
+      }
+      this.agents.get(input.agent_id);
+      if (!this.agents.isAssigned(applicationId, input.agent_id)) {
+        throw new ConflictException('Agent is not assigned to application');
+      }
+      agentId = input.agent_id;
+      localPort = input.local_port;
+    } else {
+      if (!input.url) {
+        throw new BadRequestException('Cloud Run target requires url');
+      }
+      if (input.agent_id !== undefined || input.local_port !== undefined) {
+        throw new BadRequestException(
+          'Cloud Run target must not include agent_id or local_port',
+        );
+      }
+      url = this.cloudRunUrl(input.url);
+    }
+
+    if (
+      this.repository.findEquivalentTarget(
+        applicationId,
+        deployment.id,
+        input.kind,
+        agentId,
+      )
+    ) {
+      throw new ConflictException('Routing target already exists');
+    }
+
+    const now = new Date().toISOString();
+    return this.repository.createTarget({
+      id: randomUUID(),
+      applicationId,
+      deploymentId: deployment.id,
+      kind: input.kind,
+      agentId,
+      localPort,
+      url,
+      enabled: input.enabled,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  listTargets(applicationId: string): RoutingTargetView[] {
+    this.requireApplication(applicationId);
+    return this.repository
+      .listTargets(applicationId)
+      .map((view) => ({ ...view, health: this.effectiveHealth(view.health) }));
+  }
+
+  getRoute(applicationId: string): RouteSnapshot {
+    this.requireApplication(applicationId);
+    const route = this.repository.route(applicationId);
+    if (!route) throw new NotFoundException('Application route not found');
+    return { ...route, health: this.effectiveHealth(route.health) };
+  }
+
+  changeRoute(
+    applicationId: string,
+    input: UpdateApplicationRouteDto,
+    changedBy: string,
+  ): RouteSnapshot {
+    this.requireApplication(applicationId);
+    const target = this.repository.findTarget(input.target_id);
+    if (!target || target.applicationId !== applicationId) {
+      throw new NotFoundException('Routing target not found for application');
+    }
+    if (!target.enabled) {
+      throw new ConflictException('Routing target is disabled');
+    }
+    const route = this.repository.changeRoute(
+      applicationId,
+      target.id,
+      input.expected_revision,
+      changedBy,
+      input.reason ?? null,
+    );
+    if (!route) {
+      throw new ConflictException('Routing revision does not match');
+    }
+    return { ...route, health: this.effectiveHealth(route.health) };
+  }
+
+  resolve(applicationId: string): RouteSnapshot {
+    const route = this.getRoute(applicationId);
+    if (!route.target.enabled) {
+      throw new ConflictException('Routing target is disabled');
+    }
+    return route;
+  }
+
+  recordHealth(input: TargetHealthObservation): RoutingTargetHealth {
+    const target = this.repository.findTarget(input.targetId);
+    if (!target) throw new NotFoundException('Routing target not found');
+    if (target.deploymentId !== input.deploymentId) {
+      throw new ConflictException(
+        'Health deployment does not match routing target',
+      );
+    }
+    const observedAt = new Date(input.observedAt).toISOString();
+    const expiresAt = new Date(input.expiresAt).toISOString();
+    if (expiresAt <= observedAt) {
+      throw new BadRequestException(
+        'Health expires_at must follow observed_at',
+      );
+    }
+    return this.repository.saveHealth({
+      targetId: target.id,
+      deploymentId: target.deploymentId,
+      status: input.status,
+      observedAt,
+      expiresAt,
+      reason: input.reason ?? null,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  private requireApplication(id: string): void {
+    if (!this.applications.find(id)) {
+      throw new NotFoundException('Application not found');
+    }
+  }
+
+  private cloudRunUrl(value: string): string {
+    let url: URL;
+    try {
+      url = new URL(value);
+    } catch {
+      throw new BadRequestException('Cloud Run url is invalid');
+    }
+    if (
+      url.protocol !== 'https:' ||
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash
+    ) {
+      throw new BadRequestException('Cloud Run url must be an HTTPS base URL');
+    }
+    return url.toString().replace(/\/$/, '');
+  }
+
+  private effectiveHealth(
+    health: RoutingTargetHealth | null,
+  ): RoutingTargetHealth | null {
+    if (!health || health.expiresAt > new Date().toISOString()) return health;
+    return { ...health, status: 'unknown' };
+  }
+}
