@@ -20,6 +20,12 @@ plan.json ─→ [decision 확인] ─→ (needs_approval이면 approval.json �
 - Plan 스키마 검사를 못 하면 서명 안 함
 - 거절이면 sign_result.json을 남기지 않음 (예전 결과가 있어도 지움)
 
+### 누가 요청하고 승인했는지는 signer가 확인하지 않음
+
+- `--requester`, `--approver`에 들어온 id를 그대로 믿음. 로그인이나 GitHub 인증은 signer 밖의 일
+- 인증된 사람 id를 넘기는 건 부르는 쪽(backend) 책임. 예: webhook의 push 작성자 → requester, 로그인한 승인 화면 사용자 → approver
+- signer가 막는 건 본인 승인, 승인 뒤 plan·이미지 바꿔치기까지
+
 ## 사용법
 
 ```bash
@@ -60,6 +66,7 @@ cosign verify --key signer/keys/cosign.pub -a plan_hash=<sign_result.plan_hash> 
 | `contracts/Approval.schema.json` | approval.json |
 
 - `npm run contracts`로 `src/schema.ts`에서 생성 (손으로 고치지 않음)
+- SignResult, SignLog는 루트 `contracts/`에도 같은 파일이 있음. 바꾸면 같은 PR에서 루트에도 복사 (테스트가 확인)
 - plan 검사는 `policy/contracts/Plan.schema.json` 사용 (`--plan-schema`로 바꿀 수 있음)
 - plan_hash는 plan.json 값 그대로 (접두어 없이 64자), digest는 `sha256:` + 64자
 
