@@ -25,6 +25,10 @@ export interface Config {
   deployMode: DeployMode;
   policyTimeoutMs: number;
   signerTimeoutMs: number;
+  /** 레포의 deploy/ 폴더 (배포 조율기, Cloud Run 스크립트) */
+  deployDir: string;
+  /** 배포 조율기 시간 제한 */
+  deployTimeoutMs: number;
 }
 
 export class ConfigError extends Error {}
@@ -53,5 +57,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, backendRoot: st
     deployMode: pick(env.DEPLOY_MODE, ["off", "dry", "real"] as const, "DEPLOY_MODE", "off"),
     policyTimeoutMs: 180_000,
     signerTimeoutMs: 180_000,
+    deployDir: resolve(repoRoot, "deploy"),
+    deployTimeoutMs: 600_000,
   };
 }
