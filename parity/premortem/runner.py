@@ -15,7 +15,7 @@ from .evidence import EvidenceLog, utc_now
 from .gate import fault_positions, overall_status
 from .jsonio import load_jsonl, write_json_atomic
 from .lifecycle import ConditionRunner
-from .paths import create_run_dir, new_run_id
+from .paths import create_run_dir, new_run_id, validate_run_id
 from .snapshot import copy_file, git_commit_for, sha256_file, take_snapshot, verify_unchanged
 from .validation import validate
 
@@ -44,9 +44,12 @@ class RunResult:
 
 
 def execute_run(scenario, source_dir: Path, stage: str, parent_run_id: Optional[str], settings: Settings,
-                docker, replay_port, commit_runner, run_root: Optional[Path] = None) -> RunResult:
+                docker, replay_port, commit_runner, run_root: Optional[Path] = None,
+                run_id: Optional[str] = None) -> RunResult:
     run_root = Path(run_root or settings.run_root)
-    run_id = new_run_id(f"{scenario.name}-{'pre' if stage == 'pretest' else 'retest'}")
+    # 파이프라인이 준 run_id가 있으면 그대로 쓴다. 같은 run_id의 결과는 덮어쓰지 않는다(RUN_EXISTS)
+    run_id = (validate_run_id(run_id) if run_id is not None
+              else new_run_id(f"{scenario.name}-{'pre' if stage == 'pretest' else 'retest'}"))
     run_dir = create_run_dir(run_root, run_id)
     log(f"[{run_id}] 시작 ({stage})")
 

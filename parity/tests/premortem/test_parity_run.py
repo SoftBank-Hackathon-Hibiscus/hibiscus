@@ -62,7 +62,7 @@ class RunLabelsTest(unittest.TestCase):
         self.noise.write_text('{"rules": []}', encoding="utf-8")
         self.run_root = root / "runs"
 
-    def run_with(self, replay_class):
+    def run_with(self, replay_class, run_id=None):
         docker = BuildingDocker()
         scenario = Scenario("guestbook", "test", self.src, self.session, self.noise, 8080, "/healthz", 0.5,
                             (3,), CORE_CONDITIONS, (), {})
@@ -70,11 +70,21 @@ class RunLabelsTest(unittest.TestCase):
         ready = lambda *a, **k: real(*a, http_check=lambda url: True, sleep=lambda s: None, **k)  # noqa: E731
         with mock.patch.object(runner_mod, "ConditionRunner", ready):
             result = execute_run(scenario, self.src, "pretest", None, Settings(), docker, replay_class(docker),
-                                 FakeRunner(no_git), self.run_root)
+                                 FakeRunner(no_git), self.run_root, run_id=run_id)
         return result, docker
 
+    def test_pipeline_run_id_is_used_as_is(self):
+        result, _ = self.run_with(ParityLikeReplay, run_id="pipe-20261001-1")
+        self.assertEqual((result.run_id, result.env_report["run_id"], result.run_dir.name), ("pipe-20261001-1",) * 3)
+
+    def test_same_run_id_is_not_overwritten(self):
+        self.run_with(ParityLikeReplay, run_id="pipe-1")
+        with self.assertRaises(PremortemError) as caught:
+            self.run_with(ParityLikeReplay, run_id="pipe-1")
+        self.assertEqual(caught.exception.code, "RUN_EXISTS")
+
     def test_parity_run_is_marked_as_team_result(self):
-        result, docker = self.run_with(ParityLikeReplay)
+        result, _ = self.run_with(ParityLikeReplay)
         report = result.env_report
         self.assertEqual((report["replay_backend"], report["team_parity_integrated"]), ("parity", True))
         self.assertIn("parity 재생기", report["note"])
@@ -111,6 +121,9 @@ class RunCommandInputTest(unittest.TestCase):
 
     def test_bad_after_is_rejected(self):
         self.assertEqual(main([*self.base, "--after", "ten"]), EXIT_ERROR)
+
+    def test_bad_run_id_is_rejected_before_docker(self):
+        self.assertEqual(main([*self.base, "--run-id", "../x"]), EXIT_ERROR)
 
 
 if __name__ == "__main__":

@@ -99,12 +99,15 @@ def _cmd_run(args) -> int:
     from .config import CORE_CONDITIONS
     from .docker_driver import DockerDriver
     from .handoff import write_handoff
+    from .paths import validate_run_id
     from .process import SubprocessRunner
     from .report import summary_lines, write_report
     from .runner import execute_run
     from .scenarios import Scenario
 
     replay = load_parity_adapter()  # 윤선님 재생기 없이는 실제 앱을 검사하지 않는다
+    if args.run_id is not None:
+        validate_run_id(args.run_id)
     if not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{0,39}", args.name):
         raise PremortemError("INPUT_INVALID", f"--name은 소문자·숫자·-_. 만 쓸 수 있음: {args.name!r}")
     app_dir, record = Path(args.app), Path(args.record)
@@ -123,7 +126,7 @@ def _cmd_run(args) -> int:
     docker = DockerDriver(command_runner, settings)
     docker.require_daemon()
     result = execute_run(scenario, app_dir, "pretest", None, settings, docker, replay, command_runner,
-                         Path(args.run_root) if args.run_root else None)
+                         Path(args.run_root) if args.run_root else None, run_id=args.run_id)
     write_report(result.run_dir)
     write_handoff(result.run_dir)
     overall = result.env_report["overall_status"]
@@ -193,6 +196,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--health-path", default="/healthz", help="준비 확인 경로 (기본 /healthz)")
     run.add_argument("--health-timeout", type=float, default=30.0, help="준비 확인 최대 초 (기본 30)")
     run.add_argument("--after", help="조건을 넣을 요청 번호, 쉼표로 구분 (예: 10). 없으면 가운데 한 번")
+    run.add_argument("--run-id", help="파이프라인이 만든 run_id. 없으면 새로 만든다")
     run.add_argument("--run-root", help="실행 결과를 둘 폴더 (기본 premortem/.runs)")
     run.add_argument("--json", action="store_true")
     run.set_defaults(handler=_cmd_run)
