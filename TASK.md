@@ -50,11 +50,14 @@ API 전송 계약과 예시는 `backend-v2/README.md`의 `Agent API 계약 v1`�
 - [x] Agent token으로 SSH 전달 목록을 조회한다.
 - [x] Agent가 VM으로 outbound 연결하게 한다.
 - [x] Agent가 `ssh2` Node 모듈 연결 하나로 여러 전달 규칙을 관리한다.
+- [x] Agent가 최초 실행에서 ED25519 키를 자동 생성한다.
+- [x] 1회용 등록 token으로 공개키만 Backend에 등록한다.
+- [x] `AuthorizedKeysCommand`가 DB 공개키와 Agent별 포트 제한을 조회한다.
 - [x] Gateway 요청과 Agent 응답을 중계한다.
 - [x] 연결 종료와 요청 시간 초과를 처리한다.
 - [x] Agent 자동 재연결을 만든다.
 - [ ] 운영 VM의 `sshd`, 전용 사용자, 공개키, 방화벽을 설정한다.
-- [ ] SSH 키 교체와 폐기 절차를 확정한다.
+- [x] 새 등록 token 발급과 Agent token 폐기 시 SSH 키 폐기를 구현한다.
 
 ## P4. Gateway와 Routing
 

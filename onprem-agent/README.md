@@ -52,6 +52,7 @@ node dist/main.js
 | `BACKEND_API_URL`                 |                      필수 | Backend HTTP API 주소                   |
 | `AGENT_ID`                        |                      필수 | Agent 등록 응답의 `agent.id`            |
 | `AGENT_TOKEN`                     |                      필수 | Agent 등록 또는 token 교체 응답의 token |
+| `SSH_ENROLLMENT_TOKEN`            |                 최초 필수 | 1회용 SSH 공개키 등록 token             |
 | `COSIGN_PUBLIC_KEY`               |                      필수 | 이미지 서명 공개키 경로                 |
 | `AGENT_STATE_FILE`                | `./data/agent-state.json` | 컨테이너와 완료 Job 상태 파일           |
 | `AGENT_POLL_INTERVAL_MS`          |                    `2000` | Job 폴링 간격                           |
@@ -61,26 +62,34 @@ node dist/main.js
 | `DOCKER_STOP_TIMEOUT_SECONDS`     |                      `10` | 컨테이너 정지 대기 시간                 |
 | `COSIGN_ALLOW_INSECURE_REGISTRY`  |                   `false` | 로컬 개발용 HTTP Registry 허용          |
 | `COSIGN_INSECURE_IGNORE_TLOG`     |                   `false` | 로컬 테스트에서만 transparency log 생략 |
-| `SSH_HOST`                        |                      필수 | Backend VM SSH 주소                     |
+| `SSH_HOST`                        |                 자동 설정 | Backend VM SSH 주소                     |
 | `SSH_PORT`                        |                      `22` | Backend VM SSH 포트                     |
-| `SSH_USER`                        |                      필수 | Tunnel 전용 OS 사용자                   |
-| `SSH_IDENTITY_FILE`               |                      필수 | Agent 전용 SSH 개인 키 경로             |
-| `SSH_HOST_KEY_SHA256`             |                      필수 | 고정한 VM SSH host key 지문             |
+| `SSH_USER`                        |                 자동 설정 | Tunnel 전용 OS 사용자                   |
+| `SSH_IDENTITY_FILE`               | `./data/ssh/agent_ed25519` | Agent 전용 SSH 개인 키 경로           |
+| `SSH_HOST_KEY_SHA256`             |                 자동 설정 | 고정한 VM SSH host key 지문             |
 | `SSH_READY_TIMEOUT_MS`            |                   `10000` | SSH 연결 준비 시간 초과                 |
 | `SSH_FORWARD_POLL_INTERVAL_MS`    |                    `2000` | 전달 목록 확인 간격                     |
 | `SSH_SERVER_ALIVE_INTERVAL_SECONDS` |                    `15` | SSH keepalive 간격                      |
 | `SSH_SERVER_ALIVE_COUNT_MAX`      |                       `3` | 연결 종료 전 keepalive 실패 횟수        |
+| `SSH_SESSION_MAX_MS`              |                  `900000` | 공개키 재검사를 위한 최대 연결 시간     |
 
-SSH Tunnel은 `ssh2` Node 모듈을 사용합니다. 시스템 `ssh` 명령과 `child_process`를 사용하지 않습니다. SSH 연결 하나가 여러 앱의 TCP 연결을 함께 처리합니다. 전달 목록이 바뀌면 연결을 다시 구성합니다.
+SSH Tunnel은 `ssh2` Node 모듈을 사용합니다. 시스템 `ssh` 명령과 `child_process`를 사용하지 않습니다. SSH 연결 하나가 여러 앱의 TCP 연결을 함께 처리합니다. 전달 목록이 바뀌거나 최대 연결 시간이 지나면 연결을 다시 구성합니다.
 
-Agent 키 생성과 VM host key 지문 확인 예:
+최초 실행 흐름:
 
-```bash
-ssh-keygen -t ed25519 -f ./keys/agent_ed25519
-ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256
+```text
+POST /agents 응답을 Agent 환경 변수에 설정
+  ↓
+Agent가 ED25519 개인 키와 공개키 생성
+  ↓
+공개키만 POST /agent/v1/ssh/enroll로 전송
+  ↓
+등록 완료 파일 저장
+  ↓
+ssh2 연결 시작
 ```
 
-첫 명령은 Agent에서 실행합니다. 두 번째 명령은 Backend VM에서 실행합니다. 출력의 `SHA256:...` 값을 `SSH_HOST_KEY_SHA256`에 넣습니다. 개인 키는 Agent에만 둡니다. Backend VM에는 공개키만 등록합니다. Tunnel 전용 OS 사용자는 shell 작업에 사용하지 않습니다.
+개인 키는 `SSH_IDENTITY_FILE`에 mode `0600`으로 저장합니다. 공개키와 등록 완료 정보는 같은 경로에 `.pub`, `.enrolled` 접미사로 저장합니다. 같은 등록 token으로 다시 실행해도 공개키 등록을 반복하지 않습니다. 키를 교체할 때는 관리 API에서 새 SSH 등록 token을 발급하고 Agent 설정을 교체합니다.
 
 `candidate`는 다음 서명을 확인합니다.
 

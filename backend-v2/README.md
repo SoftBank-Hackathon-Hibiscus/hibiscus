@@ -320,9 +320,30 @@ Docker container
 - Gateway와 Health Monitor는 `127.0.0.1:<gateway_port>`에 연결합니다.
 - SSH 포트는 `SSH_FORWARD_PORT_MIN`부터 `SSH_FORWARD_PORT_MAX` 사이에서 할당합니다.
 - `GET /agents/:id/tunnel`은 각 전달 포트의 접속 가능 상태를 반환합니다.
-- Agent token 교체는 API 접근만 차단합니다. 이미 연결된 SSH 세션은 SSH 키 수명 주기로 관리합니다.
+- Agent를 만들면 Agent token과 1회용 SSH 등록 token을 함께 발급합니다.
+- Agent는 ED25519 키를 직접 생성하고 공개키만 Backend에 등록합니다.
+- SSH 등록 token은 기본 10분 뒤 만료되며 한 번만 사용할 수 있습니다.
+- Agent token을 폐기하면 등록한 SSH 공개키도 폐기합니다.
 
-Backend VM에는 별도 `sshd`가 필요합니다. Backend 프로세스가 SSH 서버를 구현하지 않습니다. 전용 OS 사용자와 전용 키를 사용하세요. SSH 서버는 remote TCP forwarding을 허용하고, 전달 주소는 loopback으로 제한해야 합니다. `GatewayPorts no`, `AllowTcpForwarding remote`, `PermitListen 127.0.0.1:*` 설정을 권장합니다. 운영에서는 방화벽과 SSH 키 교체·폐기 절차도 설정해야 합니다.
+Backend VM에는 별도 `sshd`가 필요합니다. Backend 프로세스가 SSH 서버를 구현하지 않습니다. `scripts/authorized-keys-command.mjs`는 DB에서 등록된 공개키를 찾고, 해당 Agent에 배정된 `gateway_port`만 허용하는 `authorized_keys` 한 줄을 출력합니다.
+
+```text
+FingerprintHash sha256
+
+Match User hibiscus-agent
+    AuthorizedKeysFile none
+    AuthorizedKeysCommand /opt/hibiscus/backend-v2/scripts/authorized-keys-command.mjs /var/lib/hibiscus/backend.db %f
+    AuthorizedKeysCommandUser hibiscus-key-reader
+    PasswordAuthentication no
+    KbdInteractiveAuthentication no
+    PubkeyAuthentication yes
+    AllowTcpForwarding remote
+    GatewayPorts no
+    PermitTTY no
+    X11Forwarding no
+```
+
+명령 파일은 root 소유여야 하며 group과 other가 수정할 수 없어야 합니다. `hibiscus-key-reader`는 DB와 상위 폴더를 읽을 수 있어야 합니다. 설정 후 `sshd -t`로 검사하고 SSH 서버를 다시 불러옵니다. 운영 방화벽에서는 SSH 포트를 필요한 네트워크에만 엽니다.
 
 ## Agent API 계약 v1
 
@@ -338,12 +359,25 @@ Backend VM에는 별도 `sshd`가 필요합니다. Backend 프로세스가 SSH �
 | GET    | `/agents`, `/agents/:id`   | Agent 조회                            |
 | POST   | `/agents/:id/token/rotate` | 새 token 발급, 이전 token 즉시 무효화 |
 | DELETE | `/agents/:id/token`        | token 폐기                            |
+| POST   | `/agents/:id/ssh/enrollment` | 새 1회용 SSH 등록 token 발급        |
 | GET    | `/agents/:id/status`       | 최근 상태 조회                        |
 | POST   | `/agents/:id/jobs`         | 작업 생성                             |
 | GET    | `/agents/:id/jobs`         | 작업 목록 조회                        |
 | GET    | `/agents/:id/jobs/:jobId`  | 작업 상태와 결과 조회                 |
 
 token 원문은 등록·교체 응답에서 한 번만 제공합니다. DB에는 SHA-256 해시만 저장합니다. 폐기된 Agent는 token 교체로 다시 등록 상태가 됩니다. Job·결과·heartbeat 기록은 삭제하지 않습니다.
+
+`POST /agents`는 `ssh_enrollment_token`, 만료 시각, SSH host·port·user·host key 지문도 반환합니다. Agent는 최초 실행에서 다음 API를 한 번 호출합니다.
+
+```http
+POST /agent/v1/ssh/enroll
+Authorization: Bearer <ssh_enrollment_token>
+Content-Type: application/json
+
+{"public_key":"ssh-ed25519 AAAA... hibiscus:<agent-id>"}
+```
+
+이 API에는 Agent token이 아니라 SSH 등록 token을 사용합니다. Backend는 ED25519 공개키만 받습니다. 개인 키는 받지 않습니다.
 
 작업 생성 본문은 다음과 같습니다. `run_id`는 존재하는 Deployment ID여야 합니다. 해당 앱에 Agent가 할당되어 있어야 하며 `digest`는 Deployment의 값과 같아야 합니다.
 
