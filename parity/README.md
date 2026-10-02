@@ -9,6 +9,8 @@
 회의에서 정한 기본 연결, 오류 처리, 교체 시험은 [MEETING.md](MEETING.md)에 있습니다.
 이전 어댑터 실험 및 원본 인계 파일 제안은 [INTEGRATION.md](INTEGRATION.md)에 보존합니다.
 기본 결과 JSON의 최상위 키와 타입은 유지하며, 실행 상태·해시는 별도 진단 파일에 저장합니다.
+커밋된 앱을 레지스트리에 빌드·업로드하고 index digest를 기록하는 방법은
+[premortem의 레지스트리 빌드](premortem/README.md#레지스트리-빌드)에 있습니다.
 
 ---
 

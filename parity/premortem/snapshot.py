@@ -68,6 +68,13 @@ def tree_hash(files: list) -> str:
     return sha256_bytes(canonical.encode("utf-8"))
 
 
+def verify_source_tree(source: Path, expected_sha256: str) -> None:
+    """완료 기록에 담을 소스는 제외 파일 없이 빌드 당시 복사본과 같아야 한다."""
+    files, excludes = tree_listing(source)
+    if Path(source).is_symlink() or not files or excludes or tree_hash(files) != expected_sha256:
+        raise PremortemError("SOURCE_CHANGED", "보관된 소스가 빌드 manifest의 해시와 다르거나 제외 파일이 추가됨")
+
+
 @dataclass(frozen=True)
 class Snapshot:
     root: Path
