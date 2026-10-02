@@ -10,7 +10,7 @@ parity 안에서 배포 환경 조건을 재현하고, AI 수정안을 같은 �
 
 - 로컬 검토본의 `test-build`는 윤선님 실행기로 같은 이미지의 세 조건을 시험합니다. 기존 `demo`는 샘플 전용 reference 재생기를 사용합니다.
 - 기존 `demo`의 AI 수정·재검증은 예제 앱을 대상으로 합니다. 빌드 이미지와 연결하는 명령은 후속 변경에서 추가합니다.
-- 원본 result·facts와 handoff를 보존합니다. 정책 입력 변환은 류진님 변환기를 연결하는 후속 변경에서 추가합니다. env_report는 환경 진단·AI 분석용 내부 결과입니다.
+- 정책 입력(test_result)은 원본 result·facts·handoff를 류진님 변환기에 넘겨 만듭니다. env_report는 환경 진단·AI 분석용 내부 결과입니다.
 
 샘플 결과: 메모 앱은 컨테이너를 새로 바꾸면(replace) 6건 중 4건만 맞습니다(restart는 6건 다 맞음). 127.0.0.1 앱은 AI 수정 후 같은 기록으로 다시 돌려서 none, restart, replace 모두 통과합니다.
 
@@ -82,9 +82,9 @@ Dockerfile은 앱 폴더 바로 아래에 있어야 하며, submodule은 지원�
 조건별 재생은 실행하지 않습니다. 기존 `demo`/`run`/`handoff`에 이 이미지를 넘기는 연결은 별도 작업입니다.
 pull한 로컬 이미지는 다음 검사에서 쓸 수 있도록 남겨 둡니다.
 
-## 빌드 이미지 검사
+## 빌드 이미지 검사와 정책 확인
 
-아래 연결은 PR #10, #21을 함께 읽는 로컬 검토본입니다. 각 PR의 병합 여부와 별개로
+아래 연결은 PR #10, #12, #15, #21을 함께 읽는 로컬 검토본입니다. 각 PR의 병합 여부와 별개로
 확인한 것이며, 기존 Backend의 TestStage에는 등록하지 않았습니다.
 
 ```sh
@@ -93,6 +93,8 @@ python -m premortem test-build \
   --record <기록폴더>/session.jsonl --noise <기록폴더>/session.noise.json \
   --name guestbook --out-dir <새검사폴더> --after 10 --json
 
+python -m premortem policy-preview \
+  --test-dir <검사폴더> --out-dir <새정책폴더> --json
 ```
 
 `test-build`는 registry의 index와 platform manifest를 다시 읽고 소스 hash와 이미지 라벨을 대조합니다.
@@ -107,9 +109,14 @@ python -m premortem test-build \
 handoff 안의 `caller_asserted`는 기존 parity 형식을 유지한 값이며, 추가 이미지 검증은 별도 빌드·실행 기록에 남습니다.
 실행이 중단되면 원본 부분 결과를 보존하고 정책 인계 파일은 만들지 않습니다.
 
+`policy-preview`는 파일 hash와 식별값을 먼저 확인한 뒤 류진님 정책 실행기를 부릅니다.
+`policy/`에서 `npm ci`가 필요합니다. 입력은 원본 handoff와 검증 진단, 소스는 빌드 당시 복사본입니다.
+분류기는 `heuristic`으로 고정합니다. 정책 규칙을 재구현하지 않으며 서명·배포는 호출하지 않습니다.
+
 | 명령 | 종료 코드 |
 |---|---|
 | `test-build` | 0: 앱 검사 통과, 3: 완료했지만 불일치, 1: 입력·실행·정리 오류 |
+| `policy-preview` | 정책 CLI와 같음. 0: allow, 2: needs_approval, 3: block, 1: 실행 오류 |
 
 현재 비교 범위는 요청 200건 이하와 빈 컨테이너 쓰기 계층입니다. 기존 볼륨·서비스 컨테이너는 받지 않습니다.
 테스트와 정책 결과 폴더는 새로 만들어야 하며, 완료 결과를 덮어쓰지 않습니다.

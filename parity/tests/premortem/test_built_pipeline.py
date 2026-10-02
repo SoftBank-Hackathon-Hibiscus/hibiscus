@@ -8,6 +8,7 @@ from premortem.built_image import verify_build
 from premortem.built_test import test_build
 from premortem.errors import PremortemError
 from premortem.jsonio import load_json, write_json_atomic
+from premortem.policy_preview import verify_test_bundle
 from premortem.process import CommandResult
 from premortem.snapshot import sha256_file
 from tests.premortem import test_registry_build as registry_fixture
@@ -80,11 +81,14 @@ class BuiltPipelineTest(unittest.TestCase):
         self.assertEqual(handoff['metadata']['digest'], self.build['image']['registry_digest'])
         self.assertNotEqual(handoff['metadata']['digest'], registry_fixture.CONFIG_ID)
         self.assertTrue(1 <= self.docker.fixed_port <= 65535)
+        self.assertEqual(verify_test_bundle(self.out), summary)
 
     def test_partial_execution_has_no_handoff(self):
         self.partial = True
         self.assertEqual(self.run_pipeline()['status'], 'error')
         self.assertFalse((self.out / 'parity_handoff.json').exists())
+        with self.assertRaises(PremortemError):
+            verify_test_bundle(self.out)
 
     def test_wrong_run_revision_digest_stop_before_container(self):
         for changes in ({'run_id': 'other'}, {'revision': 'b' * 40}, {'digest': 'sha256:' + 'c' * 64}):
@@ -123,6 +127,16 @@ class BuiltPipelineTest(unittest.TestCase):
             self.run_pipeline()
         self.assertFalse((self.out / 'parity_handoff.json').exists())
 
+    def test_policy_rejects_modified_result_and_source(self):
+        self.run_pipeline()
+        original = (self.out / 'result.json').read_bytes()
+        (self.out / 'result.json').write_bytes(original + b' ')
+        with self.assertRaises(PremortemError):
+            verify_test_bundle(self.out)
+        (self.out / 'result.json').write_bytes(original)
+        (self.out / 'source/start.sh').write_text('changed', encoding='utf-8')
+        with self.assertRaises(PremortemError):
+            verify_test_bundle(self.out)
 
     def test_output_cannot_overwrite_success(self):
         self.run_pipeline()
