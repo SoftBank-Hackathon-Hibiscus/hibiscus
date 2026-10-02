@@ -17,10 +17,10 @@ Nest CLI로 생성한 하이브리드 배포 백엔드 재구현 초안입니다
 - Revision 확인을 사용하는 수동 Route 변경과 변경 이력 저장
 - Health Monitor가 전달할 Target Health 저장과 만료 처리
 - Application Host 기반 Reverse Proxy와 개발용 slug 경로
-- On-Prem Tunnel·Cloud Run 요청 전달과 스트리밍
+- On-Prem SSH Tunnel·Cloud Run 요청 전달과 스트리밍
 - Application별 임계값을 사용하는 Health Monitor와 On-Prem → Cloud Run 자동 Failover
-- Agent token으로 인증하는 outbound WSS Reverse Tunnel
-- Agent별 Tunnel 세션·채널·heartbeat·시간 초과 관리
+- Agent가 OpenSSH로 만드는 outbound SSH Reverse Tunnel
+- 앱별 VM loopback 전달 포트 할당과 연결 상태 확인
 - SQLite 작업함을 확인하는 배포 Worker
 - `test → policy → sign → deploy` 단계 실행과 시도별 기록
 - 정책 결과 `allow`, `needs_approval`, `block`
@@ -54,7 +54,7 @@ src/
 ├── deployment/   Version, Pipeline, Stage, Policy Result
 ├── agent/        Agent와 Application 연결
 ├── routing/      Target, 현재 Route, Health 상태
-├── tunnel/       Agent WSS 제어·데이터 터널
+├── ssh-tunnel/   VM loopback SSH 전달 연결과 상태 확인
 ├── gateway/      Host 선택과 On-Prem·Cloud Run Reverse Proxy
 ├── health/       Target 점검과 자동 Failover
 ├── auth/         GitHub 로그인, JWT 발급·검증·갱신
@@ -279,7 +279,7 @@ Webhook은 원본 요청 바이트의 HMAC-SHA256을 `X-Hub-Signature-256`과 �
 
 `/agent/v1/*`는 Agent token이 필요합니다. `/healthz`와 인증 진입 API를 제외한 나머지 API는 Access JWT가 필요합니다. 두 인증 수단을 서로 바꾸어 사용할 수 없습니다.
 
-## Routing과 Reverse Tunnel
+## Routing과 SSH Reverse Tunnel
 
 Routing Target은 특정 Deployment의 실행 위치입니다.
 
@@ -290,9 +290,9 @@ Routing Target은 특정 Deployment의 실행 위치입니다.
 - Revision이 다르면 `409`를 반환합니다. 동시 변경으로 새 Route를 덮어쓰지 않습니다.
 - Target Health는 `healthy`, `unhealthy`, `unknown`을 저장합니다. `expires_at`이 지나면 조회 결과는 `unknown`입니다.
 - Health Monitor는 Application의 interval, timeout, success/failure threshold를 사용합니다.
-- HTTP 상태 오류는 `application`, 연결·Tunnel·timeout 오류는 `network`로 저장합니다.
+- HTTP 상태 오류는 `application`, 연결·SSH·timeout 오류는 `network`로 저장합니다.
 - 현재 On-Prem Target이 `unhealthy`이면 같은 Deployment의 정상 Cloud Run Target으로 전환합니다. 정책의 `failoverAllowed`가 `true`여야 합니다.
-- Tunnel 종료만으로 전환하지 않습니다. 자동 Failback도 하지 않습니다.
+- SSH 연결 종료만으로 전환하지 않습니다. 자동 Failback도 하지 않습니다.
 
 Gateway 진입 방법은 두 개입니다.
 
@@ -301,26 +301,28 @@ Gateway 진입 방법은 두 개입니다.
 
 Gateway는 요청과 응답을 스트리밍합니다. Hop-by-hop 헤더는 전달하지 않습니다. 쓰기 요청도 자동 재전송하지 않습니다. `GATEWAY_IDLE_TIMEOUT_MS` 동안 데이터가 없으면 요청을 종료합니다.
 
-Tunnel은 제어 연결과 요청별 데이터 연결을 분리합니다.
+Agent는 Backend API에서 전달 목록을 폴링합니다. 그 뒤 OpenSSH 연결 하나에 여러 `-R` 전달 규칙을 설정합니다.
 
 ```text
-On-Prem Agent -- WSS control --> VM Backend
-On-Prem Agent -- WSS data ----> VM Backend -- raw stream --> Gateway request
-      |
-      +-- TCP 127.0.0.1:<target.local_port> --> local container
+Gateway request
+  ↓
+VM 127.0.0.1:<gateway_port>
+  ↓ SSH reverse forward
+Agent 127.0.0.1:<local_port>
+  ↓
+Docker container
 ```
 
-- 제어: `GET /agent/v1/tunnel/control` WebSocket upgrade
-- 데이터: `GET /agent/v1/tunnel/data?session_id=...&channel_id=...` WebSocket upgrade
-- 두 연결 모두 `Authorization: Bearer <agent_token>`을 사용합니다.
-- 새 제어 연결은 같은 Agent의 이전 세션을 대체합니다.
-- Token을 교체하거나 폐기하면 활성 Tunnel을 즉시 닫습니다.
-- Backend는 ping/pong, 채널 열기 시간 초과, Agent별 채널 수, frame 크기를 제한합니다.
-- Agent는 연결이 끊기면 exponential backoff와 jitter로 재연결합니다. Token이 거부되면 재시도하지 않습니다.
+- Backend는 On-Prem Target 생성 시 `gateway_port`를 자동 할당합니다.
+- Agent는 `GET /agent/v1/forwards`를 Agent token으로 폴링합니다.
+- Agent는 자신이 관리하는 Docker host port만 전달합니다.
+- SSH 연결이 끊기면 Agent가 다음 폴링에서 다시 연결합니다.
+- Gateway와 Health Monitor는 `127.0.0.1:<gateway_port>`에 연결합니다.
+- SSH 포트는 `SSH_FORWARD_PORT_MIN`부터 `SSH_FORWARD_PORT_MAX` 사이에서 할당합니다.
+- `GET /agents/:id/tunnel`은 각 전달 포트의 접속 가능 상태를 반환합니다.
+- Agent token 교체는 API 접근만 차단합니다. 이미 연결된 SSH 세션은 SSH 키 수명 주기로 관리합니다.
 
-`TUNNEL_PING_INTERVAL_MS`, `TUNNEL_HEARTBEAT_TIMEOUT_MS`, `TUNNEL_OPEN_TIMEOUT_MS`, `TUNNEL_MAX_CHANNELS_PER_AGENT`, `TUNNEL_MAX_FRAME_BYTES`로 제한을 설정합니다.
-
-Tunnel Service는 Gateway에 raw duplex stream을 제공합니다. Gateway는 이 stream으로 On-Prem 컨테이너에 HTTP 요청을 전달합니다.
+Backend VM에는 별도 `sshd`가 필요합니다. Backend 프로세스가 SSH 서버를 구현하지 않습니다. 전용 OS 사용자와 전용 키를 사용하세요. SSH 서버는 remote TCP forwarding을 허용하고, 전달 주소는 loopback으로 제한해야 합니다. `GatewayPorts no`, `AllowTcpForwarding remote`, `PermitListen 127.0.0.1:*` 설정을 권장합니다. 운영에서는 방화벽과 SSH 키 교체·폐기 절차도 설정해야 합니다.
 
 ## Agent API 계약 v1
 
@@ -375,6 +377,7 @@ token 원문은 등록·교체 응답에서 한 번만 제공합니다. DB에는
 | POST   | `/agent/v1/jobs/:jobId/result` | 저장한 Result JSON `200`                    |
 | POST   | `/agent/v1/heartbeat`          | 저장한 상태 `200`                           |
 | GET    | `/agent/v1/status`             | 자신의 최근 상태 `200`                      |
+| GET    | `/agent/v1/forwards`           | SSH reverse forward 목록 `200`              |
 
 폴링은 2초 간격을 권장합니다. Job은 `created_at` 순서로 Agent별 하나씩 전달합니다. 폴링 응답은 기존 Job 필드에 `schema_version`, `agent_id`, `attempt`, `lease_until`, `runtime`, `health_check`를 추가합니다. `runtime.container_port`는 Application 설정입니다. `health_check`는 Application의 현재 Health Check 설정입니다. 첫 전달은 `attempt: 1`입니다. 활성 lease가 있으면 추가 작업은 전달하지 않습니다.
 

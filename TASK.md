@@ -44,15 +44,17 @@ API 전송 계약과 예시는 `backend-v2/README.md`의 `Agent API 계약 v1`�
 
 실제 트래픽 전환은 Agent 내부 프록시가 아니라 Backend의 Application Route 변경으로 처리한다. Agent는 이전 컨테이너를 롤백용으로 유지한다.
 
-## P3. Reverse Tunnel
+## P3. SSH Reverse Tunnel
 
-- [x] VM Backend에 WSS Tunnel endpoint를 만든다.
-- [x] Agent token으로 WSS 연결을 인증한다.
+- [x] VM Backend가 앱별 loopback 전달 포트를 할당한다.
+- [x] Agent token으로 SSH 전달 목록을 조회한다.
 - [x] Agent가 VM으로 outbound 연결하게 한다.
-- [x] Agent별 터널 세션을 관리한다.
+- [x] Agent가 OpenSSH 프로세스 하나로 여러 전달 규칙을 관리한다.
 - [x] Gateway 요청과 Agent 응답을 중계한다.
 - [x] 연결 종료와 요청 시간 초과를 처리한다.
 - [x] Agent 자동 재연결을 만든다.
+- [ ] 운영 VM의 `sshd`, 전용 사용자, 공개키, 방화벽을 설정한다.
+- [ ] SSH 키 교체와 폐기 절차를 확정한다.
 
 ## P4. Gateway와 Routing
 
@@ -68,7 +70,7 @@ API 전송 계약과 예시는 `backend-v2/README.md`의 `Agent API 계약 v1`�
 
 - [x] Health 실패 횟수와 timeout은 Application별 설정을 사용한다.
 - [x] 터널 종료만으로 즉시 전환하지 않는다. Health 실패 임계값을 사용한다.
-- [x] HTTP 상태 오류는 `application`, 연결·Tunnel·timeout 오류는 `network`로 저장한다.
+- [x] HTTP 상태 오류는 `application`, 연결·SSH·timeout 오류는 `network`로 저장한다.
 - [x] 자동 Failback은 하지 않는다. 복구 뒤 수동 Route 변경을 사용한다.
 - [x] 쓰기 요청을 자동 재전송하지 않는다.
 
@@ -77,7 +79,7 @@ API 전송 계약과 예시는 `backend-v2/README.md`의 `Agent API 계약 v1`�
 - [x] GitHub Webhook endpoint와 HMAC 검증을 만든다.
 - [x] 중복 Webhook 요청을 차단한다.
 - [x] 앱별 Health Check 설정 API를 만든다.
-- [x] Agent, Job, Tunnel, Routing 상태 조회 API를 만든다.
+- [x] Agent, Job, SSH Tunnel, Routing 상태 조회 API를 만든다.
 
 ## 준하님과 같이 연결할 부분
 
@@ -101,7 +103,7 @@ API 전송 계약과 예시는 `backend-v2/README.md`의 `Agent API 계약 v1`�
 1. Job 계약
 2. Agent 작업 API
 3. Docker Agent
-4. WSS Tunnel
+4. SSH Reverse Tunnel
 5. Gateway와 Routing
 6. Failover
 7. Webhook과 관리 API

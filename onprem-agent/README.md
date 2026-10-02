@@ -1,6 +1,6 @@
 # Hibiscus On-Prem Agent
 
-Backend 작업을 폴링하고 Docker 컨테이너를 관리합니다. Backend VM으로 outbound WSS Reverse Tunnel도 연결합니다.
+Backend 작업을 폴링하고 Docker 컨테이너를 관리합니다. Backend VM으로 outbound SSH Reverse Tunnel도 연결합니다.
 
 ## 처리 흐름
 
@@ -24,7 +24,7 @@ Result + heartbeat 전송
 - `version_path`가 있으면 Health 성공 뒤 JSON `run_id`가 현재 Job과 같은지 확인합니다.
 - `activate`는 serving 상태를 확정합니다. 실제 외부 트래픽은 Backend Application Route가 전환합니다.
 - 이전 컨테이너는 즉시 삭제하지 않습니다. `rollback` 또는 `discard` Job으로 처리합니다.
-- Tunnel은 Agent 상태에 등록된 Hibiscus 관리 컨테이너의 host port에만 연결합니다. Backend가 다른 loopback port를 요청하면 거부합니다.
+- SSH Tunnel은 Agent 상태에 등록된 Hibiscus 관리 컨테이너의 host port에만 연결합니다. Backend가 다른 loopback port를 요청하면 거부합니다.
 
 ## 실행
 
@@ -33,6 +33,7 @@ Result + heartbeat 전송
 - Node.js
 - Docker
 - cosign
+- OpenSSH client (`ssh`)
 
 ```bash
 npm install
@@ -49,8 +50,7 @@ node dist/main.js
 
 | 키                                |                    기본값 | 기능                                    |
 | --------------------------------- | ------------------------: | --------------------------------------- |
-| `BACKEND_TUNNEL_URL`              |                      필수 | Backend의 `ws://` 또는 `wss://` 주소    |
-| `BACKEND_API_URL`                 |      Tunnel 주소에서 변환 | Backend HTTP API 주소                   |
+| `BACKEND_API_URL`                 |                      필수 | Backend HTTP API 주소                   |
 | `AGENT_ID`                        |                      필수 | Agent 등록 응답의 `agent.id`            |
 | `AGENT_TOKEN`                     |                      필수 | Agent 등록 또는 token 교체 응답의 token |
 | `COSIGN_PUBLIC_KEY`               |                      필수 | 이미지 서명 공개키 경로                 |
@@ -62,10 +62,26 @@ node dist/main.js
 | `DOCKER_STOP_TIMEOUT_SECONDS`     |                      `10` | 컨테이너 정지 대기 시간                 |
 | `COSIGN_ALLOW_INSECURE_REGISTRY`  |                   `false` | 로컬 개발용 HTTP Registry 허용          |
 | `COSIGN_INSECURE_IGNORE_TLOG`     |                   `false` | 로컬 테스트에서만 transparency log 생략 |
-| `TUNNEL_RECONNECT_MIN_MS`         |                    `1000` | 최소 Tunnel 재연결 대기 시간            |
-| `TUNNEL_RECONNECT_MAX_MS`         |                   `30000` | 최대 Tunnel 재연결 대기 시간            |
-| `TUNNEL_HANDSHAKE_TIMEOUT_MS`     |                   `10000` | WSS handshake 시간 초과                 |
-| `TUNNEL_LOCAL_CONNECT_TIMEOUT_MS` |                    `3000` | local container 연결 시간 초과          |
+| `SSH_HOST`                        |                      필수 | Backend VM SSH 주소                     |
+| `SSH_PORT`                        |                      `22` | Backend VM SSH 포트                     |
+| `SSH_USER`                        |                      필수 | Tunnel 전용 OS 사용자                   |
+| `SSH_IDENTITY_FILE`               |                      필수 | Agent 전용 SSH 개인 키 경로             |
+| `SSH_KNOWN_HOSTS_FILE`            |                      필수 | 고정한 VM host key 파일                 |
+| `SSH_COMMAND`                     |                     `ssh` | OpenSSH 실행 파일                       |
+| `SSH_FORWARD_POLL_INTERVAL_MS`    |                    `2000` | 전달 목록 확인 간격                     |
+| `SSH_SERVER_ALIVE_INTERVAL_SECONDS` |                    `15` | SSH keepalive 간격                      |
+| `SSH_SERVER_ALIVE_COUNT_MAX`      |                       `3` | 연결 종료 전 keepalive 실패 횟수        |
+
+Agent는 전달 목록이 바뀌면 SSH 프로세스를 다시 시작합니다. OpenSSH 연결 하나가 여러 앱의 TCP 연결을 함께 처리합니다. `BatchMode`, `IdentitiesOnly`, `StrictHostKeyChecking`, `ExitOnForwardFailure`를 항상 사용합니다.
+
+VM의 공개키 등록과 `known_hosts` 준비 예:
+
+```bash
+ssh-keygen -t ed25519 -f ./keys/agent_ed25519
+ssh-keyscan -H backend.example.com > ./keys/known_hosts
+```
+
+개인 키는 Agent에만 둡니다. Backend VM에는 공개키만 등록합니다. Tunnel 전용 OS 사용자는 shell 작업에 사용하지 않습니다.
 
 `candidate`는 다음 서명을 확인합니다.
 
