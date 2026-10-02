@@ -64,12 +64,13 @@ API 전송 계약과 예시는 `backend-v2/README.md`의 `Agent API 계약 v1`�
 ## P4. Gateway와 Routing
 
 - [x] VM Backend에 Reverse Proxy를 만든다.
-- [x] 운영 Host 이름과 개발용 `/_gateway/:slug`로 앱을 찾는다.
+- [x] `slug.GATEWAY_BASE_DOMAIN` Host 이름으로 앱을 찾는다.
+- [x] 개발용 `/_gateway/:slug` 경로를 제거한다.
 - [x] On-Prem 터널 또는 Cloud Run URL로 요청을 보낸다.
 - [x] Backend Health Monitor가 Target 상태를 기록하고 Routing에 적용한다.
 - [x] Hop-by-hop 헤더를 제거하고 요청·응답을 스트리밍한다.
 - [x] 수동 라우팅 변경 API를 만든다.
-- [ ] 도메인과 TLS를 설정한다.
+- [ ] 운영 DNS에 wildcard record를 만들고 TLS를 설정한다.
 
 ## P5. Failover
 
@@ -92,6 +93,7 @@ API 전송 계약과 예시는 `backend-v2/README.md`의 `Agent API 계약 v1`�
 - [ ] 조율기가 Agent 결과를 기다리게 한다.
 - [ ] Cloud Run과 On-Prem 결과를 하나의 `deploy_result`로 합친다.
 - [ ] Backend `deploy` 단계가 조율기를 호출하게 한다.
+- [ ] 새 Deployment 검증 성공 후 같은 Host의 Application Route를 새 Target으로 변경한다.
 - [ ] 한쪽 활성화 실패 시 양쪽 롤백을 검증한다.
 
 ## 태현님 담당에서 제외

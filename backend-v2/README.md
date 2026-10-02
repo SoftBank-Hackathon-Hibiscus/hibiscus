@@ -16,7 +16,7 @@ Nest CLI로 생성한 하이브리드 배포 백엔드 재구현 초안입니다
 - Application별 On-Prem·Cloud Run Routing Target과 현재 Route 저장
 - Revision 확인을 사용하는 수동 Route 변경과 변경 이력 저장
 - Health Monitor가 전달할 Target Health 저장과 만료 처리
-- Application Host 기반 Reverse Proxy와 개발용 slug 경로
+- Application Host 기반 Reverse Proxy
 - On-Prem SSH Tunnel·Cloud Run 요청 전달과 스트리밍
 - Application별 임계값을 사용하는 Health Monitor와 On-Prem → Cloud Run 자동 Failover
 - Agent가 `ssh2` Node 모듈로 만드는 outbound SSH Reverse Tunnel
@@ -213,7 +213,6 @@ GitHub App 사용자 토큰과 GitHub refresh token은 AES-256-GCM으로 암호�
 {
   "name": "My app",
   "slug": "my-app",
-  "public_host": "my-app.example.com",
   "image_repo": "registry.example/my-app",
   "container_port": 8080,
   "installation_id": 123,
@@ -294,10 +293,9 @@ Routing Target은 특정 Deployment의 실행 위치입니다.
 - 현재 On-Prem Target이 `unhealthy`이면 같은 Deployment의 정상 Cloud Run Target으로 전환합니다. 정책의 `failoverAllowed`가 `true`여야 합니다.
 - SSH 연결 종료만으로 전환하지 않습니다. 자동 Failback도 하지 않습니다.
 
-Gateway 진입 방법은 두 개입니다.
+Application 생성 시 `slug`와 `GATEWAY_BASE_DOMAIN`으로 대표 주소를 만듭니다. `GATEWAY_BASE_DOMAIN=lth.so`, `slug=a`이면 `public_host`는 `a.lth.so`입니다. 요청 `Host`가 이 값과 일치하면 Gateway가 현재 Application Route로 전달합니다. `/_gateway/<slug>` 개발 경로는 사용하지 않습니다.
 
-- 운영: Application의 `public_host`와 요청 `Host`가 일치해야 합니다.
-- 개발: `/_gateway/<application-slug>/<path>`를 사용합니다.
+대표 주소는 Deployment 버전에 고정하지 않습니다. 새 Deployment의 Target이 준비되고 검증되면 조율기가 `PATCH /applications/:id/routing`을 호출합니다. 같은 `a.lth.so`가 새 Target을 가리킵니다. 새 Target 준비나 Route 변경이 실패하면 기존 Target을 유지합니다.
 
 Gateway는 요청과 응답을 스트리밍합니다. Hop-by-hop 헤더는 전달하지 않습니다. 쓰기 요청도 자동 재전송하지 않습니다. `GATEWAY_IDLE_TIMEOUT_MS` 동안 데이터가 없으면 요청을 종료합니다.
 
