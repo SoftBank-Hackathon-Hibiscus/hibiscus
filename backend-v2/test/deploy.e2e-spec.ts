@@ -2,6 +2,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -10,14 +11,13 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { App } from 'supertest/types.js';
 import { AgentJobService } from '../src/agent/agent-job.service.js';
 import type { AgentJobResultDto } from '../src/agent/dto/agent-job.dto.js';
 import { AuthService } from '../src/auth/auth.service.js';
 import { DeploymentRepository } from '../src/deployment/deployment.repository.js';
-import { DeploymentArtifactService } from '../src/deployment/deployment-artifact.service.js';
 import { DeployStage } from '../src/deployment/stages/deploy.stage.js';
 import { DeploymentPaths } from '../src/deployment/types/deployment.type.js';
 import type { DeployResult } from '../src/deployment/types/deploy-result.type.js';
@@ -68,6 +68,8 @@ describe('deploy stage (e2e)', () => {
       GITHUB_APP_CLIENT_SECRET: 'test-client-secret',
       ALLOWED_GITHUB_IDS: '1',
       HEALTH_MONITOR_ENABLED: 'false',
+      SSH_SERVER_ENABLED: 'false',
+      SSH_HOST: '127.0.0.1',
       DEPLOY_MODE: 'real',
       GCP_PROJECT_ID: 'test-project',
       GCP_REGION: 'asia-northeast3',
@@ -108,6 +110,8 @@ describe('deploy stage (e2e)', () => {
       'GITHUB_APP_CLIENT_SECRET',
       'ALLOWED_GITHUB_IDS',
       'HEALTH_MONITOR_ENABLED',
+      'SSH_SERVER_ENABLED',
+      'SSH_HOST',
       'DEPLOY_MODE',
       'GCP_PROJECT_ID',
       'GCP_REGION',
@@ -150,7 +154,11 @@ describe('deploy stage (e2e)', () => {
     return { applicationId, agentId };
   }
 
-  function createDeployment(applicationId: string, digest: string) {
+  function createDeployment(
+    applicationId: string,
+    digest: string,
+    sourceRevisionVerified = true,
+  ) {
     const now = new Date().toISOString();
     // Worker 가 집어 가지 않게 running 으로 만든다. 단계는 테스트에서 직접 실행한다
     return app.get(DeploymentRepository).create({
@@ -158,8 +166,7 @@ describe('deploy stage (e2e)', () => {
       applicationId,
       trigger: 'manual',
       sourceRevision: '0123456789abcdef0123456789abcdef01234567',
-      // This isolated deploy fixture represents a completed registry parity run.
-      sourceRevisionVerified: true,
+      sourceRevisionVerified,
       imageDigest: digest,
       digestSource: 'registry',
       requester: userId,
@@ -179,54 +186,26 @@ describe('deploy stage (e2e)', () => {
   function prepare(deploymentId: string, digest: string) {
     const paths = new DeploymentPaths(join(directory, 'cli'), deploymentId);
     paths.ensure();
-    writeFileSync(
-      join(paths.sign, 'sign_result.json'),
-      JSON.stringify({
-        run_id: deploymentId,
-        digest,
-        plan_hash: 'b'.repeat(64),
-        targets: ['onprem', 'cloud_run'],
-        failover_allowed: true,
-        requester: userId,
-        approver: 'auto',
-        signature_ref: `cosign:${imageRepo}@${digest}`,
-        signed_at: new Date().toISOString(),
-      }),
-    );
-    // The worker normally stores policy/sign evidence before entering deploy.
-    // Seed the same DB evidence for this isolated stage test; routing now requires it.
+    const now = new Date().toISOString();
+    const planHash = 'b'.repeat(64);
+    const signResult = JSON.stringify({
+      run_id: deploymentId,
+      digest,
+      plan_hash: planHash,
+      targets: ['onprem', 'cloud_run'],
+      failover_allowed: true,
+      requester: userId,
+      approver: 'auto',
+      signature_ref: `cosign:${imageRepo}@${digest}`,
+      signed_at: now,
+    });
+    writeFileSync(join(paths.sign, 'sign_result.json'), signResult);
+    // Routing 은 서명된 정책 결과가 있는 배포만 허용한다. 앞 단계가 남기는 기록을 직접 만든다
     const repository = app.get(DeploymentRepository);
-    const timestamp = new Date().toISOString();
-    const execution = {
-      id: randomUUID(),
-      deploymentId,
-      sequence: 3,
-      attempt: 1,
-      stage: 'sign' as const,
-      status: 'succeeded' as const,
-      exitCode: 0,
-      startedAt: timestamp,
-      finishedAt: timestamp,
-      artifacts: {},
-      summary: null,
-      error: null,
-    };
-    repository.createStage(execution);
-    const captured = app
-      .get(DeploymentArtifactService)
-      .capture(paths, execution, repository.find(deploymentId)!);
-    expect(captured.error).toBeUndefined();
-    repository.checkpoint(
-      captured.artifacts,
-      captured.auditLogs,
-      (artifacts) => {
-        repository.updateStage(execution.id, { artifacts });
-      },
-    );
     repository.savePolicyResult({
       deploymentId,
       decision: 'allow',
-      planHash: 'b'.repeat(64),
+      planHash,
       targets: ['onprem', 'cloud_run'],
       failoverAllowed: true,
       requires: [],
@@ -234,9 +213,43 @@ describe('deploy stage (e2e)', () => {
       piiPath: null,
       planArtifactId: null,
       piiArtifactId: null,
-      createdAt: timestamp,
-      updatedAt: timestamp,
+      createdAt: now,
+      updatedAt: now,
     });
+    const stageId = randomUUID();
+    repository.createStage({
+      id: stageId,
+      deploymentId,
+      sequence: 3,
+      attempt: 1,
+      stage: 'sign',
+      status: 'succeeded',
+      exitCode: 0,
+      startedAt: now,
+      finishedAt: now,
+      artifacts: {},
+      summary: null,
+      error: null,
+    });
+    repository.checkpoint(
+      [
+        {
+          id: randomUUID(),
+          deploymentId,
+          stageExecutionId: stageId,
+          name: 'sign_result',
+          relativePath: 'sign/sign_result.json',
+          mediaType: 'application/json',
+          content: signResult,
+          contentHash: createHash('sha256').update(signResult).digest('hex'),
+          schemaName: null,
+          validationError: null,
+          createdAt: now,
+        },
+      ],
+      [],
+      () => undefined,
+    );
     return paths;
   }
 
@@ -359,6 +372,25 @@ describe('deploy stage (e2e)', () => {
       ),
     ).toBe(true);
     expect(() => app.get(RoutingService).getRoute(applicationId)).toThrow();
+    paths.cleanup();
+  });
+  it('refuses an unverified source revision before touching any target', async () => {
+    const { applicationId } = await setupApplication('unverified-demo');
+    const digest = `sha256:${'c'.repeat(64)}`;
+    const deployment = createDeployment(applicationId, digest, false);
+    const paths = prepare(deployment.id, digest);
+    const application = app.get(ApplicationRepository).find(applicationId)!;
+    const log = join(directory, 'calls.log');
+    const calls = () => (existsSync(log) ? readFileSync(log, 'utf8') : '');
+    const before = calls();
+
+    const outcome = await app
+      .get(DeployStage)
+      .run({ application, deployment, paths });
+
+    expect(outcome).toMatchObject({ status: 'failed' });
+    expect(outcome.error).toContain('verified source revision');
+    expect(calls()).toBe(before);
     paths.cleanup();
   });
 });

@@ -14,6 +14,9 @@ export const deployEnvironmentSchema = z.object({
   CLOUD_RUN_SCRIPTS_DIR: z.string().trim().default(''),
   COSIGN_COMMAND: z.string().trim().min(1).default('cosign'),
   COSIGN_PUBLIC_KEY: z.string().trim().default(''),
+  // Rekor 없이 서명한 이미지(signer --no-tlog)를 확인할 때만 true. 비우면 SIGNER_NO_TLOG=1 을 따른다
+  COSIGN_IGNORE_TLOG: z.enum(['true', 'false']).optional(),
+  SIGNER_NO_TLOG: z.string().trim().default(''),
   DEPLOY_SCRIPT_TIMEOUT_MS: z.coerce.number().int().min(1_000).default(300_000),
   DEPLOY_CANDIDATE_TIMEOUT_MS: z.coerce
     .number()
@@ -38,6 +41,9 @@ export const deployConfig = registerAs('deploy', () => {
     cloudRunScriptsDir: env.CLOUD_RUN_SCRIPTS_DIR,
     cosignCommand: env.COSIGN_COMMAND,
     cosignPublicKey: env.COSIGN_PUBLIC_KEY,
+    cosignIgnoreTlog: env.COSIGN_IGNORE_TLOG
+      ? env.COSIGN_IGNORE_TLOG === 'true'
+      : env.SIGNER_NO_TLOG === '1',
     scriptTimeoutMs: env.DEPLOY_SCRIPT_TIMEOUT_MS,
     candidateTimeoutMs: env.DEPLOY_CANDIDATE_TIMEOUT_MS,
     actionTimeoutMs: env.DEPLOY_ACTION_TIMEOUT_MS,

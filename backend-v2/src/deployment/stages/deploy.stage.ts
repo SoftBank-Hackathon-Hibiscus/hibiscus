@@ -70,12 +70,12 @@ export class DeployStage implements StageRunner {
     }
 
     const { deployment, application, paths } = context;
-    // 실제 parity 결과와 소스·이미지의 연결을 확인한 실행만 배포한다.
-    if (!deployment.sourceRevisionVerified) {
-      return this.failed('Real deploy requires a verified source revision');
-    }
+    // 서명 단계와 같은 조건을 배포 직전에 한 번 더 확인한다 (서명 단계를 거치지 않은 경로 방지)
     if (deployment.digestSource !== 'registry') {
       return this.failed('Real deploy requires a registry image digest');
+    }
+    if (!deployment.sourceRevisionVerified) {
+      return this.failed('Real deploy requires a verified source revision');
     }
     const signPath = join(paths.sign, 'sign_result.json');
     if (!existsSync(signPath))
@@ -148,6 +148,7 @@ export class DeployStage implements StageRunner {
         publicKey,
         cwd: repoRoot,
         timeoutMs: deploy.scriptTimeoutMs,
+        ignoreTlog: deploy.cosignIgnoreTlog,
       }),
       health: new HttpHealthChecker(),
       routing: new RoutingAdapter(

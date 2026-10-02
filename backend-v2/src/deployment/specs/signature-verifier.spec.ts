@@ -21,7 +21,7 @@ function sign(ref: string): DeploymentSignResult {
   };
 }
 
-function verifier(code = 0, stderr = '') {
+function verifier(code = 0, stderr = '', ignoreTlog = false) {
   const run = vi.fn(async () => ({
     code,
     signal: null,
@@ -34,6 +34,7 @@ function verifier(code = 0, stderr = '') {
     publicKey: '/keys/cosign.pub',
     cwd: '/repo',
     timeoutMs: 1_000,
+    ignoreTlog,
   });
   return { subject, run };
 }
@@ -46,6 +47,7 @@ describe('SignatureVerifier', () => {
     ).resolves.toEqual({
       imageRef: `${REPO}@${DIGEST}`,
       key: '/keys/cosign.pub',
+      tlog: 'verified',
     });
     expect(run).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -89,5 +91,26 @@ describe('SignatureVerifier', () => {
     await expect(
       subject.verify(sign(`cosign:${REPO}@${DIGEST}`), REPO),
     ).rejects.toThrow('missing or incorrect annotation');
+  });
+  it('skips only the transparency log check for --no-tlog signatures', async () => {
+    const { subject, run } = verifier(0, '', true);
+    await expect(
+      subject.verify(sign(`cosign:${REPO}@${DIGEST}`), REPO),
+    ).resolves.toMatchObject({ tlog: 'ignored' });
+    expect(run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        args: [
+          'verify',
+          '--key',
+          '/keys/cosign.pub',
+          '--insecure-ignore-tlog=true',
+          '-a',
+          'run_id=run-1',
+          '-a',
+          `plan_hash=${'d'.repeat(64)}`,
+          `${REPO}@${DIGEST}`,
+        ],
+      }),
+    );
   });
 });

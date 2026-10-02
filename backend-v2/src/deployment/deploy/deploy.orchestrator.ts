@@ -95,7 +95,7 @@ export class DeployOrchestrator {
         this.deps.cloudRunUnavailableReason ?? 'Cloud Run is not configured',
       );
 
-    const { imageRef, key } = await this.deps.verifier.verify(
+    const { imageRef, key, tlog } = await this.deps.verifier.verify(
       input.sign,
       input.imageRepo,
     );
@@ -104,6 +104,7 @@ export class DeployOrchestrator {
       verified: true,
       ref: input.sign.signature_ref,
       key,
+      ...(tlog ? { tlog } : {}),
     };
 
     // 2) 후보: 양쪽을 동시에 띄운다 (온프레는 Agent 결과를 기다리느라 오래 걸릴 수 있음)
