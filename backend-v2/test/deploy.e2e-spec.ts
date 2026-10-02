@@ -290,8 +290,27 @@ describe('deploy stage (e2e)', () => {
                     check: { mode: 'candidate', pass: true, checks: [] },
                   }
                 : job.action === 'activate'
-                  ? { ...base, result: 'ok', serving }
-                  : { ...base, result: 'ok' };
+                  ? {
+                      ...base,
+                      result: 'ok',
+                      previous: {
+                        run_id: 'run-old',
+                        digest: `sha256:${'0'.repeat(64)}`,
+                        container: 'hibiscus-run-old',
+                      },
+                      serving,
+                    }
+                  : job.action === 'rollback'
+                    ? {
+                        ...base,
+                        result: 'ok',
+                        serving: {
+                          run_id: 'run-old',
+                          digest: job.to_digest,
+                          container: 'hibiscus-run-old',
+                        },
+                      }
+                    : { ...base, result: 'ok' };
           jobs.submit(agentId, job.job_id, body as AgentJobResultDto);
         }
         await new Promise((resolve) => setTimeout(resolve, 20));
@@ -374,6 +393,49 @@ describe('deploy stage (e2e)', () => {
     expect(() => app.get(RoutingService).getRoute(applicationId)).toThrow();
     paths.cleanup();
   });
+  it('rolls back and records a failure when the routing switch fails', async () => {
+    const { applicationId, agentId } = await setupApplication('routing-fail');
+    const digest = `sha256:${'d'.repeat(64)}`;
+    const deployment = createDeployment(applicationId, digest);
+    const paths = prepare(deployment.id, digest);
+    const stop = fakeAgent(agentId);
+    const application = app.get(ApplicationRepository).find(applicationId)!;
+    const changeRoute = vi
+      .spyOn(app.get(RoutingService), 'changeRoute')
+      .mockImplementationOnce(() => {
+        throw new Error('Routing revision does not match');
+      });
+
+    const outcome = await app
+      .get(DeployStage)
+      .run({ application, deployment, paths });
+    await stop();
+    changeRoute.mockRestore();
+
+    expect(outcome).toMatchObject({ status: 'failed', exitCode: 4 });
+    expect(outcome.deploymentPatch).toEqual({ deploymentPerformed: false });
+    expect(outcome.error).toContain('Routing switch failed');
+    const result = JSON.parse(
+      readFileSync(join(paths.deploy, 'deploy_result.json'), 'utf8'),
+    ) as DeployResult;
+    expect(result.decision).toBe('rolled_back');
+    expect(result.routing).toMatchObject({ result: 'error' });
+    expect(
+      result.targets.map(
+        (step) => `${step.target}:${step.phase}:${step.result}`,
+      ),
+    ).toEqual([
+      'cloud_run:candidate:ok',
+      'onprem:candidate:ok',
+      'cloud_run:activate:ok',
+      'onprem:activate:ok',
+      'cloud_run:rollback:ok',
+      'onprem:rollback:ok',
+    ]);
+    expect(() => app.get(RoutingService).getRoute(applicationId)).toThrow();
+    paths.cleanup();
+  });
+
   it('refuses an unverified source revision before touching any target', async () => {
     const { applicationId } = await setupApplication('unverified-demo');
     const digest = `sha256:${'c'.repeat(64)}`;

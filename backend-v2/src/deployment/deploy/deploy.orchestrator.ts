@@ -42,6 +42,7 @@ const message = (error: unknown) =>
 /**
  * 서명 확인 → 대상별 후보(트래픽 0%) → 검사 → 전부 통과하면 전환 → 대표 경로 변경.
  * 하나라도 실패하면 전환하지 않고 후보만 정리한다 (held). 전환 중 실패하면 이미 전환한 Cloud Run 을 되돌린다.
+ * 대표 경로 변경이 실패하면 새 버전이 트래픽을 받지 못하므로 activated 로 남기지 않고 전환한 대상을 모두 되돌린다.
  */
 export class DeployOrchestrator {
   constructor(private readonly deps: DeployOrchestratorDeps) {}
@@ -153,6 +154,8 @@ export class DeployOrchestrator {
     // 4) 전환: Cloud Run 먼저 (되돌리기가 빠름), 그다음 온프레
     let cloudActivated = false;
     let cloudPrevious = '';
+    let onpremActivated = false;
+    let onpremPrevious: string | undefined;
     try {
       if (liveCloud) {
         const activated = await this.deps.cloudRun!.activate();
@@ -185,6 +188,8 @@ export class DeployOrchestrator {
             `On-prem activation failed: ${activated.error ?? activated.status}`,
           );
         }
+        onpremActivated = true;
+        onpremPrevious = activated.payload?.previous?.digest;
         result.targets.push({
           target: 'onprem',
           phase: 'activate',
@@ -204,10 +209,24 @@ export class DeployOrchestrator {
       if (liveOnprem) await this.discardOnprem(input, result);
       return;
     }
-    result.decision = 'activated';
 
     // 5) 대표 경로: 온프레가 있으면 온프레, 없으면 Cloud Run
     result.routing = this.route(input, liveCloud, liveOnprem);
+    if (result.routing.result === 'error') {
+      // 대표 경로가 예전 대상을 가리킨 채로 남는다. 성공으로 기록하지 않고 전환한 대상을 되돌린다
+      result.error = `Routing switch failed: ${result.routing.error ?? 'unknown error'}`;
+      const cloudRestored = cloudActivated
+        ? (await this.revertCloud(true, cloudPrevious, result)) ===
+          'rolled_back'
+        : true;
+      const onpremRestored = onpremActivated
+        ? await this.rollbackOnprem(input, result, onpremPrevious)
+        : true;
+      result.decision =
+        cloudRestored && onpremRestored ? 'rolled_back' : 'error';
+      return;
+    }
+    result.decision = 'activated';
   }
 
   private async cloudCandidate(
@@ -359,6 +378,50 @@ export class DeployOrchestrator {
         result: 'error',
         error: message(error),
       });
+    }
+  }
+
+  private async rollbackOnprem(
+    input: DeployInput,
+    result: DeployResult,
+    previousDigest: string | undefined,
+  ): Promise<boolean> {
+    if (!previousDigest) {
+      result.targets.push({
+        target: 'onprem',
+        phase: 'rollback',
+        result: 'error',
+        error: 'No previous container was serving on the agent',
+      });
+      return false;
+    }
+    try {
+      const outcome = await this.deps.onprem.run({
+        agentId: input.agentId!,
+        runId: input.deploymentId,
+        action: 'rollback',
+        digest: input.digest,
+        toDigest: previousDigest,
+      });
+      const ok = outcome.status === 'succeeded';
+      result.targets.push({
+        target: 'onprem',
+        phase: 'rollback',
+        result: ok ? 'ok' : 'error',
+        job_id: outcome.jobId,
+        ...(ok
+          ? { serving: outcome.payload?.serving?.container ?? null }
+          : { error: outcome.error ?? outcome.status }),
+      });
+      return ok;
+    } catch (error) {
+      result.targets.push({
+        target: 'onprem',
+        phase: 'rollback',
+        result: 'error',
+        error: message(error),
+      });
+      return false;
     }
   }
 

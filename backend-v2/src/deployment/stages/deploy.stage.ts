@@ -112,8 +112,8 @@ export class DeployStage implements StageRunner {
       routing: result.routing,
       ...(result.error ? { error: result.error } : {}),
     };
-    const performed =
-      result.decision === 'activated' || result.decision === 'rolled_back';
+    // 새 버전이 실제로 트래픽을 받는 경우만 배포 완료로 본다.
+    // rolled_back(전환 후 되돌림, 대표 경로 변경 실패 포함)은 실패로 기록한다
     if (result.decision === 'activated') {
       return {
         status: 'succeeded',
@@ -129,7 +129,7 @@ export class DeployStage implements StageRunner {
       artifacts: { deploy_result: paths.relative(output) },
       summary,
       error: `${result.decision}: ${result.error ?? 'Deployment did not complete'}`,
-      deploymentPatch: { deploymentPerformed: performed },
+      deploymentPatch: { deploymentPerformed: false },
     };
   }
 
