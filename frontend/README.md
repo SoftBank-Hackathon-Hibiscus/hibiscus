@@ -15,7 +15,7 @@ npm install
 npm run dev
 ```
 
-`http://127.0.0.1:5173` 이 열린다. 기본은 **mock 모드 시나리오 ①**.
+`http://127.0.0.1:5173` 이 열린다. 루트는 **Demo Launcher** (mock 시나리오 4개를 고르는 시작판)이고, 상단에 DEMO DATA 배지가 항상 보인다.
 
 | 명령 | 내용 |
 |---|---|
@@ -40,10 +40,10 @@ mock 데이터는 `src/mocks/` 에 있고 실제 API 응답과 같은 구조다.
 ## real API 모드
 
 1. backend-v2 를 띄운다 (기본 `http://127.0.0.1:8080`). 다른 주소면 `.env.example` 을 `.env.local` 로 복사해 `VITE_BACKEND_URL` 을 바꾸고 dev 서버를 다시 시작한다.
-2. `http://127.0.0.1:5173/?mode=real` 로 연다.
+2. `http://127.0.0.1:5173/?mode=real` 로 연다. 백엔드 → 토큰 → 앱 선택 체크리스트가 뜨고, 상단 표시는 `/healthz` 가 `{ok:true}` 를 돌려주지 않으면 빨강 "백엔드 연결 안 됨", 토큰이 없거나 401 이면 주황 "로그인 필요", `/users/me` 가 성공할 때만 초록 "실제 백엔드 연결됨"이다. 실패해도 mock 으로 되돌아가지 않는다.
 3. access token 을 구한다: 브라우저로 `http://127.0.0.1:8080/auth/github` → `authorization_url` 로 이동 → GitHub 로그인 → 콜백이 JSON 을 돌려주는데 그 안의 `access_token` 을 복사한다. (콜백은 리다이렉트하지 않는다. 쿠키는 `/auth/github` 경로에만 붙으므로 시작 요청과 콜백을 같은 호스트로 해야 한다.)
 4. 상단 입력칸에 토큰을 붙여 저장한다. `localStorage` 에 들어가고 모든 요청에 `Authorization: Bearer` 로 나간다.
-5. application id 또는 deployment id 를 입력해 이동한다.
+5. 토큰이 유효하면 `GET /applications` 목록이 보이고 클릭하면 이동한다. id 직접 입력은 "고급"에 있다.
 
 access token 은 기본 15분 만료다. 401 이 나면 "토큰이 만료되었습니다. 새 토큰을 입력하세요" 가 뜨고 자동 갱신은 하지 않는다.
 

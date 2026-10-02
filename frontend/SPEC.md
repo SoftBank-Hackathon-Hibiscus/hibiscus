@@ -26,6 +26,13 @@ main 에 없는 것: CORS 설정, 정적 파일 서빙, routing 변경 이력 �
 
 출처는 모두 `GET /deployments/:id` 한 번. 앱 이름만 `GET /applications/:id`. `stages` 는 attempt 별 row 가 쌓이므로 **단계별 최대 attempt 만** 표시.
 
+### 결과 요약 카드 (첫 화면, `src/lib/summary.ts`)
+
+- 결론 한 문장: blocked → "차단됨: 재시작·교체 후 데이터가 사라집니다"(requires 에 fix_restart_failure 등이 있을 때) 또는 걸린 규칙 reason. activated+ok → "배포 완료: {위치}에서 서비스 중, {standby} 대기". held → "안전하게 보류: 새 버전 검사 실패, 기존 서비스 그대로". rolled_back → "이전 버전으로 복구됨". activated+routing error 와 error 만 빨강.
+- 가로 4단계(테스트, 정책, 서명, 배포)에 한 단어 결과.
+- 증명 체인 4줄. 값이 2개 이상 있고 모두 같을 때만 ✓, 다르면 "불일치", 값이 부족하면 "확인 전". `sourceRevisionVerified` 는 "미검증"으로 표시하고 실패색을 쓰지 않는다. plan_hash 는 정책↔서명만 직접 비교하고, deploy_result 에는 plan_hash 가 없어 cosign 서명 검증 기록으로 간접 확인한다고 적는다. mock 에서는 DEMO DATA 배지를 같이 둔다.
+- 정책 결정과 고칠 것(requires)은 이 카드 안. 단계별 상세, 감사 기록, 산출물은 아래 접힘.
+
 | 섹션 | 필드 | 출처 |
 |---|---|---|
 | 상단 | version, status, decision, deploymentPerformed, sourceRevisionVerified, error | `deployment` |
