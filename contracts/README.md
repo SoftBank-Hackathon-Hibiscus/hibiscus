@@ -75,8 +75,32 @@
 - **필드 삭제, 이름 변경, enum 값 삭제**는 바로 하지 않는다. 새 필드나 값을 먼저 추가하고, 모든 파트가 옮긴 뒤 다음 단계에서 지운다.
 - **선택 필드는 "없을 수 있다"** 는 뜻이다. 값이 없으면 `null` 대신 키를 생략한다. 스키마에 `null` 이 명시된 필드(예: `rollback_plan.serve_digest`, `SignLog` 의 `approver`·`reason`·`signature_ref`)만 예외다.
 
+## JSON Schema에 표현되지 않는 런타임 의미 규칙
+
+JSON Schema는 구조와 개별 필드 제약은 검사하지만, 필드끼리의 관계를 비교하는 일부 의미 규칙은 표현하지 못한다. 이 규칙은 정책의 zod 런타임 검증이 최종 기준이다. **JSON Schema 검사를 통과해도 정책 입력으로 거부될 수 있다.** 미리 확인하려면 `cd policy && npx tsx src/validate.ts --type test_result --file <파일>` 로 zod 검사를 돌린다.
+
+### TestResult (test_result.json)
+
+런타임 의미 검증은 `policy/src/schema.ts` 의 `TestResultSchema`, `FactsSchema`, `ConditionFactsSchema`, `ConditionFactSchema` 의 `superRefine` 과 `SourceRevisionInputSchema` 의 `transform` 에서 수행한다. "스키마 파일에는" 열은 `TestResult.schema.json` 에 그 규칙이 어디까지 들어 있는지다 (없음 / 부분 / description만).
+
+| 규칙 | 스키마 파일에는 |
+|---|---|
+| 최상위 `match.matched` ≤ `match.total` | 없음 (각각 0 이상만) |
+| `facts.conditions` 가 있으면 `match.total`·`match.matched` 는 `none` 조건의 `total`·`matched` 와 같아야 한다. `passed` 는 테스트 파트 원본의 종합값이라 비교하지 않는다 | description만 |
+| `facts.conditions` 는 `none` / `restart` / `replace` 가 정확히 한 번씩 (빠짐·중복 거부) | 부분 (항목 3개와 `name` enum 만. 같은 이름 3개도 통과한다) |
+| 조건마다 `matched` ≤ `total`, `failed` == (`matched` < `total`), `mismatches` 수 == `total` − `matched` | 없음 (`total` ≥ 1, `matched` ≥ 0 만) |
+| `mismatches[].index` 는 1 이상 그 조건의 `total` 이하이고, 같은 조건 안에서 중복이 없다 (다른 조건과 같은 번호는 정상) | 부분 (하한 1은 `exclusiveMinimum`, 상한과 중복 금지는 없음) |
+| `related_kind` 나 `related_storage` 가 있으면 `related_fact`·`related_storage`·`related_kind` 세 값이 모두 있어야 하고, `facts.storage` 에 같은 `path`·`kind`·`storage` 항목이 있어야 한다 (`related_fact` 만 있는 힌트는 검사하지 않는다) | description만 |
+| `related_kind` 가 `sqlite` 면 `facts.db` 가 `sqlite`, `local_upload` / `local_file` 이면 `facts.writes_local_file` 에 그 `path` 가 있어야 한다 | description만 |
+| `source_revision` 의 `"unknown"` 은 값 없음으로 취급한다 (출력과 `plan_hash` 에 들어가지 않는다) | 부분 (`"unknown"` 허용만 표현되고 의미는 없음) |
+
+정책 단계(`policy/src/stage.ts`)는 스키마와 별도로 `--source-revision` 과 `test_result.source_revision` 불일치, `facts.migration.destructive` 와 실행기 계산값 불일치(모두 실행 오류), test·pii 의 `run_id` 불일치(R2, block)도 막는다.
+
+parity 의 `result.json`(`parity/mocks/test_result.json` 형식)은 이 계약이 아니다. 변환기(`policy/src/adapters/parity.ts`)를 거친 것만 TestResult 다.
+
 ## 변경 기록
 
 | 날짜 | PR | 내용 |
 |---|---|---|
 | 2026-10-01 | contracts/publish-current | main 의 Plan, RollbackRequest, RollbackPlan, DecisionLog, SignResult, SignLog 를 그대로 공개 |
+| 2026-10-02 | TBD | TestResult 공개 및 런타임 의미 규칙 문서화 |
