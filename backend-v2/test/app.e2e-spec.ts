@@ -35,6 +35,9 @@ import { createServer } from 'node:http';
 import { connect, createServer as createTcpServer } from 'node:net';
 import { RoutingService } from '../src/routing/routing.service.js';
 import { FailoverService } from '../src/health/failover.service.js';
+import ssh2 from 'ssh2';
+
+const { utils: sshUtils } = ssh2;
 
 describe('deployment API (e2e)', () => {
   let app: INestApplication<App>;
@@ -54,6 +57,8 @@ describe('deployment API (e2e)', () => {
     process.env.GITHUB_APP_CLIENT_ID = 'Iv1.test-client';
     process.env.GITHUB_APP_CLIENT_SECRET = 'test-client-secret';
     process.env.HEALTH_MONITOR_ENABLED = 'false';
+    process.env.SSH_HOST = '127.0.0.1';
+    process.env.SSH_HOST_KEY_SHA256 = `SHA256:${'A'.repeat(43)}`;
     process.env.ALLOWED_GITHUB_IDS = [
       ...Array.from({ length: 32 }, (_, index) => String(index + 1)),
       '1000000',
@@ -1050,7 +1055,34 @@ describe('deployment API (e2e)', () => {
       .expect(201);
 
     expect(registration.body.token).toMatch(/^[A-Za-z0-9_-]{40,}$/);
+    expect(registration.body.ssh_enrollment_token).toMatch(
+      /^[A-Za-z0-9_-]{40,}$/,
+    );
+    expect(registration.body.ssh).toEqual({
+      host: '127.0.0.1',
+      port: 22,
+      user: 'hibiscus-agent',
+      host_key_sha256: `SHA256:${'A'.repeat(43)}`,
+    });
     expect(registration.body.agent).not.toHaveProperty('tokenHash');
+
+    const keys = sshUtils.generateKeyPairSync('ed25519', {
+      comment: 'hibiscus:test-agent',
+    });
+    const enrollment = await request(app.getHttpServer())
+      .post('/agent/v1/ssh/enroll')
+      .set('Authorization', `Bearer ${registration.body.ssh_enrollment_token}`)
+      .send({ public_key: keys.public })
+      .expect(200);
+    expect(enrollment.body).toMatchObject({
+      agent_id: registration.body.agent.id,
+      fingerprint: expect.stringMatching(/^SHA256:/),
+    });
+    await request(app.getHttpServer())
+      .post('/agent/v1/ssh/enroll')
+      .set('Authorization', `Bearer ${registration.body.ssh_enrollment_token}`)
+      .send({ public_key: keys.public })
+      .expect(401);
 
     const assignment = await api()
       .post(
@@ -1064,6 +1096,8 @@ describe('deployment API (e2e)', () => {
 
     const agents = await api().get('/agents').expect(200);
     expect(agents.body[0]).not.toHaveProperty('tokenHash');
+    expect(agents.body[0].sshEnrolledAt).toBeTruthy();
+    expect(agents.body[0]).not.toHaveProperty('sshPublicKey');
   });
 
   it('stores routing targets and changes one application route with revision checks', async () => {

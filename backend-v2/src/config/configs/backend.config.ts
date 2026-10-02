@@ -59,6 +59,21 @@ export const environmentSchema = z
       .int()
       .min(100)
       .default(3_000),
+    SSH_HOST: z.string().min(1),
+    SSH_PORT: z.coerce.number().int().min(1).max(65_535).default(22),
+    SSH_USER: z.string().min(1).default('hibiscus-agent'),
+    SSH_HOST_KEY_SHA256: z
+      .string()
+      .regex(
+        /^SHA256:[A-Za-z0-9+/]{43}$/,
+        'SSH host key fingerprint is invalid',
+      ),
+    SSH_ENROLLMENT_TTL_SECONDS: z.coerce
+      .number()
+      .int()
+      .min(60)
+      .max(86_400)
+      .default(600),
   })
   .refine((value) => value.SSH_FORWARD_PORT_MIN <= value.SSH_FORWARD_PORT_MAX, {
     message: 'SSH_FORWARD_PORT_MIN must not exceed SSH_FORWARD_PORT_MAX',
@@ -90,6 +105,11 @@ export const backendConfig = registerAs('backend', () => {
     sshForwardPortMin: env.SSH_FORWARD_PORT_MIN,
     sshForwardPortMax: env.SSH_FORWARD_PORT_MAX,
     sshForwardConnectTimeoutMs: env.SSH_FORWARD_CONNECT_TIMEOUT_MS,
+    sshHost: env.SSH_HOST,
+    sshPort: env.SSH_PORT,
+    sshUser: env.SSH_USER,
+    sshHostKeySha256: env.SSH_HOST_KEY_SHA256,
+    sshEnrollmentTtlSeconds: env.SSH_ENROLLMENT_TTL_SECONDS,
     npmCommand:
       process.env.NPM_COMMAND ||
       (process.platform === 'win32' ? 'npm.cmd' : 'npm'),

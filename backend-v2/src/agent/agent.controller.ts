@@ -15,12 +15,14 @@ import {
   AgentAdminJobParamDto,
   CreateAgentJobDto,
 } from './dto/agent-job.dto.js';
+import { AgentSshService } from './agent-ssh.service.js';
 
 @Controller()
 export class AgentController {
   constructor(
     private readonly service: AgentService,
     private readonly jobs: AgentJobService,
+    private readonly ssh: AgentSshService,
   ) {}
 
   @Post('agents')
@@ -48,6 +50,12 @@ export class AgentController {
   @Delete('agents/:id/token')
   revokeToken(@Param() params: AgentIdParamDto) {
     return this.service.revokeToken(params.id);
+  }
+
+  @Post('agents/:id/ssh/enrollment')
+  @Header('Cache-Control', 'no-store')
+  createSshEnrollment(@Param() params: AgentIdParamDto) {
+    return this.ssh.createEnrollment(params.id);
   }
 
   @Get('agents/:id/status')

@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { and, asc, eq, ne } from 'drizzle-orm';
+import { and, asc, eq, gt, isNull, ne } from 'drizzle-orm';
 import { DatabaseService } from '../database/database.service.js';
 import {
   agents,
@@ -28,6 +28,14 @@ export class AgentRepository {
       .get();
   }
 
+  findBySshFingerprint(fingerprint: string): Agent | undefined {
+    return this.database.db
+      .select()
+      .from(agents)
+      .where(eq(agents.sshKeyFingerprint, fingerprint))
+      .get();
+  }
+
   list(): Agent[] {
     return this.database.db
       .select()
@@ -45,6 +53,50 @@ export class AgentRepository {
         updatedAt: new Date().toISOString(),
       })
       .where(and(eq(agents.tokenHash, tokenHash), ne(agents.status, 'revoked')))
+      .returning()
+      .get();
+  }
+
+  authenticateSshEnrollment(tokenHash: string, now: string): Agent | undefined {
+    return this.database.db
+      .select()
+      .from(agents)
+      .where(
+        and(
+          eq(agents.sshEnrollmentTokenHash, tokenHash),
+          gt(agents.sshEnrollmentExpiresAt, now),
+          isNull(agents.sshEnrollmentUsedAt),
+          ne(agents.status, 'revoked'),
+        ),
+      )
+      .get();
+  }
+
+  consumeSshEnrollment(
+    agentId: string,
+    tokenHash: string,
+    publicKey: string,
+    fingerprint: string,
+    now: string,
+  ): Agent | undefined {
+    return this.database.db
+      .update(agents)
+      .set({
+        sshEnrollmentUsedAt: now,
+        sshPublicKey: publicKey,
+        sshKeyFingerprint: fingerprint,
+        sshEnrolledAt: now,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(agents.id, agentId),
+          eq(agents.sshEnrollmentTokenHash, tokenHash),
+          gt(agents.sshEnrollmentExpiresAt, now),
+          isNull(agents.sshEnrollmentUsedAt),
+          ne(agents.status, 'revoked'),
+        ),
+      )
       .returning()
       .get();
   }

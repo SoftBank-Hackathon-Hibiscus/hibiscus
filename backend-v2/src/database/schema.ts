@@ -170,6 +170,12 @@ export const agents = sqliteTable(
     id: text('id').primaryKey(),
     name: text('name').notNull(),
     tokenHash: text('token_hash').notNull(),
+    sshEnrollmentTokenHash: text('ssh_enrollment_token_hash'),
+    sshEnrollmentExpiresAt: text('ssh_enrollment_expires_at'),
+    sshEnrollmentUsedAt: text('ssh_enrollment_used_at'),
+    sshPublicKey: text('ssh_public_key'),
+    sshKeyFingerprint: text('ssh_key_fingerprint'),
+    sshEnrolledAt: text('ssh_enrolled_at'),
     status: text('status', {
       enum: ['registered', 'online', 'offline', 'revoked'],
     }).notNull(),
@@ -180,6 +186,12 @@ export const agents = sqliteTable(
   (table) => [
     uniqueIndex('agents_name_unique').on(table.name),
     uniqueIndex('agents_token_hash_unique').on(table.tokenHash),
+    uniqueIndex('agents_ssh_enrollment_token_hash_unique').on(
+      table.sshEnrollmentTokenHash,
+    ),
+    uniqueIndex('agents_ssh_key_fingerprint_unique').on(
+      table.sshKeyFingerprint,
+    ),
   ],
 );
 
