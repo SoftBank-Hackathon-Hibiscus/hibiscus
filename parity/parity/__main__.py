@@ -106,33 +106,8 @@ def cmd_facts(args):
 
 
 def cmd_test(args):
-    records = _load_records(args.record)
-    names = [n.strip() for n in args.conditions.split(",") if n.strip()]
-    restart_after = conditions_mod.parse_index_list(args.restart_after) if args.restart_after else None
-    conditions = conditions_mod.build(names, args.container, _health_url(args),
-                                      restart_after=restart_after, restart_every=args.restart_every,
-                                      health_timeout=args.health_timeout, log=log)
-    noise_by_index = _load_noise(args)
-    ssl_context = make_ssl_context(args.target, args.cafile)
-    commit, why = git_commit()
-    log(f"[test] commit={commit}: {why}")
-
-    image = docker_ops.image_of(args.container)
-    facts, entries, mismatches = None, [], []
-    for cond in conditions:
-        log(f"[test] 조건 '{cond.name}' ({cond.describe()}): 컨테이너 재생성 → 요청 {len(records)}개 재생")
-        _reset_container(args, ssl_context)
-        result = replay(records, args.target, hooks=[cond], extra_headers=args.header,
-                        ssl_context=ssl_context, log=log)
-        if facts is None:
-            facts = facts_mod.collect(args.container)  # 기록 전체를 한 번 재생한 뒤의 컨테이너 상태
-        entry, found = evaluate(cond.name, records, result, noise_by_index, facts)
-        entries.append(entry)
-        mismatches.extend(found)
-        log(f"[test] 조건 '{cond.name}': {entry['matched']}/{entry['total']} 일치"
-            + (f" (중단: {entry['error']})" if entry.get("error") else ""))
-
-    return _finish(build_result(image, facts, entries, mismatches, commit=commit), args.out)
+    from .execution import run_test
+    return run_test(args, log=log)
 
 
 def cmd_verify(args):
@@ -156,6 +131,11 @@ def cmd_verify(args):
 def cmd_summary(args):
     with open(args.result, encoding="utf-8") as f:
         result = json.load(f)
+    if getattr(args, "matrix", False):
+        from .summary_matrix import matrix_lines
+        for line in matrix_lines(result):
+            print(line)
+        return 0
     for line in summary_lines(result):
         print(line)
     for m in result["mismatches"]:
@@ -211,13 +191,14 @@ def build_parser():
     p = sub.add_parser("test", help="조건별 재생 → result.json")
     p.add_argument("--record", required=True)
     _add_target_options(p)
-    p.add_argument("--conditions", default="none,restart",
-                   help=f"쉼표로 구분 (지원: {', '.join(conditions_mod.SUPPORTED)})")
+    p.add_argument("--conditions", default="none,restart,replace",
+                   help=f"쉼표로 구분 (기본: %(default)s; 지원: {', '.join(conditions_mod.SUPPORTED)})")
     group = p.add_mutually_exclusive_group()
     group.add_argument("--restart-after", help="이 요청 번호들 뒤에 재시작 (예: 3,7)")
     group.add_argument("--restart-every", action="store_true", help="모든 요청 사이에 재시작")
     p.add_argument("--noise", help="노이즈 파일 (기본값: <기록파일이름>.noise.json)")
     p.add_argument("--out", default="result.json")
+    p.add_argument("--expected-image-id", help="검사할 컨테이너의 로컬 이미지 ID (registry digest가 아님)")
     p.set_defaults(func=cmd_test)
 
     p = sub.add_parser("verify", help="Docker 조작 없이 요청만 재생 (배포 후 확인)")
@@ -231,6 +212,8 @@ def build_parser():
 
     p = sub.add_parser("summary", help="결과 JSON 요약 출력")
     p.add_argument("result")
+    p.add_argument("--matrix", action="store_true",
+                   help="같은 요청의 none/restart/replace 결과를 표로 비교 (원본 판정 유지)")
     p.set_defaults(func=cmd_summary)
     return parser
 

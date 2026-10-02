@@ -11,7 +11,7 @@ import ipaddress
 import time
 import urllib.request
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Optional
 
 from .errors import PremortemError
 from .gate import condition_status
@@ -116,6 +116,8 @@ class ConditionRunner:
             outcome = self.replay_port.replay(self.scenario.session_path, self.scenario.noise_path,
                                               lambda index: f"http://127.0.0.1:{self.current.port}", hook, {})
         except ReplayHookError as error:
+            if error.code == "READINESS_FAILED":
+                return self._readiness_failure(name, error.partial)
             self.evidence.add(name, "tool_error", f"요청 사이 조건 조작 실패: {error.code} {error.message}")
             mismatches = self._mismatches(name, error.partial)
             return self._result(name, "error", error.partial.expected_count, error.partial.executed_count,
@@ -191,6 +193,8 @@ class ConditionRunner:
         ready = self._wait_ready(self.current)
         self.evidence.add("restart", "readiness", f"restart 뒤 health {'준비됨' if ready else '응답 없음'}",
                           request_index=index)
+        if not ready:
+            raise PremortemError("READINESS_FAILED", "restart 뒤 health 준비 확인 실패")
 
     def _replace(self, index: int) -> None:
         old = self.current
@@ -210,17 +214,27 @@ class ConditionRunner:
         ready = self._wait_ready(new)
         self.evidence.add("replace", "readiness", f"replace 뒤 health {'준비됨' if ready else '응답 없음'}",
                           request_index=index)
+        if not ready:
+            raise PremortemError("READINESS_FAILED", "replace 뒤 health 준비 확인 실패")
 
     # 증거와 결과 ---------------------------------------------------------
-    def _readiness_failure(self, name: str) -> dict:
+    def _readiness_failure(self, name: str, partial: Optional[ReplayOutcome] = None) -> dict:
+        # 조건 주입 후 실패는 재생기가 보존한 비교 결과를 유지하고 다음 요청을 readiness 실패로 표시한다.
+        expected = partial.expected_count if partial is not None else self.request_count
+        executed = partial.executed_count if partial is not None else 0
+        matched = partial.matched_count if partial is not None else 0
+        request_index = executed + 1
+        evidence_index = request_index if partial is not None else None
+        mismatches = self._mismatches(name, partial) if partial is not None else []
         info = self.docker.inspect(self.current.id)
         port, path = self.scenario.container_port, self.scenario.readiness_path
         evidence_ids = []
         if not info["running"]:
             evidence_ids.append(self.evidence.add(name, "container_log", f"준비 전에 컨테이너가 종료됨(exit {info['exit_code']})",
+                                                  request_index=evidence_index,
                                                   artifact_text=self.docker.logs(self.current.id, 50)))
             reason = f"readiness_failed: 컨테이너 종료(exit {info['exit_code']})"
-            summary = "준비 전에 컨테이너가 종료되어 1번 요청부터 보내지 못함"
+            summary = f"준비 전에 컨테이너가 종료되어 {request_index}번 요청부터 보내지 못함"
         else:
             probe = self.docker.exec_probe(self.current.id, ["python", "-c", PROBE_CODE.format(port=port, path=path)])
             internal_ok = probe.returncode == 0 and probe.stdout.strip().startswith("2")
@@ -229,17 +243,20 @@ class ConditionRunner:
             evidence_ids.append(self.evidence.add(
                 name, "readiness",
                 f"게시 포트 127.0.0.1:{self.current.port}에서 {self.scenario.readiness_timeout_sec:g}초 동안 health 응답 없음. "
-                f"컨테이너 안 루프백 health: {'성공' if internal_ok else '실패'}"))
+                f"컨테이너 안 루프백 health: {'성공' if internal_ok else '실패'}", request_index=evidence_index))
             listen_text = ", ".join(listen) if listen else ("관측 안 됨" if listen is not None else "확인하지 못함")
-            evidence_ids.append(self.evidence.add(name, "listen_socket", f"컨테이너 안 {port}번 포트 LISTEN 주소: {listen_text}"))
-            self.evidence.add(name, "container_log", "컨테이너 로그(마지막 50줄)", artifact_text=self.docker.logs(self.current.id, 50))
+            evidence_ids.append(self.evidence.add(name, "listen_socket", f"컨테이너 안 {port}번 포트 LISTEN 주소: {listen_text}",
+                                                  request_index=evidence_index))
+            self.evidence.add(name, "container_log", "컨테이너 로그(마지막 50줄)", request_index=evidence_index,
+                              artifact_text=self.docker.logs(self.current.id, 50))
             if internal_ok and listen and all(is_loopback(address) for address in listen):
                 reason = "readiness_failed: 내부 health 성공·외부 실패·루프백 listen 관측 → binding 후보"
             else:
                 reason = "readiness_failed: 원인 미확정"
-            summary = "외부에서 health 응답을 받지 못해 1번 요청부터 보내지 못함"
-        mismatch = {"request_index": 1, "kind": "readiness", "summary": summary, "evidence_ids": evidence_ids}
-        return self._result(name, "failed", self.request_count, 0, 0, [mismatch], reason)
+            summary = f"외부에서 health 응답을 받지 못해 {request_index}번 요청부터 보내지 못함"
+        mismatches.append({"request_index": request_index, "kind": "readiness", "summary": summary,
+                           "evidence_ids": evidence_ids})
+        return self._result(name, "failed", expected, executed, matched, mismatches, reason)
 
     def _mismatches(self, name: str, outcome: ReplayOutcome) -> list:
         mismatches = []

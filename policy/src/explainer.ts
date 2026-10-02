@@ -6,12 +6,16 @@
  * - lang: ko(기본) | ja. 규칙의 reason/hint 는 결정서의 *_i18n 에 해당 언어가 있으면 그것을, 없으면 ko 를 쓴다.
  * - reason/hint 안의 sha256:<64자> 는 앞 12자로 줄인다 (안전장치).
  * - 결정서에 source_revision(커밋 SHA)이 있으면 맨 아래 줄에 앞 7자리를 표시한다.
+ * - test(test_result)를 같이 주고 facts.conditions 가 있으면 결론 아래에 조건별 재생 결과 한 줄을 넣는다
+ *   ("재생 결과: none 20/20, restart 14/20, replace 13/20"). 결정서만 있으면 이 줄은 없다.
  */
-import type { Plan, PlanRequirement, RollbackPlan, RuleResult } from "./schema.js";
+import type { ConditionFact, Plan, PlanRequirement, RollbackPlan, RuleResult, TestResult } from "./schema.js";
 
 export type Lang = "ko" | "ja";
 export interface ExplainOptions {
   lang?: Lang;
+  /** 결정에 들어간 test_result. facts.conditions 가 있을 때만 조건별 재생 결과 줄을 넣는다 (배포 결정서만) */
+  test?: Pick<TestResult, "facts">;
 }
 
 const ONPREM = "onprem";
@@ -35,6 +39,8 @@ interface Strings {
     offBlocked: string;
     offManual: string;
   };
+  /** 조건별 재생 결과 한 줄. facts.conditions 가 있을 때만 */
+  conditionsLine: (conditions: readonly ConditionFact[]) => string;
   reasonsHeading: string;
   reasonsNone: string;
   defaultPolicy: (reason: string) => string;
@@ -78,6 +84,7 @@ const STRINGS: Record<Lang, Strings> = {
       offBlocked: "배포하지 않으므로 장애 시 전환도 없습니다.",
       offManual: "수동 복구 전까지 장애 시 전환은 없습니다.",
     },
+    conditionsLine: (conditions) => `재생 결과: ${conditions.map((c) => `${c.name} ${c.matched}/${c.total}`).join(", ")}`,
     reasonsHeading: "## 이유",
     reasonsNone: "걸린 규칙이 없습니다.",
     defaultPolicy: (reason) => `기본 정책을 적용했습니다: ${reason}`,
@@ -119,6 +126,7 @@ const STRINGS: Record<Lang, Strings> = {
       offBlocked: "デプロイしないため、障害時の切り替えもありません。",
       offManual: "手動復旧までは障害時の切り替えはありません。",
     },
+    conditionsLine: (conditions) => `再生結果：${conditions.map((c) => `${c.name} ${c.matched}/${c.total}`).join("、")}`,
     reasonsHeading: "## 理由",
     reasonsNone: "該当したルールはありません。",
     defaultPolicy: (reason) => `既定ポリシーを適用しました：${reason}`,
@@ -222,6 +230,12 @@ function requiresSection(requires: readonly PlanRequirement[] | undefined, s: St
 // explainPlan / explainRollbackPlan
 // ---------------------------------------------------------------------------
 
+/** 조건별 재생 결과 줄. test 가 없거나 facts.conditions 가 비어 있으면 아무 줄도 넣지 않는다 */
+function conditionsLines(test: ExplainOptions["test"], s: Strings): string[] {
+  const conditions = test?.facts.conditions;
+  return conditions !== undefined && conditions.length > 0 ? [s.conditionsLine(conditions), ""] : [];
+}
+
 export function explainPlan(plan: Plan, opts: ExplainOptions = {}): string {
   const lang = opts.lang ?? "ko";
   const s = STRINGS[lang];
@@ -233,6 +247,7 @@ export function explainPlan(plan: Plan, opts: ExplainOptions = {}): string {
     "",
     failoverText(plan.decision, plan.targets, plan.failover_allowed, s, false),
     "",
+    ...conditionsLines(opts.test, s),
     ...reasonsSection(plan.rules, s, lang, s.afterBlockHeading),
     "",
     ...requiresSection(plan.requires, s, lang),

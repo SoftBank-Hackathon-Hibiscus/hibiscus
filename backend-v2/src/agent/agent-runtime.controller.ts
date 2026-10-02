@@ -63,4 +63,10 @@ export class AgentRuntimeController {
   status(@Req() request: AgentRequest) {
     return this.agents.status(request.agent.id);
   }
+
+  @Get('forwards')
+  @Header('Cache-Control', 'no-store')
+  forwards(@Req() request: AgentRequest) {
+    return this.agents.forwards(request.agent.id);
+  }
 }

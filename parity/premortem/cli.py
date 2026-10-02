@@ -36,6 +36,22 @@ def _cmd_doctor(args) -> int:
     return EXIT_OK
 
 
+def _cmd_build(args) -> int:
+    from .process import SubprocessRunner
+    from .registry_build import build_and_push
+
+    result = build_and_push(app=Path(args.app), image_repo=args.image_repo, out_dir=Path(args.out_dir),
+                            run_id=args.run_id, platforms=tuple(args.platforms.split(",")),
+                            builder=args.builder, timeout=args.timeout, runner=SubprocessRunner())
+    if args.json:
+        _print_json(result)
+    else:
+        print(f"이미지: {result['image']['reference']}")
+        print(f"소스: {result['source']['commit']}")
+        print(f"빌드 기록: {Path(args.out_dir) / 'build_manifest.json'}")
+    return EXIT_OK
+
+
 def _cmd_demo(args) -> int:
     from .demo import run_demo
 
@@ -93,10 +109,56 @@ def _cmd_handoff(args) -> int:
 
 
 def _cmd_run(args) -> int:
-    from .adapters.parity_adapter import load_parity_adapter
+    import re
 
-    load_parity_adapter(Path.cwd())  # 윤선님 재생기 없이는 실제 앱을 검사하지 않는다
-    return EXIT_INCOMPLETE
+    from .adapters.parity_adapter import load_parity_adapter
+    from .config import CORE_CONDITIONS
+    from .docker_driver import DockerDriver
+    from .handoff import write_handoff
+    from .paths import validate_run_id
+    from .process import SubprocessRunner
+    from .report import summary_lines, write_report
+    from .runner import execute_run
+    from .scenarios import Scenario
+
+    replay = load_parity_adapter()  # 윤선님 재생기 없이는 실제 앱을 검사하지 않는다
+    if args.run_id is not None:
+        validate_run_id(args.run_id)
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{0,39}", args.name):
+        raise PremortemError("INPUT_INVALID", f"--name은 소문자·숫자·-_. 만 쓸 수 있음: {args.name!r}")
+    app_dir, record = Path(args.app), Path(args.record)
+    noise = Path(args.noise) if args.noise else record.with_name(record.stem + ".noise.json")
+    for option, path in (("--app", app_dir), ("--record", record), ("--noise", noise)):
+        if not path.exists():
+            raise PremortemError("INPUT_INVALID", f"{option} 경로가 없음: {path}")
+    try:
+        after = tuple(int(part) for part in args.after.split(",") if part.strip()) if args.after else ()
+    except ValueError:
+        raise PremortemError("INPUT_INVALID", f"--after는 '10' 또는 '3,7' 같은 요청 번호: {args.after!r}") from None
+    scenario = Scenario(args.name, f"{args.name} (parity 기록)", app_dir, record, noise, args.port,
+                        args.health_path, args.health_timeout, after, CORE_CONDITIONS, (), {})
+    settings = Settings()
+    command_runner = SubprocessRunner()
+    docker = DockerDriver(command_runner, settings)
+    docker.require_daemon()
+    result = execute_run(scenario, app_dir, "pretest", None, settings, docker, replay, command_runner,
+                         Path(args.run_root) if args.run_root else None, run_id=args.run_id)
+    write_report(result.run_dir)
+    write_handoff(result.run_dir)
+    overall = result.env_report["overall_status"]
+    if args.json:
+        _print_json({"run_id": result.run_id, "run_dir": str(result.run_dir), "overall_status": overall,
+                     "conditions": [{"name": c["name"], "status": c["status"], "matched": c["matched_count"],
+                                     "expected": c["expected_count"]} for c in result.env_report["conditions"]],
+                     "cleanup_failures": result.cleanup_failures})
+    else:
+        print("\n".join(summary_lines(result.env_report)))
+        print(f"결과: {result.run_dir}")
+    if result.cleanup_failures:
+        print("정리하지 못한 자기 컨테이너: " + ", ".join(c[:12] for c in result.cleanup_failures)
+              + " → docker rm --force <ID>로 직접 지워 주세요", file=sys.stderr)
+        return EXIT_ERROR
+    return {"passed": EXIT_OK, "failed": EXIT_FAILED, "inconclusive": EXIT_INCOMPLETE}.get(overall, EXIT_ERROR)
 
 
 def _cmd_self_test(args) -> int:
@@ -141,7 +203,17 @@ def build_parser() -> argparse.ArgumentParser:
     handoff.add_argument("--json", action="store_true")
     handoff.set_defaults(handler=_cmd_handoff)
 
-    run = sub.add_parser("run", help="실제 앱 검사 (윤선님 재생기 연결 후 사용)")
+    run = sub.add_parser("run", help="실제 앱 검사: 윤선님 parity 재생기로 none·restart·replace 실행")
+    run.add_argument("--app", required=True, help="앱 소스 폴더 (Dockerfile 포함)")
+    run.add_argument("--record", required=True, help="parity 기록 파일 (session.jsonl)")
+    run.add_argument("--noise", help="parity 노이즈 파일 (기본: <기록이름>.noise.json)")
+    run.add_argument("--name", default="app", help="이미지 태그와 run_id 앞부분 (소문자, 숫자, -_.)")
+    run.add_argument("--port", type=int, default=8080, help="컨테이너 안 앱 포트 (기본 8080)")
+    run.add_argument("--health-path", default="/healthz", help="준비 확인 경로 (기본 /healthz)")
+    run.add_argument("--health-timeout", type=float, default=30.0, help="준비 확인 최대 초 (기본 30)")
+    run.add_argument("--after", help="조건을 넣을 요청 번호, 쉼표로 구분 (예: 10). 없으면 가운데 한 번")
+    run.add_argument("--run-id", help="파이프라인이 만든 run_id. 없으면 새로 만든다")
+    run.add_argument("--run-root", help="실행 결과를 둘 폴더 (기본 premortem/.runs)")
     run.add_argument("--json", action="store_true")
     run.set_defaults(handler=_cmd_run)
 
@@ -149,6 +221,17 @@ def build_parser() -> argparse.ArgumentParser:
     self_test.add_argument("--docker", action="store_true")
     self_test.add_argument("-v", "--verbose", action="store_true")
     self_test.set_defaults(handler=_cmd_self_test)
+
+    build = sub.add_parser("build", help="커밋된 앱을 레지스트리에 업로드하고 index digest 확인")
+    build.add_argument("--app", required=True, help="Dockerfile이 있는 Git 앱 폴더")
+    build.add_argument("--image-repo", required=True, help="태그 없는 registry/이미지 경로")
+    build.add_argument("--run-id", required=True)
+    build.add_argument("--out-dir", required=True, help="새 빌드 결과 폴더 (앱 폴더 밖)")
+    build.add_argument("--platforms", default="linux/amd64,linux/arm64")
+    build.add_argument("--builder", help="사용할 buildx builder 이름")
+    build.add_argument("--timeout", type=int, default=900, help="빌드·pull 제한 시간(초)")
+    build.add_argument("--json", action="store_true")
+    build.set_defaults(handler=_cmd_build)
     return parser
 
 

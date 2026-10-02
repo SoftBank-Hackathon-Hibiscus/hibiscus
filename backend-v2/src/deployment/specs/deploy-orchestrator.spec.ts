@@ -13,6 +13,7 @@ import {
 } from '../types/deploy-result.type.js';
 
 const DIGEST = `sha256:${'a'.repeat(64)}`;
+const OLD_DIGEST = `sha256:${'b'.repeat(64)}`;
 const RUN = 'run-1';
 const REPO = 'registry.example/app';
 
@@ -62,6 +63,7 @@ function setup(
     onprem?: (spec: OnpremJobSpec) => Awaited<ReturnType<OnpremPort['run']>>;
     verifierRejects?: boolean;
     withoutCloudRun?: boolean;
+    routingFails?: boolean;
   } = {},
 ) {
   const calls: string[] = [];
@@ -132,10 +134,24 @@ function setup(
           : {}),
         ...(spec.action === 'activate'
           ? {
+              previous: {
+                run_id: 'run-old',
+                digest: OLD_DIGEST,
+                container: 'hibiscus-run-old',
+              },
               serving: {
                 run_id: RUN,
                 digest: DIGEST,
                 container: 'hibiscus-run-1',
+              },
+            }
+          : {}),
+        ...(spec.action === 'rollback'
+          ? {
+              serving: {
+                run_id: 'run-old',
+                digest: spec.toDigest!,
+                container: 'hibiscus-run-old',
               },
             }
           : {}),
@@ -157,6 +173,8 @@ function setup(
     }),
     switchTo: vi.fn((_app, targetId) => {
       calls.push(`route:switch:${targetId}`);
+      if (options.routingFails)
+        throw new Error('Routing revision does not match');
       return 1;
     }),
   };
@@ -264,6 +282,72 @@ describe('DeployOrchestrator', () => {
     expect(calls).toContain('cloud:rollback:svc-old');
     expect(calls).toContain('onprem:discard');
     expect(result.routing.result).toBe('skipped');
+  });
+
+  it('rolls both targets back when the routing switch fails', async () => {
+    const { orchestrator, calls } = setup({ routingFails: true });
+    const result = await orchestrator.run(input());
+    expect(result.decision).toBe('rolled_back');
+    expect(result.routing).toMatchObject({
+      result: 'error',
+      error: 'Routing revision does not match',
+    });
+    expect(result.error).toContain('Routing switch failed');
+    expect(calls).toContain('cloud:rollback:svc-old');
+    expect(calls).toContain('onprem:rollback');
+    expect(
+      result.targets.filter((step) => step.phase === 'rollback'),
+    ).toMatchObject([
+      { target: 'cloud_run', result: 'ok', serving: 'svc-old' },
+      { target: 'onprem', result: 'ok', serving: 'hibiscus-run-old' },
+    ]);
+  });
+
+  it('rolls Cloud Run back when routing fails without an agent', async () => {
+    const { orchestrator, calls } = setup({ routingFails: true });
+    const result = await orchestrator.run(input({ agentId: null }));
+    expect(result.decision).toBe('rolled_back');
+    expect(calls).toContain('cloud:rollback:svc-old');
+    expect(calls).not.toContain('onprem:rollback');
+  });
+
+  it('reports an error when routing fails and the agent had nothing to roll back to', async () => {
+    const { orchestrator, calls } = setup({
+      routingFails: true,
+      onprem: (spec) => ({
+        jobId: `${spec.runId}-${spec.action}-01`,
+        status: 'succeeded',
+        payload: {
+          schema_version: 1,
+          agent_id: 'agent-1',
+          job_id: `${spec.runId}-${spec.action}-01`,
+          run_id: RUN,
+          action: spec.action,
+          attempt: 1,
+          result: 'ok',
+          finished_at: '',
+          ...(spec.action === 'candidate'
+            ? {
+                candidate: {
+                  digest: DIGEST,
+                  container: 'c',
+                  url: 'http://127.0.0.1:18081',
+                },
+                check: { mode: 'candidate', pass: true, checks: [] },
+              }
+            : {}),
+        },
+      }),
+    });
+    const result = await orchestrator.run(input());
+    expect(result.decision).toBe('error');
+    expect(calls).toContain('cloud:rollback:svc-old');
+    expect(calls).not.toContain('onprem:rollback');
+    expect(
+      result.targets.find(
+        (step) => step.target === 'onprem' && step.phase === 'rollback',
+      ),
+    ).toMatchObject({ result: 'error' });
   });
 
   it('rejects before touching any target when the signature is invalid', async () => {

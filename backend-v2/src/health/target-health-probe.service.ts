@@ -2,12 +2,12 @@ import { Injectable } from '@nestjs/common';
 import { Agent as HttpAgent, request as httpRequest } from 'node:http';
 import type { Socket } from 'node:net';
 import type { HealthCheckConfig, RoutingTarget } from '../database/schema.js';
-import { TunnelService } from '../tunnel/tunnel.service.js';
+import { SshTunnelService } from '../ssh-tunnel/ssh-tunnel.service.js';
 import type { TargetProbeResult } from './types/health.type.js';
 
 @Injectable()
 export class TargetHealthProbeService {
-  constructor(private readonly tunnel: TunnelService) {}
+  constructor(private readonly tunnel: SshTunnelService) {}
 
   async check(
     target: RoutingTarget,

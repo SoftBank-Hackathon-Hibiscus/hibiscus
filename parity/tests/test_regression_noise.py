@@ -54,6 +54,7 @@ def docker_patched():
     return [mock.patch("parity.docker_ops.recreate"),
             mock.patch("parity.docker_ops.wait_healthy", return_value=0.0),
             mock.patch("parity.docker_ops.image_of", return_value="stub:1"),
+            mock.patch("parity.docker_ops.image_id_of", return_value="sha256:" + "a" * 64),
             mock.patch("parity.facts.collect", return_value=[])]
 
 

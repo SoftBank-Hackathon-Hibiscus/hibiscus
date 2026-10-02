@@ -1,5 +1,11 @@
 import { Exclude, Expose, Type } from 'class-transformer';
-import { IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import {
+  IsOptional,
+  IsString,
+  Matches,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 import { UserResponseDto } from '../../user/dto/user.dto.js';
 
 export class GithubCallbackDto {
@@ -10,6 +16,11 @@ export class GithubCallbackDto {
 
   @Matches(/^[A-Za-z0-9_-]{43}$/)
   state: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(512)
+  iss?: string;
 }
 
 export class RefreshTokenDto {
