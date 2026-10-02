@@ -1,5 +1,6 @@
 import {
   BadGatewayException,
+  ForbiddenException,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -125,12 +126,14 @@ export class AuthService {
         },
       },
     );
+    this.assertAllowedGithubId(String(profile.id));
     const user = this.users.upsertGithub(profile);
     this.githubConnection.save(user.id, token);
     return this.issueTokens(user);
   }
 
   async issueTokens(user: User) {
+    this.assertAllowedGithubId(user.githubId);
     const settings = this.config.get('auth.jwt', { infer: true });
     const sign = (
       kind: 'access' | 'refresh',
@@ -179,9 +182,20 @@ export class AuthService {
       if (claims.kind !== kind) throw new Error('Invalid token claims');
       const user = this.users.find(claims.sub);
       if (!user) throw new Error('User not found');
+      this.assertAllowedGithubId(user.githubId);
       return user;
-    } catch {
+    } catch (error) {
+      if (error instanceof ForbiddenException) throw error;
       throw new UnauthorizedException('Token is missing, expired, or invalid');
+    }
+  }
+
+  private assertAllowedGithubId(githubId: string): void {
+    const allowed = this.config.get('auth.githubApp.allowedUserIds', {
+      infer: true,
+    });
+    if (!allowed.includes(githubId)) {
+      throw new ForbiddenException('GitHub user is not allowed');
     }
   }
 

@@ -2,7 +2,11 @@ import { connect, type Socket } from "node:net";
 import WebSocket, { createWebSocketStream, type RawData } from "ws";
 import type { AgentConfig } from "./config.js";
 import { FatalTunnelError } from "./types.js";
-import type { ControlMessage, OpenMessage } from "./types.js";
+import type {
+  ControlMessage,
+  OpenMessage,
+  TunnelTargetAuthorizer,
+} from "./types.js";
 
 export class TunnelClient {
   private control?: WebSocket;
@@ -13,7 +17,10 @@ export class TunnelClient {
     { data: WebSocket; local: Socket }
   >();
 
-  constructor(private readonly config: AgentConfig) {}
+  constructor(
+    private readonly config: AgentConfig,
+    private readonly targets: TunnelTargetAuthorizer,
+  ) {}
 
   async start(): Promise<void> {
     let delay = this.config.reconnectMinMs;
@@ -114,9 +121,20 @@ export class TunnelClient {
 
   private async openChannel(message: OpenMessage): Promise<void> {
     if (this.channels.has(message.channel_id)) return;
+    let port: number | undefined;
+    try {
+      port = await this.targets.authorize(message);
+    } catch {
+      this.sendOpenError(message.channel_id, "TARGET_AUTHORIZATION_FAILED");
+      return;
+    }
+    if (port === undefined) {
+      this.sendOpenError(message.channel_id, "TARGET_NOT_ALLOWED");
+      return;
+    }
     let local: Socket;
     try {
-      local = await this.connectLocal(message.local_port);
+      local = await this.connectLocal(port);
     } catch {
       this.sendOpenError(message.channel_id, "LOCAL_CONNECT_FAILED");
       return;

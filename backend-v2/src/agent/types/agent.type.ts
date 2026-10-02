@@ -33,6 +33,7 @@ export interface AgentRuntimeConfig {
 export interface AgentHealthCheckConfig {
   enabled: boolean;
   path: string;
+  version_path?: string;
   method: 'GET' | 'HEAD';
   interval_seconds: number;
   timeout_seconds: number;

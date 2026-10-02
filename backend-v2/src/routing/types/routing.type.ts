@@ -22,4 +22,5 @@ export interface TargetHealthObservation {
   observedAt: string;
   expiresAt: string;
   reason?: string;
+  failureKind?: 'application' | 'network';
 }

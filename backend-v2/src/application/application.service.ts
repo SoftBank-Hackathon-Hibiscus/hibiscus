@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -16,11 +17,16 @@ export class ApplicationService {
   constructor(private readonly repository: ApplicationRepository) {}
 
   create(input: CreateApplicationDto) {
+    const publicHost = input.public_host?.toLowerCase() ?? null;
+    if (publicHost && this.repository.findByPublicHost(publicHost)) {
+      throw new ConflictException('Application public host already exists');
+    }
     const timestamp = new Date().toISOString();
     const application: Application = {
       id: randomUUID(),
       name: input.name,
       slug: input.slug,
+      publicHost,
       sourcePath: input.source_path,
       imageRepo: input.image_repo,
       containerPort: input.container_port,
@@ -36,6 +42,7 @@ export class ApplicationService {
       applicationId: application.id,
       enabled: input.health_check.enabled,
       path: input.health_check.path,
+      versionPath: input.health_check.version_path ?? null,
       method: input.health_check.method,
       intervalSeconds: input.health_check.interval_seconds,
       timeoutSeconds: input.health_check.timeout_seconds,
@@ -78,6 +85,7 @@ export class ApplicationService {
     return this.repository.updateHealthCheck(id, {
       enabled: input.enabled,
       path: input.path,
+      versionPath: input.version_path,
       method: input.method,
       intervalSeconds: input.interval_seconds,
       timeoutSeconds: input.timeout_seconds,

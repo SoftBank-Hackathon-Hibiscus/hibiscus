@@ -72,6 +72,12 @@ export class HealthCheckDto {
   @MaxLength(256)
   path = '/health';
 
+  @IsOptional()
+  @IsString()
+  @Matches(/^\/(?!\/)[^\s?#]*$/)
+  @MaxLength(256)
+  version_path?: string;
+
   @IsIn(['GET', 'HEAD'])
   method: 'GET' | 'HEAD' = 'GET';
 
@@ -118,6 +124,12 @@ export class UpdateHealthCheckDto {
   @Matches(/^\/(?!\/)[^\s?#]*$/)
   @MaxLength(256)
   path?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^\/(?!\/)[^\s?#]*$/)
+  @MaxLength(256)
+  version_path?: string | null;
 
   @IsOptional()
   @IsIn(['GET', 'HEAD'])
@@ -172,6 +184,13 @@ export class CreateApplicationDto {
   @Matches(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
   @MaxLength(64)
   slug: string;
+
+  @IsOptional()
+  @trim()
+  @Matches(
+    /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/,
+  )
+  public_host?: string;
 
   @trim()
   @IsString()

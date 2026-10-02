@@ -1,0 +1,1 @@
+ALTER TABLE `health_check_configs` ADD `version_path` text;

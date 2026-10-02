@@ -30,6 +30,23 @@ export class RoutingRepository {
       .get();
   }
 
+  findHealth(targetId: string): RoutingTargetHealth | undefined {
+    return this.database.db
+      .select()
+      .from(routingTargetHealth)
+      .where(eq(routingTargetHealth.targetId, targetId))
+      .get();
+  }
+
+  listEnabledTargets(): RoutingTarget[] {
+    return this.database.db
+      .select()
+      .from(routingTargets)
+      .where(eq(routingTargets.enabled, true))
+      .orderBy(asc(routingTargets.createdAt))
+      .all();
+  }
+
   findEquivalentTarget(
     applicationId: string,
     deploymentId: string,

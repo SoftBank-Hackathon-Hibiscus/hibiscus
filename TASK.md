@@ -56,21 +56,21 @@ API 전송 계약과 예시는 `backend-v2/README.md`의 `Agent API 계약 v1`�
 
 ## P4. Gateway와 Routing
 
-- [ ] VM Backend에 Reverse Proxy를 만든다.
-- [ ] Host 이름으로 앱을 찾는다.
-- [ ] On-Prem 터널 또는 Cloud Run URL로 요청을 보낸다.
-- [ ] 준하님의 Health 상태를 읽는다. Target Health 저장과 조회는 완료. Health Monitor 연결은 미구현.
-- [ ] 요청·응답 헤더와 스트리밍을 처리한다.
+- [x] VM Backend에 Reverse Proxy를 만든다.
+- [x] 운영 Host 이름과 개발용 `/_gateway/:slug`로 앱을 찾는다.
+- [x] On-Prem 터널 또는 Cloud Run URL로 요청을 보낸다.
+- [x] Backend Health Monitor가 Target 상태를 기록하고 Routing에 적용한다.
+- [x] Hop-by-hop 헤더를 제거하고 요청·응답을 스트리밍한다.
 - [x] 수동 라우팅 변경 API를 만든다.
 - [ ] 도메인과 TLS를 설정한다.
 
-## P5. Failover 결정 필요
+## P5. Failover
 
-- [ ] Health 실패 횟수와 timeout을 정한다.
-- [ ] 터널 종료 즉시 전환할지 정한다.
-- [ ] 앱 오류와 네트워크 오류를 구분한다.
-- [ ] 자동 Failback 여부를 정한다.
-- [ ] 쓰기 요청 재전송 정책을 정한다.
+- [x] Health 실패 횟수와 timeout은 Application별 설정을 사용한다.
+- [x] 터널 종료만으로 즉시 전환하지 않는다. Health 실패 임계값을 사용한다.
+- [x] HTTP 상태 오류는 `application`, 연결·Tunnel·timeout 오류는 `network`로 저장한다.
+- [x] 자동 Failback은 하지 않는다. 복구 뒤 수동 Route 변경을 사용한다.
+- [x] 쓰기 요청을 자동 재전송하지 않는다.
 
 ## P6. Webhook과 관리 기능
 

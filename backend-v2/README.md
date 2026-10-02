@@ -16,6 +16,9 @@ Nest CLI로 생성한 하이브리드 배포 백엔드 재구현 초안입니다
 - Application별 On-Prem·Cloud Run Routing Target과 현재 Route 저장
 - Revision 확인을 사용하는 수동 Route 변경과 변경 이력 저장
 - Health Monitor가 전달할 Target Health 저장과 만료 처리
+- Application Host 기반 Reverse Proxy와 개발용 slug 경로
+- On-Prem Tunnel·Cloud Run 요청 전달과 스트리밍
+- Application별 임계값을 사용하는 Health Monitor와 On-Prem → Cloud Run 자동 Failover
 - Agent token으로 인증하는 outbound WSS Reverse Tunnel
 - Agent별 Tunnel 세션·채널·heartbeat·시간 초과 관리
 - SQLite 작업함을 확인하는 배포 Worker
@@ -52,6 +55,8 @@ src/
 ├── agent/        Agent와 Application 연결
 ├── routing/      Target, 현재 Route, Health 상태
 ├── tunnel/       Agent WSS 제어·데이터 터널
+├── gateway/      Host 선택과 On-Prem·Cloud Run Reverse Proxy
+├── health/       Target 점검과 자동 Failover
 ├── auth/         GitHub 로그인, JWT 발급·검증·갱신
 ├── user/         GitHub 계정과 고정 사용자 ID
 ├── app.module.ts
@@ -64,7 +69,7 @@ src/
 - 서비스 파일에는 서비스 클래스 하나만 둡니다. 인증 가드는 `auth/guards/jwt-auth.guard.ts`에 둡니다.
 - Deployment의 `stages/`가 단계별 실행 책임을 가집니다.
 - 공통 명령 실행은 `infrastructure/`에 둡니다. 계약 스키마 검사는 테스트에서만 수행합니다.
-- Git 검사는 수행하지 않습니다. `sourceRevisionVerified`는 `false`로 저장합니다.
+- 수동 요청은 Git 검사를 수행하지 않으므로 `sourceRevisionVerified=false`입니다. HMAC을 검증하고 연결된 저장소·브랜치와 일치한 GitHub Push Webhook은 `true`입니다.
 
 ## 데이터 관계
 
@@ -147,7 +152,7 @@ npm run start:dev
 
 기본 주소는 `http://127.0.0.1:8080`입니다.
 
-`JWT_ACCESS_SECRET`과 `JWT_REFRESH_SECRET`은 각각 최소 32자이며 서로 달라야 합니다. 각 키는 `openssl rand -hex 32`로 생성할 수 있습니다. GitHub App의 Client ID와 Client Secret도 필수입니다. 설정은 서버 시작 시 검증합니다. 필수 설정이 없거나 잘못되면 서버를 시작하지 않습니다. 서비스 안에서는 설정 누락을 다시 검사하지 않습니다.
+`JWT_ACCESS_SECRET`과 `JWT_REFRESH_SECRET`은 각각 최소 32자이며 서로 달라야 합니다. 각 키는 `openssl rand -hex 32`로 생성할 수 있습니다. GitHub App의 Client ID, Client Secret, `ALLOWED_GITHUB_IDS`도 필수입니다. 설정은 서버 시작 시 검증합니다. 필수 설정이 없거나 잘못되면 서버를 시작하지 않습니다. 서비스 안에서는 설정 누락을 다시 검사하지 않습니다.
 
 백엔드 오류 메시지는 영문입니다. CLI의 원본 출력과 공통 계약의 정책 설명은 수정하지 않습니다. CLI 실패 시 원본 출력은 단계의 `summary.stdout`, `summary.stderr`에 보관하고 `error`에는 영문 오류를 저장합니다. 예상하지 못한 단계 오류의 원문은 `summary.details`에 보관합니다. Worker 자체 오류의 원문은 서버 로그에만 남깁니다.
 
@@ -170,7 +175,10 @@ GitHub App 등록 방법:
 GITHUB_APP_CLIENT_ID=your-github-app-client-id
 GITHUB_APP_CLIENT_SECRET=your-github-app-client-secret
 GITHUB_APP_CALLBACK_URL=http://localhost:8080/auth/github/callback
+ALLOWED_GITHUB_IDS=12345678,87654321
 ```
+
+`ALLOWED_GITHUB_IDS`에는 로그인할 팀원의 GitHub 숫자 사용자 ID를 쉼표로 구분해서 넣습니다. OAuth Callback과 기존 JWT 검증에서 이 목록을 확인합니다. 목록에서 사용자를 제거하면 기존 Access·Refresh JWT도 더 이상 사용할 수 없습니다.
 
 1. 같은 브라우저에서 `GET /auth/github`를 호출합니다. 서버가 `authorization_url`과 10분짜리 HttpOnly 임시 Cookie를 제공합니다.
 2. 브라우저를 `authorization_url`로 이동합니다. `state`와 PKCE `S256`을 사용합니다. Cookie에는 서명한 state와 verifier를 보관합니다. 서버 세션은 저장하지 않습니다.
@@ -205,13 +213,17 @@ GitHub App 사용자 토큰과 GitHub refresh token은 AES-256-GCM으로 암호�
 {
   "name": "My app",
   "slug": "my-app",
+  "public_host": "my-app.example.com",
   "image_repo": "registry.example/my-app",
   "container_port": 8080,
   "installation_id": 123,
   "repository_id": 456,
   "branch": "main",
   "auto_deploy": true,
-  "health_check": { "path": "/health" }
+  "health_check": {
+    "path": "/health",
+    "version_path": "/version"
+  }
 }
 ```
 
@@ -219,11 +231,12 @@ GitHub App 사용자 토큰과 GitHub refresh token은 AES-256-GCM으로 암호�
 
 Webhook은 원본 요청 바이트의 HMAC-SHA256을 `X-Hub-Signature-256`과 상수 시간 비교합니다. [GitHub 서명 검증 문서](https://docs.github.com/en/webhooks/using-webhooks/validating-webhook-deliveries).
 
-- 선택한 브랜치의 push만 기존 배포 큐에 넣습니다. trigger는 `webhook`, source revision은 push commit SHA입니다.
+- 선택한 브랜치의 push만 기존 배포 큐에 넣습니다. trigger는 `webhook`, source revision은 push commit SHA이고 검증 상태는 `true`입니다.
 - Delivery ID와 payload hash를 DB에 저장합니다. 같은 이벤트 재전송은 배포를 다시 생성하지 않습니다. 같은 ID에 다른 내용이면 409입니다.
 - 수신 기록과 배포 생성은 한 DB 트랜잭션입니다. 실패하면 모두 취소합니다. 이후 재전송할 수 있습니다.
 - 태그 push, 삭제 push, 선택하지 않은 브랜치는 배포하지 않습니다.
 - App 설치 삭제·중단, 저장소 접근 제거, 사용자 인증 취소 이벤트는 해당 연결을 비활성화합니다. 인증 취소 시 GitHub 자격 증명도 삭제합니다.
+- Webhook에는 빌드된 이미지 Digest가 없으므로 현재는 placeholder Digest를 저장합니다. 빌드 단계가 Registry Digest를 저장하기 전에는 실제 서명을 진행하지 않습니다.
 
 `GITHUB_WEBHOOK_SECRET`은 최소 32자입니다. 없으면 Webhook은 503을 반환합니다. `GITHUB_APP_SLUG`는 설치 URL 생성용입니다. `GITHUB_TOKEN_ENCRYPTION_KEY`는 `openssl rand -hex 32`로 생성하고 운영에서 고정 보관하세요. 생략하면 JWT refresh 서명 키에서 별도 키를 파생합니다. 이때 JWT refresh 서명 키를 변경하면 GitHub 재로그인이 필요합니다. App private key와 installation token은 현재 방식에서 사용하지 않습니다.
 
@@ -237,6 +250,8 @@ Webhook은 원본 요청 바이트의 HMAC-SHA256을 `X-Hub-Signature-256`과 �
 ```
 
 승인은 `POST /deployments/:id/approve`에 빈 본문 `{}`를 보냅니다. `approver`는 보내지 않습니다. 본인 배포는 승인할 수 없습니다.
+
+실제 서명은 검증된 Source Revision과 Registry Image Digest가 모두 있을 때만 진행합니다.
 
 ## API
 
@@ -270,9 +285,21 @@ Routing Target은 특정 Deployment의 실행 위치입니다.
 
 - `onprem`: 할당된 `agent_id`와 `local_port`를 사용합니다.
 - `cloud_run`: HTTPS `url`을 사용합니다.
+- 성공한 서명 결과가 있고 정책 `targets`가 허용한 종류만 Target으로 만들거나 현재 Route로 선택할 수 있습니다.
 - `PATCH /applications/:id/routing`은 `target_id`, `expected_revision`, 선택 `reason`을 받습니다.
 - Revision이 다르면 `409`를 반환합니다. 동시 변경으로 새 Route를 덮어쓰지 않습니다.
 - Target Health는 `healthy`, `unhealthy`, `unknown`을 저장합니다. `expires_at`이 지나면 조회 결과는 `unknown`입니다.
+- Health Monitor는 Application의 interval, timeout, success/failure threshold를 사용합니다.
+- HTTP 상태 오류는 `application`, 연결·Tunnel·timeout 오류는 `network`로 저장합니다.
+- 현재 On-Prem Target이 `unhealthy`이면 같은 Deployment의 정상 Cloud Run Target으로 전환합니다. 정책의 `failoverAllowed`가 `true`여야 합니다.
+- Tunnel 종료만으로 전환하지 않습니다. 자동 Failback도 하지 않습니다.
+
+Gateway 진입 방법은 두 개입니다.
+
+- 운영: Application의 `public_host`와 요청 `Host`가 일치해야 합니다.
+- 개발: `/_gateway/<application-slug>/<path>`를 사용합니다.
+
+Gateway는 요청과 응답을 스트리밍합니다. Hop-by-hop 헤더는 전달하지 않습니다. 쓰기 요청도 자동 재전송하지 않습니다. `GATEWAY_IDLE_TIMEOUT_MS` 동안 데이터가 없으면 요청을 종료합니다.
 
 Tunnel은 제어 연결과 요청별 데이터 연결을 분리합니다.
 
@@ -293,7 +320,7 @@ On-Prem Agent -- WSS data ----> VM Backend -- raw stream --> Gateway request
 
 `TUNNEL_PING_INTERVAL_MS`, `TUNNEL_HEARTBEAT_TIMEOUT_MS`, `TUNNEL_OPEN_TIMEOUT_MS`, `TUNNEL_MAX_CHANNELS_PER_AGENT`, `TUNNEL_MAX_FRAME_BYTES`로 제한을 설정합니다.
 
-현재 Tunnel Service는 Gateway가 사용할 raw duplex stream을 제공합니다. 외부 요청을 받는 Host 기반 Gateway, Cloud Run proxy, 자동 Failover는 아직 없습니다.
+Tunnel Service는 Gateway에 raw duplex stream을 제공합니다. Gateway는 이 stream으로 On-Prem 컨테이너에 HTTP 요청을 전달합니다.
 
 ## Agent API 계약 v1
 
@@ -357,6 +384,7 @@ token 원문은 등록·교체 응답에서 한 번만 제공합니다. DB에는
   "health_check": {
     "enabled": true,
     "path": "/health",
+    "version_path": "/version",
     "method": "GET",
     "interval_seconds": 5,
     "timeout_seconds": 2,
@@ -367,6 +395,8 @@ token 원문은 등록·교체 응답에서 한 번만 제공합니다. DB에는
   }
 }
 ```
+
+`version_path`는 선택 값입니다. 값이 있으면 Agent가 후보 Health Check 뒤 해당 경로를 `GET`으로 호출합니다. JSON 응답의 `run_id`가 Job의 `run_id`와 같아야 후보 배포가 성공합니다. 값이 없으면 기존 Health Check만 실행합니다.
 
 lease 기본값은 candidate 120초, 나머지 작업 30초입니다. `AGENT_CANDIDATE_LEASE_MS`, `AGENT_ACTION_LEASE_MS`로 서버 시작 전에 설정합니다. `lease_until`은 `deadline`을 넘지 않습니다. lease 만료 후 재전달할 때는 같은 `job_id`에서 `attempt`를 올립니다. deadline이 지난 작업은 `expired`로 종료합니다.
 
@@ -440,5 +470,5 @@ DB 결과 저장, 잘못된 결과의 차단, 원문 해시와 경로 검사, �
 - 운영 정책 설정과 실제 이미지 서명 검증
 - Cloud Run 후보 배포, 트래픽 전환, 롤백
 - 배포 조율기와 Agent Job 자동 연결
-- Health Monitor와 Failover 정책
-- Host 기반 Gateway와 Cloud Run proxy
+- 앱 오류와 네트워크 오류의 구조화된 구분
+- 운영 도메인 DNS와 TLS 인증서 연결

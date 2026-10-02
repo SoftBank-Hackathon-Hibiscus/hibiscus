@@ -4,6 +4,7 @@ describe('auth environment validation', () => {
   const configured = {
     GITHUB_APP_CLIENT_ID: 'Iv1.test-client',
     GITHUB_APP_CLIENT_SECRET: 'test-client-secret',
+    ALLOWED_GITHUB_IDS: '1000000, 2000000',
     JWT_ACCESS_SECRET: 'a'.repeat(32),
     JWT_REFRESH_SECRET: 'b'.repeat(32),
   };
@@ -12,6 +13,7 @@ describe('auth environment validation', () => {
     expect(authEnvironmentSchema.parse(configured)).toMatchObject({
       ...configured,
       GITHUB_APP_CALLBACK_URL: 'http://localhost:8080/auth/github/callback',
+      ALLOWED_GITHUB_IDS: ['1000000', '2000000'],
       JWT_ACCESS_TTL_SECONDS: 900,
       JWT_REFRESH_TTL_SECONDS: 604800,
     });
@@ -31,6 +33,18 @@ describe('auth environment validation', () => {
           expect(result.error.issues[0]?.message).not.toMatch(/[가-힣]/);
         }
       }
+    },
+  );
+
+  it.each(['', 'not-a-number', '0', '1000000,invalid'])(
+    'rejects invalid GitHub allowlist %s',
+    (value) => {
+      expect(
+        authEnvironmentSchema.safeParse({
+          ...configured,
+          ALLOWED_GITHUB_IDS: value,
+        }).success,
+      ).toBe(false);
     },
   );
 

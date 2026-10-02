@@ -40,11 +40,13 @@ describe('GitHub management and Webhook (e2e)', () => {
       JWT_REFRESH_SECRET: randomBytes(32).toString('hex'),
       GITHUB_APP_CLIENT_ID: 'Iv1.test',
       GITHUB_APP_CLIENT_SECRET: 'test-secret',
+      ALLOWED_GITHUB_IDS: '400000,400001',
       GITHUB_APP_SLUG: 'hibiscus-test',
       GITHUB_WEBHOOK_SECRET: webhookSecret,
       GITHUB_TOKEN_ENCRYPTION_KEY: randomBytes(32).toString('hex'),
       STAGE_MODE: 'skeleton',
       DEPLOY_MODE: 'off',
+      HEALTH_MONITOR_ENABLED: 'false',
     });
     const { AppModule } = await import('../src/app.module.js');
     const module = await Test.createTestingModule({
@@ -155,16 +157,14 @@ describe('GitHub management and Webhook (e2e)', () => {
       expires_in: -1,
       refresh_token: 'ghr_old',
     });
-    const mock = vi
-      .fn()
-      .mockResolvedValue(
-        Response.json({
-          access_token: 'ghu_renewed',
-          token_type: 'bearer',
-          expires_in: 28800,
-          refresh_token: 'ghr_new',
-        }),
-      );
+    const mock = vi.fn().mockResolvedValue(
+      Response.json({
+        access_token: 'ghu_renewed',
+        token_type: 'bearer',
+        expires_in: 28800,
+        refresh_token: 'ghr_new',
+      }),
+    );
     vi.stubGlobal('fetch', mock);
     const tokens = await Promise.all([
       connection.accessToken(userId),
@@ -276,6 +276,7 @@ describe('GitHub management and Webhook (e2e)', () => {
     expect(row).toMatchObject({
       requester: userId,
       sourceRevision: payload.after,
+      sourceRevisionVerified: true,
       trigger: 'webhook',
     });
   });
@@ -456,11 +457,13 @@ describe('GitHub management and Webhook (e2e)', () => {
       'JWT_REFRESH_SECRET',
       'GITHUB_APP_CLIENT_ID',
       'GITHUB_APP_CLIENT_SECRET',
+      'ALLOWED_GITHUB_IDS',
       'GITHUB_APP_SLUG',
       'GITHUB_WEBHOOK_SECRET',
       'GITHUB_TOKEN_ENCRYPTION_KEY',
       'STAGE_MODE',
       'DEPLOY_MODE',
+      'HEALTH_MONITOR_ENABLED',
     ])
       delete process.env[key];
   });

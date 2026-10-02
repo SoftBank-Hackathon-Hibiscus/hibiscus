@@ -46,6 +46,22 @@ export class ApplicationRepository {
       .get();
   }
 
+  findBySlug(slug: string): Application | undefined {
+    return this.database.db
+      .select()
+      .from(applications)
+      .where(eq(applications.slug, slug))
+      .get();
+  }
+
+  findByPublicHost(host: string): Application | undefined {
+    return this.database.db
+      .select()
+      .from(applications)
+      .where(eq(applications.publicHost, host))
+      .get();
+  }
+
   getView(id: string): ApplicationView | undefined {
     const application = this.find(id);
     if (!application) return undefined;
