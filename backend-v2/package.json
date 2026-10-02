@@ -35,7 +35,7 @@
     "drizzle-orm": "^0.45.3",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
-    "ws": "^8.22.0",
+    "ssh2": "^1.17.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {
@@ -45,8 +45,8 @@
     "@types/better-sqlite3": "^9.6.0",
     "@types/express": "^5.0.0",
     "@types/node": "^24.0.0",
+    "@types/ssh2": "^1.15.6",
     "@types/supertest": "^7.0.0",
-    "@types/ws": "^8.18.2",
     "@vitest/coverage-v8": "^4.1.2",
     "drizzle-kit": "^0.31.11",
     "oxlint": "^1.58.0",

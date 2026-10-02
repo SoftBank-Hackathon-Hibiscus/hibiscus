@@ -10,7 +10,7 @@ import { request as httpsRequest } from 'node:https';
 import type { Socket } from 'node:net';
 import type { Request, Response } from 'express';
 import type { BackendConfig } from '../config/configs/backend.config.js';
-import { TunnelService } from '../tunnel/tunnel.service.js';
+import { SshTunnelService } from '../ssh-tunnel/ssh-tunnel.service.js';
 import type { GatewayResolution } from './types/gateway.type.js';
 
 const hopByHopHeaders = new Set([
@@ -27,7 +27,7 @@ const hopByHopHeaders = new Set([
 @Injectable()
 export class GatewayProxyService {
   constructor(
-    private readonly tunnel: TunnelService,
+    private readonly tunnel: SshTunnelService,
     private readonly config: ConfigService<BackendConfig, true>,
   ) {}
 

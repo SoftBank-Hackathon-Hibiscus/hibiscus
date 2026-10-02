@@ -3,10 +3,14 @@ import test from "node:test";
 import { loadConfig } from "../config.js";
 
 const requiredEnvironment = {
-  BACKEND_TUNNEL_URL: "wss://backend.example.com/agent/v1/tunnel/control",
+  BACKEND_API_URL: "https://backend.example.com",
   AGENT_ID: "agent-1",
   AGENT_TOKEN: "a".repeat(32),
   COSIGN_PUBLIC_KEY: "./cosign.pub",
+  SSH_HOST: "backend.example.com",
+  SSH_USER: "hibiscus-agent",
+  SSH_IDENTITY_FILE: "./agent_ed25519",
+  SSH_HOST_KEY_SHA256: `SHA256:${"A".repeat(43)}`,
 };
 
 void test("parses explicit false security options as false", () => {
@@ -38,4 +42,26 @@ void test("rejects ambiguous boolean values", () => {
       COSIGN_ALLOW_INSECURE_REGISTRY: "1",
     }),
   );
+});
+
+void test("rejects an invalid SSH host key fingerprint", () => {
+  assert.throws(() =>
+    loadConfig({
+      ...requiredEnvironment,
+      SSH_HOST_KEY_SHA256: "replace-me",
+    }),
+  );
+});
+
+void test("allows SSH connection settings to come from enrollment", () => {
+  const config = loadConfig({
+    ...requiredEnvironment,
+    SSH_HOST: "",
+    SSH_USER: "",
+    SSH_HOST_KEY_SHA256: "",
+    SSH_ENROLLMENT_TOKEN: "e".repeat(43),
+  });
+
+  assert.equal(config.sshHost, "");
+  assert.equal(config.sshEnrollmentToken, "e".repeat(43));
 });

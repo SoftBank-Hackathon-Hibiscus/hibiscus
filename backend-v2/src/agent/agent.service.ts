@@ -13,6 +13,7 @@ import { ApplicationRepository } from '../application/application.repository.js'
 import { AgentRepository } from './agent.repository.js';
 import type { CreateAgentDto } from './dto/agent.dto.js';
 import type { AgentHeartbeatDto } from './dto/agent-heartbeat.dto.js';
+import { AgentSshService } from './agent-ssh.service.js';
 
 @Injectable()
 export class AgentService {
@@ -24,21 +25,37 @@ export class AgentService {
     private readonly repository: AgentRepository,
     private readonly applications: ApplicationRepository,
     private readonly config: ConfigService<BackendConfig, true>,
+    private readonly ssh: AgentSshService,
   ) {}
 
   create(input: CreateAgentDto) {
     const token = randomBytes(32).toString('base64url');
+    const sshEnrollment = this.ssh.issue();
     const timestamp = new Date().toISOString();
     const agent = this.repository.create({
       id: randomUUID(),
       name: input.name,
       tokenHash: createHash('sha256').update(token).digest('hex'),
+      sshEnrollmentTokenHash: sshEnrollment.tokenHash,
+      sshEnrollmentExpiresAt: sshEnrollment.expiresAt,
+      sshEnrollmentUsedAt: null,
+      sshPublicKey: null,
+      sshKeyFingerprint: null,
+      sshEnrolledAt: null,
       status: 'registered',
       lastSeenAt: null,
       createdAt: timestamp,
       updatedAt: timestamp,
     });
-    return { agent: this.publicAgent(agent), token };
+    return {
+      agent: this.publicAgent(agent),
+      token,
+      ...this.ssh.enrollmentResponse(
+        agent.id,
+        sshEnrollment.token,
+        sshEnrollment.expiresAt,
+      ),
+    };
   }
 
   list() {
@@ -73,6 +90,7 @@ export class AgentService {
 
   revokeToken(id: string) {
     this.get(id);
+    this.ssh.revoke(id);
     const agent = this.repository.update(id, { status: 'revoked' });
     this.notifyTokenInvalidated(id);
     return this.publicAgent(agent);
@@ -110,6 +128,14 @@ export class AgentService {
       serving: heartbeat?.serving ?? null,
       public_url: heartbeat?.publicUrl ?? null,
     };
+  }
+
+  forwards(agentId: string) {
+    return this.repository.listForwards(agentId).map((target) => ({
+      target_id: target.id,
+      gateway_port: target.gatewayPort!,
+      local_port: target.localPort!,
+    }));
   }
 
   assign(applicationId: string, agentId: string) {
@@ -154,6 +180,7 @@ export class AgentService {
       lastSeenAt: agent.lastSeenAt,
       createdAt: agent.createdAt,
       updatedAt: agent.updatedAt,
+      sshEnrolledAt: agent.sshEnrolledAt,
     };
   }
 }

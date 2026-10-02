@@ -170,6 +170,12 @@ export const agents = sqliteTable(
     id: text('id').primaryKey(),
     name: text('name').notNull(),
     tokenHash: text('token_hash').notNull(),
+    sshEnrollmentTokenHash: text('ssh_enrollment_token_hash'),
+    sshEnrollmentExpiresAt: text('ssh_enrollment_expires_at'),
+    sshEnrollmentUsedAt: text('ssh_enrollment_used_at'),
+    sshPublicKey: text('ssh_public_key'),
+    sshKeyFingerprint: text('ssh_key_fingerprint'),
+    sshEnrolledAt: text('ssh_enrolled_at'),
     status: text('status', {
       enum: ['registered', 'online', 'offline', 'revoked'],
     }).notNull(),
@@ -180,6 +186,12 @@ export const agents = sqliteTable(
   (table) => [
     uniqueIndex('agents_name_unique').on(table.name),
     uniqueIndex('agents_token_hash_unique').on(table.tokenHash),
+    uniqueIndex('agents_ssh_enrollment_token_hash_unique').on(
+      table.sshEnrollmentTokenHash,
+    ),
+    uniqueIndex('agents_ssh_key_fingerprint_unique').on(
+      table.sshKeyFingerprint,
+    ),
   ],
 );
 
@@ -260,6 +272,7 @@ export const routingTargets = sqliteTable(
     kind: text('kind', { enum: ['onprem', 'cloud_run'] }).notNull(),
     agentId: text('agent_id').references(() => agents.id),
     localPort: integer('local_port'),
+    gatewayPort: integer('gateway_port'),
     url: text('url'),
     enabled: integer('enabled', { mode: 'boolean' }).notNull(),
     createdAt: text('created_at').notNull(),
@@ -272,6 +285,7 @@ export const routingTargets = sqliteTable(
       table.kind,
       table.agentId,
     ),
+    uniqueIndex('routing_targets_gateway_port_unique').on(table.gatewayPort),
   ],
 );
 

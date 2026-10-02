@@ -47,6 +47,35 @@ export class RoutingRepository {
       .all();
   }
 
+  listAgentForwards(agentId: string): RoutingTarget[] {
+    return this.database.db
+      .select()
+      .from(routingTargets)
+      .where(
+        and(
+          eq(routingTargets.agentId, agentId),
+          eq(routingTargets.kind, 'onprem'),
+          eq(routingTargets.enabled, true),
+        ),
+      )
+      .orderBy(asc(routingTargets.createdAt))
+      .all();
+  }
+
+  allocateGatewayPort(minimum: number, maximum: number): number | undefined {
+    const used = new Set(
+      this.database.db
+        .select({ port: routingTargets.gatewayPort })
+        .from(routingTargets)
+        .all()
+        .flatMap(({ port }) => (port === null ? [] : [port])),
+    );
+    for (let port = minimum; port <= maximum; port += 1) {
+      if (!used.has(port)) return port;
+    }
+    return undefined;
+  }
+
   findEquivalentTarget(
     applicationId: string,
     deploymentId: string,

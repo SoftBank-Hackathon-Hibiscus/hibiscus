@@ -185,13 +185,6 @@ export class CreateApplicationDto {
   @MaxLength(64)
   slug: string;
 
-  @IsOptional()
-  @trim()
-  @Matches(
-    /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/,
-  )
-  public_host?: string;
-
   @trim()
   @IsString()
   @IsNotEmpty()

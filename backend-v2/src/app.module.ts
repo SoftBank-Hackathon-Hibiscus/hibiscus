@@ -13,7 +13,7 @@ import { AuthModule } from './auth/auth.module.js';
 import { UserModule } from './user/user.module.js';
 import { GithubModule } from './github/github.module.js';
 import { RoutingModule } from './routing/routing.module.js';
-import { TunnelModule } from './tunnel/tunnel.module.js';
+import { SshTunnelModule } from './ssh-tunnel/ssh-tunnel.module.js';
 import { GatewayModule } from './gateway/gateway.module.js';
 import { HealthModule } from './health/health.module.js';
 
@@ -31,7 +31,7 @@ import { HealthModule } from './health/health.module.js';
     UserModule,
     GithubModule,
     RoutingModule,
-    TunnelModule,
+    SshTunnelModule,
     GatewayModule,
     HealthModule,
   ],

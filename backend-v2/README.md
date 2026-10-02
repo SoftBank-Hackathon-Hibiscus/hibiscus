@@ -16,11 +16,11 @@ Nest CLI로 생성한 하이브리드 배포 백엔드 재구현 초안입니다
 - Application별 On-Prem·Cloud Run Routing Target과 현재 Route 저장
 - Revision 확인을 사용하는 수동 Route 변경과 변경 이력 저장
 - Health Monitor가 전달할 Target Health 저장과 만료 처리
-- Application Host 기반 Reverse Proxy와 개발용 slug 경로
-- On-Prem Tunnel·Cloud Run 요청 전달과 스트리밍
+- Application Host 기반 Reverse Proxy
+- On-Prem SSH Tunnel·Cloud Run 요청 전달과 스트리밍
 - Application별 임계값을 사용하는 Health Monitor와 On-Prem → Cloud Run 자동 Failover
-- Agent token으로 인증하는 outbound WSS Reverse Tunnel
-- Agent별 Tunnel 세션·채널·heartbeat·시간 초과 관리
+- Agent가 `ssh2` Node 모듈로 만드는 outbound SSH Reverse Tunnel
+- 앱별 VM loopback 전달 포트 할당과 연결 상태 확인
 - SQLite 작업함을 확인하는 배포 Worker
 - `test → policy → sign → deploy` 단계 실행과 시도별 기록
 - 정책 결과 `allow`, `needs_approval`, `block`
@@ -54,7 +54,7 @@ src/
 ├── deployment/   Version, Pipeline, Stage, Policy Result
 ├── agent/        Agent와 Application 연결
 ├── routing/      Target, 현재 Route, Health 상태
-├── tunnel/       Agent WSS 제어·데이터 터널
+├── ssh-tunnel/   내장 SSH 서버, loopback 전달과 상태 확인
 ├── gateway/      Host 선택과 On-Prem·Cloud Run Reverse Proxy
 ├── health/       Target 점검과 자동 Failover
 ├── auth/         GitHub 로그인, JWT 발급·검증·갱신
@@ -213,7 +213,6 @@ GitHub App 사용자 토큰과 GitHub refresh token은 AES-256-GCM으로 암호�
 {
   "name": "My app",
   "slug": "my-app",
-  "public_host": "my-app.example.com",
   "image_repo": "registry.example/my-app",
   "container_port": 8080,
   "installation_id": 123,
@@ -279,7 +278,7 @@ Webhook은 원본 요청 바이트의 HMAC-SHA256을 `X-Hub-Signature-256`과 �
 
 `/agent/v1/*`는 Agent token이 필요합니다. `/healthz`와 인증 진입 API를 제외한 나머지 API는 Access JWT가 필요합니다. 두 인증 수단을 서로 바꾸어 사용할 수 없습니다.
 
-## Routing과 Reverse Tunnel
+## Routing과 SSH Reverse Tunnel
 
 Routing Target은 특정 Deployment의 실행 위치입니다.
 
@@ -290,37 +289,54 @@ Routing Target은 특정 Deployment의 실행 위치입니다.
 - Revision이 다르면 `409`를 반환합니다. 동시 변경으로 새 Route를 덮어쓰지 않습니다.
 - Target Health는 `healthy`, `unhealthy`, `unknown`을 저장합니다. `expires_at`이 지나면 조회 결과는 `unknown`입니다.
 - Health Monitor는 Application의 interval, timeout, success/failure threshold를 사용합니다.
-- HTTP 상태 오류는 `application`, 연결·Tunnel·timeout 오류는 `network`로 저장합니다.
+- HTTP 상태 오류는 `application`, 연결·SSH·timeout 오류는 `network`로 저장합니다.
 - 현재 On-Prem Target이 `unhealthy`이면 같은 Deployment의 정상 Cloud Run Target으로 전환합니다. 정책의 `failoverAllowed`가 `true`여야 합니다.
-- Tunnel 종료만으로 전환하지 않습니다. 자동 Failback도 하지 않습니다.
+- SSH 연결 종료만으로 전환하지 않습니다. 자동 Failback도 하지 않습니다.
 
-Gateway 진입 방법은 두 개입니다.
+Application 생성 시 `slug`와 `GATEWAY_BASE_DOMAIN`으로 대표 주소를 만듭니다. `GATEWAY_BASE_DOMAIN=lth.so`, `slug=a`이면 `public_host`는 `a.lth.so`입니다. 요청 `Host`가 이 값과 일치하면 Gateway가 현재 Application Route로 전달합니다. `/_gateway/<slug>` 개발 경로는 사용하지 않습니다.
 
-- 운영: Application의 `public_host`와 요청 `Host`가 일치해야 합니다.
-- 개발: `/_gateway/<application-slug>/<path>`를 사용합니다.
+대표 주소는 Deployment 버전에 고정하지 않습니다. 새 Deployment의 Target이 준비되고 검증되면 조율기가 `PATCH /applications/:id/routing`을 호출합니다. 같은 `a.lth.so`가 새 Target을 가리킵니다. 새 Target 준비나 Route 변경이 실패하면 기존 Target을 유지합니다.
 
 Gateway는 요청과 응답을 스트리밍합니다. Hop-by-hop 헤더는 전달하지 않습니다. 쓰기 요청도 자동 재전송하지 않습니다. `GATEWAY_IDLE_TIMEOUT_MS` 동안 데이터가 없으면 요청을 종료합니다.
 
-Tunnel은 제어 연결과 요청별 데이터 연결을 분리합니다.
+Agent는 Backend API에서 전달 목록을 폴링합니다. 그 뒤 Backend의 `ssh2` Tunnel Server에 연결합니다. SSH 연결 하나에 여러 remote forward를 설정합니다.
 
 ```text
-On-Prem Agent -- WSS control --> VM Backend
-On-Prem Agent -- WSS data ----> VM Backend -- raw stream --> Gateway request
-      |
-      +-- TCP 127.0.0.1:<target.local_port> --> local container
+Gateway request
+  ↓
+VM 127.0.0.1:<gateway_port>
+  ↓ SSH reverse forward
+Agent 127.0.0.1:<local_port>
+  ↓
+Docker container
 ```
 
-- 제어: `GET /agent/v1/tunnel/control` WebSocket upgrade
-- 데이터: `GET /agent/v1/tunnel/data?session_id=...&channel_id=...` WebSocket upgrade
-- 두 연결 모두 `Authorization: Bearer <agent_token>`을 사용합니다.
-- 새 제어 연결은 같은 Agent의 이전 세션을 대체합니다.
-- Token을 교체하거나 폐기하면 활성 Tunnel을 즉시 닫습니다.
-- Backend는 ping/pong, 채널 열기 시간 초과, Agent별 채널 수, frame 크기를 제한합니다.
-- Agent는 연결이 끊기면 exponential backoff와 jitter로 재연결합니다. Token이 거부되면 재시도하지 않습니다.
+- Backend는 On-Prem Target 생성 시 `gateway_port`를 자동 할당합니다.
+- Agent는 `GET /agent/v1/forwards`를 Agent token으로 폴링합니다.
+- Agent는 자신이 관리하는 Docker host port만 전달합니다.
+- SSH 연결이 끊기면 Agent가 다음 폴링에서 다시 연결합니다.
+- Gateway와 Health Monitor는 `127.0.0.1:<gateway_port>`에 연결합니다.
+- SSH 포트는 `SSH_FORWARD_PORT_MIN`부터 `SSH_FORWARD_PORT_MAX` 사이에서 할당합니다.
+- `GET /agents/:id/tunnel`은 각 전달 포트의 접속 가능 상태를 반환합니다.
+- Agent를 만들면 Agent token과 1회용 SSH 등록 token을 함께 발급합니다.
+- Agent는 ED25519 키를 직접 생성하고 공개키만 Backend에 등록합니다.
+- SSH 등록 token은 기본 10분 뒤 만료되며 한 번만 사용할 수 있습니다.
+- Agent token을 폐기하면 등록한 SSH 공개키도 폐기합니다.
+- Backend는 Agent 공개키를 DB에서 확인합니다.
+- Backend는 해당 Agent에 할당된 `gateway_port`만 허용합니다.
+- Backend는 SSH Shell, 명령 실행, SFTP, Agent의 임의 TCP 연결을 허용하지 않습니다.
 
-`TUNNEL_PING_INTERVAL_MS`, `TUNNEL_HEARTBEAT_TIMEOUT_MS`, `TUNNEL_OPEN_TIMEOUT_MS`, `TUNNEL_MAX_CHANNELS_PER_AGENT`, `TUNNEL_MAX_FRAME_BYTES`로 제한을 설정합니다.
+Backend 프로세스가 SSH Tunnel Server를 직접 실행합니다. 시스템 `sshd`, OS Tunnel 사용자, `authorized_keys`, `AuthorizedKeysCommand`는 필요하지 않습니다.
 
-Tunnel Service는 Gateway에 raw duplex stream을 제공합니다. Gateway는 이 stream으로 On-Prem 컨테이너에 HTTP 요청을 전달합니다.
+```text
+Agent ssh2 Client
+  ↓ ED25519 공개키 인증
+Backend ssh2 Tunnel Server :2222
+  ↓ 허용된 127.0.0.1:<gateway_port>만 생성
+Backend Gateway
+```
+
+`SSH_HOST_KEY_FILE`이 없으면 Backend가 ED25519 Host Key를 생성합니다. 이 파일을 영구 볼륨이나 Secret에 보관해야 합니다. 파일이 바뀌면 Agent의 Host Key 검증이 실패합니다. `SSH_HOST`는 Agent가 접속할 외부 주소입니다. `SSH_BIND_HOST`는 Backend의 수신 주소입니다. 기본 SSH 포트는 `2222`입니다. 운영 방화벽에서는 이 포트를 Agent 네트워크에만 엽니다.
 
 ## Agent API 계약 v1
 
@@ -330,18 +346,31 @@ Tunnel Service는 Gateway에 raw duplex stream을 제공합니다. Gateway는 �
 
 ### 관리 API — 사용자 Access JWT
 
-| Method | 경로                       | 기능                                  |
-| ------ | -------------------------- | ------------------------------------- |
-| POST   | `/agents`                  | 등록·token 최초 발급                  |
-| GET    | `/agents`, `/agents/:id`   | Agent 조회                            |
-| POST   | `/agents/:id/token/rotate` | 새 token 발급, 이전 token 즉시 무효화 |
-| DELETE | `/agents/:id/token`        | token 폐기                            |
-| GET    | `/agents/:id/status`       | 최근 상태 조회                        |
-| POST   | `/agents/:id/jobs`         | 작업 생성                             |
-| GET    | `/agents/:id/jobs`         | 작업 목록 조회                        |
-| GET    | `/agents/:id/jobs/:jobId`  | 작업 상태와 결과 조회                 |
+| Method | 경로                         | 기능                                  |
+| ------ | ---------------------------- | ------------------------------------- |
+| POST   | `/agents`                    | 등록·token 최초 발급                  |
+| GET    | `/agents`, `/agents/:id`     | Agent 조회                            |
+| POST   | `/agents/:id/token/rotate`   | 새 token 발급, 이전 token 즉시 무효화 |
+| DELETE | `/agents/:id/token`          | token 폐기                            |
+| POST   | `/agents/:id/ssh/enrollment` | 새 1회용 SSH 등록 token 발급          |
+| GET    | `/agents/:id/status`         | 최근 상태 조회                        |
+| POST   | `/agents/:id/jobs`           | 작업 생성                             |
+| GET    | `/agents/:id/jobs`           | 작업 목록 조회                        |
+| GET    | `/agents/:id/jobs/:jobId`    | 작업 상태와 결과 조회                 |
 
 token 원문은 등록·교체 응답에서 한 번만 제공합니다. DB에는 SHA-256 해시만 저장합니다. 폐기된 Agent는 token 교체로 다시 등록 상태가 됩니다. Job·결과·heartbeat 기록은 삭제하지 않습니다.
+
+`POST /agents`는 `ssh_enrollment_token`, 만료 시각, SSH host·port·user·host key 지문도 반환합니다. Agent는 최초 실행에서 다음 API를 한 번 호출합니다.
+
+```http
+POST /agent/v1/ssh/enroll
+Authorization: Bearer <ssh_enrollment_token>
+Content-Type: application/json
+
+{"public_key":"ssh-ed25519 AAAA... hibiscus:<agent-id>"}
+```
+
+이 API에는 Agent token이 아니라 SSH 등록 token을 사용합니다. Backend는 ED25519 공개키만 받습니다. 개인 키는 받지 않습니다.
 
 작업 생성 본문은 다음과 같습니다. `run_id`는 존재하는 Deployment ID여야 합니다. 해당 앱에 Agent가 할당되어 있어야 하며 `digest`는 Deployment의 값과 같아야 합니다.
 
@@ -375,6 +404,7 @@ token 원문은 등록·교체 응답에서 한 번만 제공합니다. DB에는
 | POST   | `/agent/v1/jobs/:jobId/result` | 저장한 Result JSON `200`                    |
 | POST   | `/agent/v1/heartbeat`          | 저장한 상태 `200`                           |
 | GET    | `/agent/v1/status`             | 자신의 최근 상태 `200`                      |
+| GET    | `/agent/v1/forwards`           | SSH reverse forward 목록 `200`              |
 
 폴링은 2초 간격을 권장합니다. Job은 `created_at` 순서로 Agent별 하나씩 전달합니다. 폴링 응답은 기존 Job 필드에 `schema_version`, `agent_id`, `attempt`, `lease_until`, `runtime`, `health_check`를 추가합니다. `runtime.container_port`는 Application 설정입니다. `health_check`는 Application의 현재 Health Check 설정입니다. 첫 전달은 `attempt: 1`입니다. 활성 lease가 있으면 추가 작업은 전달하지 않습니다.
 

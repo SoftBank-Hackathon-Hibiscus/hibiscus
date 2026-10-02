@@ -14,6 +14,10 @@ export interface AgentRequest extends Request {
   agent: Agent;
 }
 
+export interface AgentSshEnrollmentRequest extends AgentRequest {
+  sshEnrollmentToken: string;
+}
+
 export interface ServingContainer {
   run_id: string;
   digest: string;

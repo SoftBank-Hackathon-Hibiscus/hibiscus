@@ -31,12 +31,13 @@ import { DatabaseService } from '../src/database/database.service.js';
 import { AgentRepository } from '../src/agent/agent.repository.js';
 import { agentJobs, agents } from '../src/database/schema.js';
 import { eq } from 'drizzle-orm';
-import WebSocket, { createWebSocketStream, type RawData } from 'ws';
-import { Agent, createServer, request as httpRequest } from 'node:http';
-import { connect, type Socket } from 'node:net';
-import { TunnelService } from '../src/tunnel/tunnel.service.js';
+import { createServer } from 'node:http';
+import { connect } from 'node:net';
 import { RoutingService } from '../src/routing/routing.service.js';
 import { FailoverService } from '../src/health/failover.service.js';
+import ssh2 from 'ssh2';
+
+const { Client: SshClient, utils: sshUtils } = ssh2;
 
 describe('deployment API (e2e)', () => {
   let app: INestApplication<App>;
@@ -56,6 +57,12 @@ describe('deployment API (e2e)', () => {
     process.env.GITHUB_APP_CLIENT_ID = 'Iv1.test-client';
     process.env.GITHUB_APP_CLIENT_SECRET = 'test-client-secret';
     process.env.HEALTH_MONITOR_ENABLED = 'false';
+    process.env.GATEWAY_BASE_DOMAIN = 'apps.test';
+    process.env.SSH_SERVER_ENABLED = 'true';
+    process.env.SSH_BIND_HOST = '127.0.0.1';
+    process.env.SSH_HOST = '127.0.0.1';
+    process.env.SSH_PORT = '0';
+    process.env.SSH_HOST_KEY_FILE = join(testDirectory, 'ssh-host-key');
     process.env.ALLOWED_GITHUB_IDS = [
       ...Array.from({ length: 32 }, (_, index) => String(index + 1)),
       '1000000',
@@ -386,7 +393,11 @@ describe('deployment API (e2e)', () => {
       const response = await request(app.getHttpServer())
         .get('/auth/github/callback')
         .set('Cookie', cookie)
-        .query({ code: 'test-code', state: url.searchParams.get('state') })
+        .query({
+          code: 'test-code',
+          state: url.searchParams.get('state'),
+          iss: 'https://github.com/login/oauth',
+        })
         .expect(expectedStatus);
       const exchange: RequestInit = fetchMock.mock.calls[0]![1];
       expect((exchange.body as URLSearchParams).get('client_id')).toBe(
@@ -494,6 +505,7 @@ describe('deployment API (e2e)', () => {
       failureThreshold: 5,
     });
     expect(application.application.containerPort).toBe(8080);
+    expect(application.application.publicHost).toBe('health-config.apps.test');
 
     const response = await api()
       .patch(`/applications/${application.application.id}/health-check`)
@@ -1052,7 +1064,35 @@ describe('deployment API (e2e)', () => {
       .expect(201);
 
     expect(registration.body.token).toMatch(/^[A-Za-z0-9_-]{40,}$/);
+    expect(registration.body.ssh_enrollment_token).toMatch(
+      /^[A-Za-z0-9_-]{40,}$/,
+    );
+    expect(registration.body.ssh).toEqual({
+      host: '127.0.0.1',
+      port: expect.any(Number),
+      user: 'hibiscus-agent',
+      host_key_sha256: expect.stringMatching(/^SHA256:[A-Za-z0-9+/]{43}$/),
+    });
+    expect(registration.body.ssh.port).toBeGreaterThan(0);
     expect(registration.body.agent).not.toHaveProperty('tokenHash');
+
+    const keys = sshUtils.generateKeyPairSync('ed25519', {
+      comment: 'hibiscus:test-agent',
+    });
+    const enrollment = await request(app.getHttpServer())
+      .post('/agent/v1/ssh/enroll')
+      .set('Authorization', `Bearer ${registration.body.ssh_enrollment_token}`)
+      .send({ public_key: keys.public })
+      .expect(200);
+    expect(enrollment.body).toMatchObject({
+      agent_id: registration.body.agent.id,
+      fingerprint: expect.stringMatching(/^SHA256:/),
+    });
+    await request(app.getHttpServer())
+      .post('/agent/v1/ssh/enroll')
+      .set('Authorization', `Bearer ${registration.body.ssh_enrollment_token}`)
+      .send({ public_key: keys.public })
+      .expect(401);
 
     const assignment = await api()
       .post(
@@ -1066,6 +1106,8 @@ describe('deployment API (e2e)', () => {
 
     const agents = await api().get('/agents').expect(200);
     expect(agents.body[0]).not.toHaveProperty('tokenHash');
+    expect(agents.body[0].sshEnrolledAt).toBeTruthy();
+    expect(agents.body[0]).not.toHaveProperty('sshPublicKey');
   });
 
   it('stores routing targets and changes one application route with revision checks', async () => {
@@ -1205,7 +1247,7 @@ describe('deployment API (e2e)', () => {
       });
   });
 
-  it('opens an authenticated tunnel and carries an HTTP request to an on-prem port', async () => {
+  it('uses an SSH reverse forward to carry Gateway requests to an on-prem port', async () => {
     const localServer = createServer((incoming, outgoing) => {
       let body = '';
       incoming.setEncoding('utf8');
@@ -1235,6 +1277,17 @@ describe('deployment API (e2e)', () => {
         local_port: localAddress.port,
       })
       .expect(201);
+    expect(target.body.gatewayPort).toBeGreaterThanOrEqual(20_000);
+    const forwards = await agentApi(context.token)
+      .get('/agent/v1/forwards')
+      .expect(200);
+    expect(forwards.body).toEqual([
+      {
+        target_id: target.body.id,
+        gateway_port: target.body.gatewayPort,
+        local_port: localAddress.port,
+      },
+    ]);
     await api()
       .patch(`/applications/${context.applicationId}/routing`)
       .send({
@@ -1243,37 +1296,94 @@ describe('deployment API (e2e)', () => {
         reason: 'Gateway E2E target',
       })
       .expect(200);
-    const backendAddress = app.getHttpServer().address();
-    if (!backendAddress || typeof backendAddress === 'string') {
-      throw new Error('Backend test server did not start');
-    }
-    const tunnelUrl = `ws://127.0.0.1:${backendAddress.port}`;
-    const control = new WebSocket(`${tunnelUrl}/agent/v1/tunnel/control`, {
-      headers: { Authorization: `Bearer ${context.token}` },
+    const keys = sshUtils.generateKeyPairSync('ed25519', {
+      comment: `hibiscus:${context.agentId}`,
     });
-    const ready = await waitForWebSocketMessage(control);
-    expect(ready).toMatchObject({ type: 'ready', protocol_version: 1 });
+    const enrollment = await request(app.getHttpServer())
+      .post('/agent/v1/ssh/enroll')
+      .set('Authorization', `Bearer ${context.sshEnrollmentToken}`)
+      .send({ public_key: keys.public })
+      .expect(200);
+    const rejectedClient = new SshClient();
+    rejectedClient.on('error', () => undefined);
+    const unknownKeys = sshUtils.generateKeyPairSync('ed25519');
+    await expect(
+      new Promise<void>((resolve, reject) => {
+        rejectedClient.once('ready', resolve);
+        rejectedClient.once('error', reject);
+        rejectedClient.connect({
+          host: enrollment.body.ssh.host,
+          port: enrollment.body.ssh.port,
+          username: enrollment.body.ssh.user,
+          privateKey: unknownKeys.private,
+        });
+      }),
+    ).rejects.toBeTruthy();
+    rejectedClient.destroy();
 
-    const dataSockets: WebSocket[] = [];
-    control.on('message', (raw) => {
-      const message = JSON.parse(webSocketText(raw)) as {
-        type: string;
-        session_id: string;
-        channel_id: string;
-        local_port: number;
-      };
-      if (message.type !== 'open') return;
-      const data = new WebSocket(
-        `${tunnelUrl}/agent/v1/tunnel/data?session_id=${message.session_id}&channel_id=${message.channel_id}`,
-        { headers: { Authorization: `Bearer ${context.token}` } },
-      );
-      dataSockets.push(data);
-      data.once('open', () => {
-        const tunnel = createWebSocketStream(data, { allowHalfOpen: false });
-        const local = connect(message.local_port, '127.0.0.1');
-        tunnel.pipe(local).pipe(tunnel);
+    const sshClient = new SshClient();
+    sshClient.on('error', () => undefined);
+    sshClient.on('tcp connection', (details, accept, reject) => {
+      if (details.destPort !== target.body.gatewayPort) {
+        reject();
+        return;
+      }
+      const channel = accept();
+      const localSocket = connect(localAddress.port, '127.0.0.1');
+      channel.pipe(localSocket).pipe(channel);
+    });
+    await new Promise<void>((resolve, reject) => {
+      sshClient.once('ready', resolve);
+      sshClient.once('error', reject);
+      sshClient.connect({
+        host: enrollment.body.ssh.host,
+        port: enrollment.body.ssh.port,
+        username: enrollment.body.ssh.user,
+        privateKey: keys.private,
+        hostVerifier: (key) =>
+          `SHA256:${createHash('sha256')
+            .update(key)
+            .digest('base64')
+            .replace(/=+$/, '')}` === enrollment.body.ssh.host_key_sha256,
       });
     });
+    await expect(
+      new Promise<void>((resolve, reject) => {
+        sshClient.forwardIn('127.0.0.1', 65_534, (error) =>
+          error ? reject(error) : resolve(),
+        );
+      }),
+    ).rejects.toBeTruthy();
+    await expect(
+      new Promise<void>((resolve, reject) => {
+        sshClient.shell((error, stream) => {
+          stream?.destroy();
+          if (error) reject(error);
+          else resolve();
+        });
+      }),
+    ).rejects.toBeTruthy();
+    await expect(
+      new Promise<void>((resolve, reject) => {
+        sshClient.forwardOut(
+          '127.0.0.1',
+          12_345,
+          '127.0.0.1',
+          localAddress.port,
+          (error, stream) => {
+            stream?.destroy();
+            if (error) reject(error);
+            else resolve();
+          },
+        );
+      }),
+    ).rejects.toBeTruthy();
+    await new Promise<void>((resolve, reject) => {
+      sshClient.forwardIn('127.0.0.1', target.body.gatewayPort, (error) =>
+        error ? reject(error) : resolve(),
+      );
+    });
+    let sshClientClosed = false;
 
     try {
       await request(app.getHttpServer())
@@ -1286,68 +1396,48 @@ describe('deployment API (e2e)', () => {
         .expect('POST /echo?value=gateway gateway');
       await request(app.getHttpServer())
         .get('/_gateway/tunnel-http/dev-path')
+        .expect(404);
+      await api()
+        .get(`/agents/${context.agentId}/tunnel`)
         .expect(200)
-        .expect('GET /dev-path ');
-
-      const stream = await app.get(TunnelService).openTarget(target.body.id);
-      const tunnelAgent = new Agent({ keepAlive: false });
-      tunnelAgent.createConnection = () => stream as Socket;
-      const response = await new Promise<{
-        status: number | undefined;
-        header: string | string[] | undefined;
-        body: string;
-      }>((resolve, reject) => {
-        const outgoing = httpRequest(
-          {
-            method: 'POST',
-            host: 'onprem.internal',
-            path: '/echo?value=1',
-            headers: { 'content-length': '5' },
-            agent: tunnelAgent,
-          },
-          (incoming) => {
-            let body = '';
-            incoming.setEncoding('utf8');
-            incoming.on('data', (chunk: string) => {
-              body += chunk;
-            });
-            incoming.on('end', () =>
-              resolve({
-                status: incoming.statusCode,
-                header: incoming.headers['x-hibiscus-tunnel'],
-                body,
-              }),
-            );
-          },
+        .expect((result) => {
+          expect(result.body.connected).toBe(true);
+          expect(result.body.active_forwards).toBe(1);
+        });
+      await new Promise<void>((resolve, reject) => {
+        sshClient.unforwardIn('127.0.0.1', target.body.gatewayPort, (error) =>
+          error ? reject(error) : resolve(),
         );
-        outgoing.once('error', reject);
-        outgoing.end('hello');
-      });
-      expect(response).toEqual({
-        status: 200,
-        header: 'ok',
-        body: 'POST /echo?value=1 hello',
       });
       await api()
         .get(`/agents/${context.agentId}/tunnel`)
         .expect(200)
-        .expect((result) => expect(result.body.connected).toBe(true));
-
-      const closed = new Promise<void>((resolve) =>
-        control.once('close', () => resolve()),
+        .expect((result) => expect(result.body.connected).toBe(false));
+      await new Promise<void>((resolve, reject) => {
+        sshClient.forwardIn('127.0.0.1', target.body.gatewayPort, (error) =>
+          error ? reject(error) : resolve(),
+        );
+      });
+      const disconnected = new Promise<void>((resolve) =>
+        sshClient.once('close', resolve),
       );
       await request(app.getHttpServer())
         .delete(`/agents/${context.agentId}/token`)
         .set('Authorization', `Bearer ${defaultToken}`)
         .expect(200);
-      await closed;
+      await disconnected;
+      sshClientClosed = true;
       await api()
         .get(`/agents/${context.agentId}/tunnel`)
         .expect(200)
         .expect((result) => expect(result.body.connected).toBe(false));
     } finally {
-      control.terminate();
-      for (const data of dataSockets) data.terminate();
+      if (!sshClientClosed) {
+        await new Promise<void>((resolve) => {
+          sshClient.once('close', resolve);
+          sshClient.end();
+        });
+      }
       await new Promise<void>((resolve) => localServer.close(() => resolve()));
     }
   });
@@ -1794,26 +1884,12 @@ describe('deployment API (e2e)', () => {
       applicationId: application.application.id as string,
       agentId,
       token: registered.body.token as string,
+      sshEnrollmentToken: registered.body.ssh_enrollment_token as string,
       runId: deployment.id as string,
       digest: deployment.imageDigest as string,
       imageRepo: application.application.imageRepo as string,
       planHash: view.policyResult.planHash as string,
     };
-  }
-
-  function waitForWebSocketMessage(socket: WebSocket) {
-    return new Promise<Record<string, unknown>>((resolve, reject) => {
-      socket.once('message', (data) => {
-        resolve(JSON.parse(webSocketText(data)) as Record<string, unknown>);
-      });
-      socket.once('error', reject);
-    });
-  }
-
-  function webSocketText(data: RawData): string {
-    if (Buffer.isBuffer(data)) return data.toString('utf8');
-    if (data instanceof ArrayBuffer) return Buffer.from(data).toString('utf8');
-    return Buffer.concat(data).toString('utf8');
   }
 
   function jobInput(
@@ -1869,7 +1945,6 @@ describe('deployment API (e2e)', () => {
         slug: name,
         source_path: `./fixtures/${name}`,
         image_repo: `registry.example/${name}`,
-        public_host: `${name}.apps.test`,
         requires_approval: requiresApproval,
         test_template: testTemplate,
         health_check: healthCheck,
@@ -1958,5 +2033,11 @@ describe('deployment API (e2e)', () => {
     delete process.env.GITHUB_APP_CLIENT_SECRET;
     delete process.env.ALLOWED_GITHUB_IDS;
     delete process.env.HEALTH_MONITOR_ENABLED;
+    delete process.env.GATEWAY_BASE_DOMAIN;
+    delete process.env.SSH_SERVER_ENABLED;
+    delete process.env.SSH_BIND_HOST;
+    delete process.env.SSH_HOST;
+    delete process.env.SSH_PORT;
+    delete process.env.SSH_HOST_KEY_FILE;
   });
 });
