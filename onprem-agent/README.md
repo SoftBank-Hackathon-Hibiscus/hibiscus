@@ -23,6 +23,7 @@ Result + heartbeat 전송
 - Application의 `container_port`와 Health Check 설정은 Backend Job 응답에서 받습니다.
 - `activate`는 serving 상태를 확정합니다. 실제 외부 트래픽은 Backend Application Route가 전환합니다.
 - 이전 컨테이너는 즉시 삭제하지 않습니다. `rollback` 또는 `discard` Job으로 처리합니다.
+- Tunnel은 Agent 상태에 등록된 Hibiscus 관리 컨테이너의 host port에만 연결합니다. Backend가 다른 loopback port를 요청하면 거부합니다.
 
 ## 실행
 

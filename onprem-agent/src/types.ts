@@ -138,6 +138,10 @@ export interface HealthProbe {
   check(job: AgentJob, candidate: ManagedContainer): Promise<HealthCheckResult>;
 }
 
+export interface TunnelTargetAuthorizer {
+  authorize(message: OpenMessage): Promise<number | undefined>;
+}
+
 export class FatalTunnelError extends Error {}
 
 export class FatalAgentError extends Error {}
