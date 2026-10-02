@@ -4,6 +4,7 @@ import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
 import { backendConfig } from './config/configs/backend.config.js';
 import { authConfig } from './config/configs/auth.config.js';
+import { deployConfig } from './config/configs/deploy.config.js';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { ClassSerializerInterceptor } from '@nestjs/common';
 import { AgentModule } from './agent/agent.module.js';
@@ -20,7 +21,7 @@ import { TunnelModule } from './tunnel/tunnel.module.js';
     ConfigModule.forRoot({
       isGlobal: true,
       cache: true,
-      load: [backendConfig, authConfig],
+      load: [backendConfig, authConfig, deployConfig],
     }),
     DeploymentModule,
     ApplicationModule,
