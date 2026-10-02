@@ -1,4 +1,4 @@
-import { ChevronRight } from 'lucide-react';
+import { Boxes, ChevronRight } from 'lucide-react';
 import type { DataSource } from '../api/client';
 import { ApiError } from '../api/client';
 import type { ApplicationView, RouteSnapshot } from '../api/types';
@@ -64,6 +64,7 @@ export function ApplicationList({ source }: { source: DataSource }) {
             {rows.map(({ view, route, routeError }) => (
               <li key={view.application.id}>
                 <a className="app-row" href={hrefFor(applicationPath(view.application.id))}>
+                  <Boxes size={18} className="row-icon" aria-hidden />
                   <span className="app-row-main">
                     <span className="app-row-name">{view.application.name}</span>
                     <span className="small muted mono">{view.application.publicHost ?? view.application.slug}</span>
@@ -81,7 +82,7 @@ export function ApplicationList({ source }: { source: DataSource }) {
                     ) : (
                       <Pill tone="muted">{t('noRouteShort')}</Pill>
                     )}
-                    <ChevronRight size={16} className="app-row-arrow" aria-hidden />
+                    <ChevronRight size={16} className="row-icon" aria-hidden />
                   </span>
                 </a>
               </li>

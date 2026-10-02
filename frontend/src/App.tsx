@@ -38,6 +38,7 @@ function Shell() {
   return (
     <div className="app">
       <nav className="topbar">
+        <div className="topbar-inner">
         <div className="topbar-left">
           <a className="brand" href={hrefFor('')}>
             <span className="brand-mark" aria-hidden>
@@ -62,6 +63,7 @@ function Shell() {
             <button type="button" className={lang === 'ko' ? 'lang-on' : ''} onClick={() => setLang('ko')}>KO</button>
             <button type="button" className={lang === 'ja' ? 'lang-on' : ''} onClick={() => setLang('ja')}>JA</button>
           </div>
+        </div>
         </div>
       </nav>
       <main>

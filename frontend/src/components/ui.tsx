@@ -7,12 +7,26 @@ import { prettyJson } from '../lib/format';
 export type { Tone };
 
 /** 작은 알약 배지. 상태를 나타내는 유일한 색 요소로 쓴다. */
-export function Pill({ tone, children, title }: { tone: Tone; children: ReactNode; title?: string }) {
+export function Pill({ tone, children, title, icon: Icon }: { tone: Tone; children: ReactNode; title?: string; icon?: LucideIcon }) {
   return (
     <span className={`pill pill-${tone}`} title={title}>
-      <span className="pill-dot" aria-hidden />
+      {Icon ? <Icon size={13} aria-hidden /> : <span className="pill-dot" aria-hidden />}
       {children}
     </span>
+  );
+}
+
+/** 페이지 제목 위의 경로. 마지막 항목은 현재 위치라 링크가 아니다. */
+export function Crumbs({ items }: { items: Array<{ label: ReactNode; href?: string }> }) {
+  return (
+    <nav className="crumbs" aria-label="breadcrumb">
+      {items.map((item, i) => (
+        <span key={i} className="crumb">
+          {i > 0 && <span aria-hidden>/</span>}
+          {item.href ? <a href={item.href}>{item.label}</a> : <span>{item.label}</span>}
+        </span>
+      ))}
+    </nav>
   );
 }
 
@@ -132,10 +146,11 @@ export function DemoBadge({ small = false }: { small?: boolean }) {
   );
 }
 
-export function PageTitle({ title, sub, right }: { title: ReactNode; sub?: ReactNode; right?: ReactNode }) {
+export function PageTitle({ title, sub, right, crumbs }: { title: ReactNode; sub?: ReactNode; right?: ReactNode; crumbs?: ReactNode }) {
   return (
     <header className="page-title">
       <div>
+        {crumbs}
         <h1>{title}</h1>
         {sub && <p className="page-sub">{sub}</p>}
       </div>

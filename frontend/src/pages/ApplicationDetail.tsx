@@ -1,15 +1,15 @@
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, Cloud, Server, Shuffle } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { ApiError, type DataSource } from '../api/client';
 import { MockDataSource } from '../api/mock';
 import type { AgentStatusResponse, ApplicationAgentSummary, ApplicationView, Deployment, DeploymentStatus, PolicyResult, RouteSnapshot, RoutingTargetHealth, RoutingTargetView, TargetKind } from '../api/types';
 import { ErrorNotice, describeError } from '../components/ErrorNotice';
-import { Empty, Hash, Kv, PageTitle, Pill, type Tone } from '../components/ui';
+import { Crumbs, Empty, Hash, Kv, PageTitle, Pill, type Tone } from '../components/ui';
 import { usePolling } from '../hooks/usePolling';
 import { detectRouteChange, markOf, type RouteChange, type RouteMark } from '../lib/failover';
 import { fmtTime, relTime, targetLabel } from '../lib/format';
 import { useLang, type DictKey } from '../lib/i18n';
-import { deploymentPath, hrefFor } from '../lib/router';
+import { APPLICATIONS_PATH, deploymentPath, hrefFor } from '../lib/router';
 
 const POLL_MS = 5000;
 
@@ -129,6 +129,7 @@ export function ApplicationDetail({ id, source }: { id: string; source: DataSour
       {latestEvent && <RouteBanner seen={latestEvent} count={events.length} />}
       {poll.error ? <ErrorNotice error={poll.error} /> : null}
       <PageTitle
+        crumbs={<Crumbs items={[{ label: t('crumbApps'), href: hrefFor(APPLICATIONS_PATH) }, { label: a.name }]} />}
         title={a.name}
         sub={
           <span className={`headline headline-${headlineTone}`}>
@@ -208,6 +209,7 @@ function RouteBanner({ seen, count }: { seen: SeenChange; count: number }) {
   const { change, at } = seen;
   return (
     <div className={`card banner banner-${change.failover ? 'warning' : 'info'}`} role="alert">
+      <Shuffle size={18} className="banner-mark" aria-hidden />
       <div>
         <div className="banner-title">{change.failover ? t('failoverHappened') : t('routeChanged')}</div>
         <div className="banner-body">
@@ -254,7 +256,10 @@ function TrafficCard({ snap, degraded, lang }: { snap: Snapshot; degraded: boole
         <div className="traffic-grid">
           <div className="traffic-main">
             <div className="traffic-text">
-              <div className="traffic-kind">{targetLabel(route.target.kind)}</div>
+              <div className="traffic-kind">
+                {route.target.kind === 'onprem' ? <Server size={20} className="kind-icon" aria-hidden /> : <Cloud size={20} className="kind-icon" aria-hidden />}
+                {targetLabel(route.target.kind)}
+              </div>
               <div className="row">
                 {version !== undefined && <span className="muted">v{version}</span>}
                 <Pill tone={curTone}>{cur.status ? t(HEALTH_KEY[cur.status] ?? 'unknown') : t('noHealth')}</Pill>
@@ -293,6 +298,7 @@ function TrafficCard({ snap, degraded, lang }: { snap: Snapshot; degraded: boole
             <div className="field-label">{t('standbyLabel')}</div>
             {standby ? (
               <div className="row">
+                {standby.target.kind === 'onprem' ? <Server size={16} className="kind-icon" aria-hidden /> : <Cloud size={16} className="kind-icon" aria-hidden />}
                 <span className="traffic-standby">{targetLabel(standby.target.kind)}</span>
                 <Pill tone={healthTone(sb.status)}>{sb.status ? t(HEALTH_KEY[sb.status] ?? 'unknown') : t('noHealth')}</Pill>
               </div>
@@ -338,6 +344,7 @@ function TargetsCard({ snap }: { snap: Snapshot }) {
           const tone = primary ? healthTone(st.status) : 'muted';
           return (
             <li key={kind} className={`target-row ${isActive ? `target-row-active tone-${tone}` : ''}`}>
+              {kind === 'onprem' ? <Server size={16} className="kind-icon" aria-hidden /> : <Cloud size={16} className="kind-icon" aria-hidden />}
               <div className="target-row-main">
                 <div className="row">
                   <strong>{targetLabel(kind)}</strong>
@@ -374,6 +381,7 @@ function AgentsCard({ rows }: { rows: AgentRow[] }) {
           return (
             <li key={agent.id} className="agent-row">
               <div className="row">
+                <Server size={16} className="kind-icon" aria-hidden />
                 <strong>{agent.name}</strong>
                 <Pill tone={agentTone}>{s === 'online' ? t('agentOnline') : s === 'offline' ? t('agentOffline') : s}</Pill>
                 {!status && <span className="small muted">DB</span>}
@@ -401,18 +409,17 @@ function DeploymentTimeline({ deployments, activeDeploymentId }: { deployments: 
     <ol className="history">
       {deployments.map((d) => (
         <li key={d.id}>
-          <a className={`history-item ${d.id === activeDeploymentId ? 'history-active' : ''}`} href={hrefFor(deploymentPath(d.id))}>
+          <a className="history-item" href={hrefFor(deploymentPath(d.id))}>
             <span className="history-version">v{d.version}</span>
+            <Pill tone={STATUS_TONE[d.status]}>{t(STATUS_KEY[d.status])}</Pill>
+            {d.decision && <Pill tone={d.decision === 'allow' ? 'success' : d.decision === 'block' ? 'danger' : 'warning'}>{d.decision === 'allow' ? 'ALLOW' : d.decision === 'block' ? 'BLOCK' : 'NEEDS_APPROVAL'}</Pill>}
+            {!d.deploymentPerformed && d.status === 'succeeded' && <span className="small muted">{t('notDeployed')}</span>}
             <span className="history-meta">
-              <Pill tone={STATUS_TONE[d.status]}>{t(STATUS_KEY[d.status])}</Pill>
-              {d.decision && <Pill tone={d.decision === 'allow' ? 'success' : d.decision === 'block' ? 'danger' : 'warning'}>{d.decision === 'allow' ? 'ALLOW' : d.decision === 'block' ? 'BLOCK' : 'NEEDS_APPROVAL'}</Pill>}
               {d.id === activeDeploymentId && <span className="tag">{t('servingNow')}</span>}
-              {!d.deploymentPerformed && d.status === 'succeeded' && <span className="small muted">{t('notDeployed')}</span>}
+              <span className="mono">{d.sourceRevision.slice(0, 7)}</span>
+              <span className="small muted">{fmtTime(d.createdAt)}</span>
             </span>
-            <span className="history-time small muted">
-              <span className="mono">{d.sourceRevision.slice(0, 7)}</span> {fmtTime(d.createdAt)}
-            </span>
-            <ChevronRight size={16} className="history-arrow" aria-hidden />
+            <ChevronRight size={16} className="row-icon" aria-hidden />
           </a>
         </li>
       ))}
