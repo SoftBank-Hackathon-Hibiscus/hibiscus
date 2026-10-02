@@ -12,7 +12,8 @@ const ROOT = join(import.meta.dirname, "..");
 const readJson = (rel: string): unknown => JSON.parse(readFileSync(join(ROOT, rel), "utf8"));
 const policy = PolicySchema.parse(parseYaml(readFileSync(join(ROOT, "policy.yaml"), "utf8")));
 
-const DEPLOY_FIXTURES = readdirSync(join(ROOT, "fixtures")).filter((d) => d !== "rollback");
+/** test_result.json 이 있는 폴더만 배포 fixture 다 (rollback/ 과 parity/ 는 다른 형식) */
+const DEPLOY_FIXTURES = readdirSync(join(ROOT, "fixtures")).filter((d) => existsSync(join(ROOT, "fixtures", d, "test_result.json")));
 const ROLLBACK_FIXTURES = readdirSync(join(ROOT, "fixtures", "rollback")).map((f) => f.replace(/\.json$/, ""));
 
 const jsonSchemas = new Map(CONTRACTS.map((c) => [c.name, toJsonSchema(c)] as const));

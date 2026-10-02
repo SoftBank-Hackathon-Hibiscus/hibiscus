@@ -36,7 +36,8 @@ afterAll(() => {
 // 결정서 모으기: fixtures 4 + samples (pii 5, migration 4) + rollback fixtures 6
 // ---------------------------------------------------------------------------
 
-const DEPLOY_FIXTURES = readdirSync(join(ROOT, "fixtures")).filter((d) => d !== "rollback");
+/** test_result.json 이 있는 폴더만 배포 fixture 다 (rollback/ 과 parity/ 는 다른 형식) */
+const DEPLOY_FIXTURES = readdirSync(join(ROOT, "fixtures")).filter((d) => existsSync(join(ROOT, "fixtures", d, "test_result.json")));
 const fixturePlan = (name: string): Plan =>
   decide(TestResultSchema.parse(readJson(`fixtures/${name}/test_result.json`)), PiiReportSchema.parse(readJson(`fixtures/${name}/pii.json`)), policy);
 

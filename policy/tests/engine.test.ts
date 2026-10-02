@@ -46,6 +46,8 @@ describe("fixtures", () => {
     // fixture 02 는 facts.db = sqlite 라 R5 가 차단 뒤에 걸린다 (data.db 는 R6 가 무시)
     expect(plan.rules).toMatchObject([
       { id: "R1", result: "matched", reason: "테스트 실패 (17/20 일치)" },
+      { id: "R1b", result: "not_matched" },
+      { id: "R1c", result: "not_matched" },
       { id: "R2", result: "not_matched" },
       { id: "R3", result: "not_matched" },
       { id: "R4", result: "not_matched" },
@@ -432,6 +434,8 @@ describe("block 이후 계속 평가 / halt", () => {
     expect(plan.failover_allowed).toBe(false);
     expect(plan.rules.map((r) => [r.id, r.result])).toEqual([
       ["R1", "matched"],
+      ["R1b", "not_matched"],
+      ["R1c", "not_matched"],
       ["R2", "not_matched"],
       ["R3", "not_matched"],
       ["R4", "matched_after_block"],
@@ -451,7 +455,7 @@ describe("block 이후 계속 평가 / halt", () => {
     const plan = decide(test, { ...pii, run_id: "r-999" }, policy);
 
     expect(plan.decision).toBe("block");
-    expect(plan.rules.map((r) => r.id)).toEqual(["R1", "R2"]);
+    expect(plan.rules.map((r) => r.id)).toEqual(["R1", "R1b", "R1c", "R2"]);
     expect(plan.rules.find((r) => r.id === "R4")).toBeUndefined();
     expect(plan.requires).toMatchObject([{ id: "rerun_same_run", hint: "같은 run_id로 테스트와 개인정보 판정을 다시 실행", rule_id: "R2", allowed_targets: ["onprem", "cloud_run"] }]);
   });

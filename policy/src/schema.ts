@@ -70,18 +70,131 @@ export const MigrationReportSchema = z
   .describe("파괴적 DB 마이그레이션 판정. 실행기(src/stage.ts)가 facts.migration 이 없으면 채운다");
 export type MigrationReport = z.infer<typeof MigrationReportSchema>;
 
+// ---------------------------------------------------------------------------
+// 조건별 재생 결과 (facts.conditions) 와 저장 사실 (facts.storage).
+// 테스트 파트(parity)의 원본을 변환기(src/adapters/parity.ts)가 관찰된 사실 그대로 옮긴 것이다.
+// 판단(어느 조건의 불일치가 앱 결함이고 어느 것이 저장 방식의 환경 제약인지)은 policy.yaml 의 규칙이 한다.
+// 없는 값은 null 대신 키를 생략한다: 조건 DSL 의 exists 는 null 도 "있음" 으로 보기 때문이다.
+// ---------------------------------------------------------------------------
+export const ConditionMismatchSchema = z
+  .looseObject({
+    index: z.number().int().positive().describe("기록 파일의 요청 번호 (1부터)"),
+    request: z.string().min(1).describe('요청 한 줄 (예: "GET /posts")'),
+    related_fact: z.string().min(1).optional().describe("관련 있어 보이는 저장 사실의 path (테스트 파트의 힌트. 원인 증명이 아님). 없으면 키를 생략한다"),
+    related_storage: z.string().min(1).optional().describe("related_fact 가 가리키는 사실의 storage (예: container_layer). related_fact 가 없으면 생략. 있으면 facts.storage 에 같은 path·kind·storage 항목이 있어야 한다"),
+    related_kind: z.string().min(1).optional().describe("related_fact 가 가리키는 사실의 kind (sqlite, local_upload, local_file). R1c 가 읽는다. 없으면 생략. 있으면 facts.storage 에 같은 path·kind·storage 항목이 있어야 하고, sqlite 면 facts.db 가 sqlite, local_upload / local_file 이면 facts.writes_local_file 에 그 path 가 있어야 한다"),
+  })
+  .describe("한 조건에서 기록과 어긋난 요청 하나");
+export type ConditionMismatch = z.infer<typeof ConditionMismatchSchema>;
+
+/** 정책 판단(R1 / R1b / R1c)에 필요한 조건. conditions 가 있으면 이 세 개가 정확히 한 번씩 있어야 한다 */
+export const CONDITION_NAMES = ["none", "restart", "replace"] as const;
+export const ConditionNameSchema = z.enum(CONDITION_NAMES).describe("조건 이름. none(기준선) / restart(재시작) / replace(컨테이너 교체)");
+export type ConditionName = z.infer<typeof ConditionNameSchema>;
+export function isConditionName(value: string): value is ConditionName {
+  return (CONDITION_NAMES as readonly string[]).includes(value);
+}
+
+export const ConditionFactSchema = z
+  .looseObject({
+    name: ConditionNameSchema,
+    total: z.number().int().positive().describe("이 조건에서 재생한 요청 수 (1 이상. 요청 0건은 판정이 아니다)"),
+    matched: z.number().int().nonnegative().describe("응답이 일치한 요청 수 (total 이하)"),
+    failed: z.boolean().describe("이 조건에서 어긋난 요청이 하나라도 있는지. matched < total 과 같아야 한다. R1 / R1b / R1c 가 읽는다"),
+    mismatches: z.array(ConditionMismatchSchema).describe("어긋난 요청 목록 (total - matched 개). 없으면 빈 배열"),
+  })
+  .superRefine((c, ctx) => {
+    // 규칙이 failed 와 mismatches 를 읽으므로 수치와 어긋난 값이 들어오면 거부한다 (JSON Schema 에는 표현되지 않는 검사).
+    // --handoff(변환기)와 --test(직접 입력) 어느 경로로 와도 같은 조건을 보장한다
+    if (c.matched > c.total) ctx.addIssue({ code: "custom", path: ["matched"], message: `matched(${c.matched})는 total(${c.total}) 이하여야 합니다` });
+    if (c.failed !== c.matched < c.total) ctx.addIssue({ code: "custom", path: ["failed"], message: `failed 는 matched < total (${c.matched} < ${c.total}) 과 같아야 합니다` });
+    if (c.mismatches.length !== c.total - c.matched) {
+      ctx.addIssue({ code: "custom", path: ["mismatches"], message: `mismatches 는 total - matched (${c.total - c.matched})개여야 하는데 ${c.mismatches.length}개입니다` });
+    }
+    // 같은 조건 안에서 요청 번호는 한 번씩이다 (다른 조건과 같은 번호는 정상: 같은 기록을 조건마다 재생한다)
+    const seen = new Set<number>();
+    for (const [j, m] of c.mismatches.entries()) {
+      if (seen.has(m.index)) ctx.addIssue({ code: "custom", path: ["mismatches", j, "index"], message: `같은 조건 안에 요청 번호 ${m.index} 가 두 번 있습니다` });
+      seen.add(m.index);
+    }
+  })
+  .describe("조건 하나의 재생 결과");
+export type ConditionFact = z.infer<typeof ConditionFactSchema>;
+
+/** conditions 배열: none / restart / replace 가 정확히 한 번씩 (빠짐·중복 거부. 모르는 이름은 name enum 이 거부) */
+export const ConditionFactsSchema = z
+  .array(ConditionFactSchema)
+  .min(CONDITION_NAMES.length)
+  .max(CONDITION_NAMES.length)
+  .superRefine((conditions, ctx) => {
+    const names = conditions.map((c) => c.name);
+    const missing = CONDITION_NAMES.filter((n) => !names.includes(n));
+    const duplicated = names.filter((n, i) => names.indexOf(n) !== i);
+    if (missing.length > 0) ctx.addIssue({ code: "custom", message: `조건이 빠졌습니다: ${missing.join(", ")} (none, restart, replace 가 정확히 한 번씩 있어야 합니다)` });
+    if (duplicated.length > 0) ctx.addIssue({ code: "custom", message: `같은 조건이 두 번 있습니다: ${[...new Set(duplicated)].join(", ")}` });
+  })
+  .describe("조건별 재생 결과 (none / restart / replace 정확히 한 번씩). 있으면 R1 / R1b / R1c 가 이것으로 판단하고 passed 는 원본 종합값 보존용이다. 없으면 R1 이 passed 를 본다");
+
+/** facts.db = "sqlite" 가 되는 저장 사실 종류 (R5 담당) */
+export const SQLITE_KIND = "sqlite";
+/** facts.writes_local_file 에 들어가는 저장 사실 종류 (R6 담당) */
+export const LOCAL_FILE_KINDS: readonly string[] = ["local_upload", "local_file"];
+
+export const StorageFactSchema = z
+  .looseObject({
+    kind: z.string().min(1).describe("sqlite(파일 헤더로 판별) / local_upload(업로드 폴더) / local_file(그 밖의 파일)"),
+    path: z.string().min(1).describe("컨테이너 안의 경로"),
+    storage: z.string().min(1).describe("저장 위치. container_layer = 재시작으로는 남지만 컨테이너를 새로 만들면 사라진다"),
+  })
+  .describe("컨테이너 안에 남은 상태 하나 (테스트 파트의 facts[] 원본에서 kind, path, storage 만)");
+export type StorageFact = z.infer<typeof StorageFactSchema>;
+
 /**
  * 테스트 파트가 관찰한 사실 중 "정책이 읽는 키" 만 타입을 정한다.
  * 여기 없는 키는 자유롭게 넣을 수 있고 그대로 보존된다 (정책 엔진은 읽지 않는다).
  * 정의된 키에 허용되지 않은 값(예: "SQLite", 숫자)이 오면 형식 오류다.
+ *
+ * conditions 가 있는 입력에서는 passed 는 테스트 파트 원본의 종합값을 보존하는 필드이고,
+ * 정책 판단(R1, R1b, R1c)은 조건별 사실을 읽는다. conditions 가 없는 구형 입력에서만 R1 이 passed 를 본다.
  */
 export const FactsSchema = z
   .looseObject({
-    db: z.enum(["sqlite", "postgres", "mysql", "none"]).optional().describe("앱이 쓰는 DB. 소문자만. R5 가 읽는다"),
+    db: z.enum(["sqlite", "postgres", "mysql", "none"]).optional().describe("앱이 쓰는 DB. 소문자만. R5 가 읽는다. 관찰하지 못했으면 키를 생략한다 (none 은 'DB 없음' 을 확인했을 때만)"),
     writes_local_file: z.array(z.string()).optional().describe("앱이 쓰는 로컬 파일 경로 목록. R6 가 읽는다"),
     migration: MigrationReportSchema.optional(),
+    conditions: ConditionFactsSchema.optional(),
+    storage: z.array(StorageFactSchema).optional().describe("컨테이너 안에 남은 상태 목록 (테스트 파트 facts[] 원본의 kind, path, storage). 정책 판단에는 conditions[].mismatches[].related_kind 를 쓰고, 이 목록은 related_* 의 근거(같은 path·kind·storage 항목이 있어야 한다)와 설명용"),
   })
-  .describe("테스트 중 관찰한 사실. 정의된 키(db, writes_local_file, migration)는 타입이 고정되고, 그 밖의 키는 자유");
+  .superRefine((facts, ctx) => {
+    // R1c 는 replace 불일치의 related_kind 가 sqlite / local_upload / local_file 이면 차단하지 않고 R5 / R6 에 맡긴다.
+    // 그런데 R5 는 facts.db, R6 는 facts.writes_local_file 을 읽으므로, related_* 가 그 두 사실로 뒷받침되지 않으면
+    // 근거 없는 related_kind 만으로 세 규칙을 모두 피해 갈 수 있다. 그래서 related_* 는 facts.storage 의 조회값이어야 하고
+    // (변환기는 원본 facts[] 에서 join 해 만드므로 항상 만족), kind 에 따라 R5 / R6 가 실제로 읽는 사실이 있어야 한다.
+    // --handoff(변환기)와 --test(직접 입력) 어느 경로로 와도 같은 조건을 보장한다.
+    const storage = facts.storage ?? [];
+    const writes = facts.writes_local_file ?? [];
+    for (const [i, c] of (facts.conditions ?? []).entries()) {
+      for (const [j, m] of c.mismatches.entries()) {
+        if (m.related_kind === undefined && m.related_storage === undefined) continue; // 힌트(related_fact)만 있거나 아무것도 없으면 R1c 가 차단한다
+        const at = (key: keyof ConditionMismatch) => ["conditions", i, "mismatches", j, key];
+        const missing = (["related_fact", "related_storage", "related_kind"] as const).find((k) => m[k] === undefined);
+        if (missing !== undefined) {
+          ctx.addIssue({ code: "custom", path: at(missing), message: "related_kind 나 related_storage 가 있으면 related_fact, related_storage, related_kind 가 모두 있어야 합니다 (저장 사실의 조회값)" });
+          continue;
+        }
+        if (!storage.some((f) => f.path === m.related_fact && f.kind === m.related_kind && f.storage === m.related_storage)) {
+          ctx.addIssue({ code: "custom", path: at("related_fact"), message: `facts.storage 에 path=${m.related_fact}, kind=${m.related_kind}, storage=${m.related_storage} 인 항목이 없습니다 (related_* 는 facts.storage 의 조회값이어야 합니다)` });
+        }
+        if (m.related_kind === SQLITE_KIND && facts.db !== SQLITE_KIND) {
+          ctx.addIssue({ code: "custom", path: at("related_kind"), message: `related_kind 가 ${SQLITE_KIND} 이면 facts.db 도 ${SQLITE_KIND} 여야 합니다 (현재 ${facts.db ?? "(없음)"}). R1c 가 맡긴 불일치를 R5 가 처리할 수 있어야 합니다` });
+        }
+        if (LOCAL_FILE_KINDS.includes(m.related_kind!) && !writes.includes(m.related_fact!)) {
+          ctx.addIssue({ code: "custom", path: at("related_fact"), message: `related_kind 가 ${m.related_kind} 이면 facts.writes_local_file 에 ${m.related_fact} 가 있어야 합니다. R1c 가 맡긴 불일치를 R6 가 처리할 수 있어야 합니다` });
+        }
+      }
+    }
+  })
+  .describe("테스트 중 관찰한 사실. 정의된 키(db, writes_local_file, migration, conditions, storage)는 타입이 고정되고, 그 밖의 키는 자유");
 export type Facts = z.infer<typeof FactsSchema>;
 /** 정책 규칙이 참조해도 되는 facts 키 */
 export const KNOWN_FACTS_KEYS: readonly string[] = Object.keys(FactsSchema.shape);
@@ -92,13 +205,13 @@ export const TestResultSchema = z
     app: z.string().min(1).describe("앱 이름"),
     digest: DigestSchema,
     source_revision: SourceRevisionInputSchema,
-    passed: z.boolean().describe("재생 테스트 통과 여부. false 면 정책 엔진이 차단한다"),
+    passed: z.boolean().describe("재생 테스트 통과 여부 (테스트 파트 원본의 종합값). facts.conditions 가 없으면 R1 이 이 값으로 차단하고, 있으면 조건별 사실로 판단한다"),
     match: z
       .object({
         total: z.number().int().nonnegative().describe("재생한 요청 수"),
         matched: z.number().int().nonnegative().describe("응답이 일치한 요청 수"),
       })
-      .describe("재생 결과 요약"),
+      .describe("재생 결과 요약. facts.conditions 가 있으면 기준 조건 none 의 결과 (조건별 수치는 facts.conditions 에)"),
     failures: z.array(z.unknown()).default([]).describe("실패한 요청 목록. 형식은 테스트 파트가 정한다 (정책 엔진은 내용을 보지 않음)"),
     facts: FactsSchema.default({}),
   })

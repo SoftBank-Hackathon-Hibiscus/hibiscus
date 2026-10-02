@@ -9,6 +9,7 @@
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { loadParityHandoff } from "./adapters/load.js";
 import { decide, matchedRuleIds } from "./engine.js";
 import { LANGS, explainPlan } from "./explainer.js";
 import { appendDecisionLog, loadJson, loadPolicy, validate, writeJson } from "./io.js";
@@ -28,7 +29,7 @@ import {
   TestResultSchema,
 } from "./schema.js";
 
-export type StageName = "test_result" | "policy" | "migration" | "pii" | "decide" | "write" | "log";
+export type StageName = "test_result" | "handoff" | "policy" | "migration" | "pii" | "decide" | "write" | "log";
 
 export class StageError extends Error {
   constructor(
@@ -46,8 +47,12 @@ export const EXIT_ERROR = 1;
 export interface StageOptions {
   /** 분석할 앱 소스 폴더 */
   src: string;
-  /** test_result.json 경로 */
-  testPath: string;
+  /** test_result.json 경로. handoffPath 와 둘 중 하나만 */
+  testPath?: string;
+  /** parity 인계 묶음 경로. 있으면 변환기(src/adapters/parity.ts)로 test_result 를 만든다. testPath 와 둘 중 하나만 */
+  handoffPath?: string;
+  /** parity 실행 진단 경로 (handoffPath 와 함께만). status 와 digest 를 대조한다 */
+  diagnosticsPath?: string;
   /** policy.yaml 경로 */
   policyPath: string;
   /** pii.json, plan.json 을 쓸 폴더 */
@@ -122,13 +127,27 @@ async function step<T>(stage: StageName, fn: () => T | Promise<T>): Promise<T> {
   }
 }
 
+/** --test 또는 --handoff 로 test_result 를 읽는다. 변환기의 경고는 notes 에 더한다 */
+function loadTestResult(opts: StageOptions, notes: string[]): TestResult {
+  if ((opts.testPath === undefined) === (opts.handoffPath === undefined)) {
+    throw new Error("test_result.json(--test) 과 parity 인계 묶음(--handoff) 중 하나만 지정하세요");
+  }
+  if (opts.handoffPath !== undefined) {
+    const { test, warnings } = loadParityHandoff(opts.handoffPath, opts.diagnosticsPath);
+    notes.push(...warnings.map((w) => `parity 변환 경고: ${w}`));
+    return test;
+  }
+  if (opts.diagnosticsPath !== undefined) throw new Error("--diagnostics 는 --handoff 와 함께만 쓸 수 있습니다");
+  return validate(TestResultSchema, loadJson(opts.testPath!, "test_result"), "test_result", opts.testPath!);
+}
+
 export async function runStage(opts: StageOptions): Promise<StageResult> {
-  const loaded = await step("test_result", () =>
-    applySourceRevision(validate(TestResultSchema, loadJson(opts.testPath, "test_result"), "test_result", opts.testPath), opts.sourceRevision),
+  const notes: string[] = [];
+  const loaded = await step(opts.handoffPath !== undefined ? "handoff" : "test_result", () =>
+    applySourceRevision(loadTestResult(opts, notes), opts.sourceRevision),
   );
   const policy = await step("policy", () => loadPolicy(opts.policyPath));
 
-  const notes: string[] = [];
   const onSkip = (path: string) => notes.push(`symlink 를 건너뜀: ${path}`);
 
   // 마이그레이션 판정: 실행기가 항상 직접 계산한다. 테스트 파트가 facts.migration 을 줬으면
@@ -179,7 +198,7 @@ export async function runStage(opts: StageOptions): Promise<StageResult> {
       mkdirSync(opts.outDir, { recursive: true });
       for (const lang of LANGS) {
         const path = join(opts.outDir, `explain.${lang}.md`);
-        writeFileSync(path, explainPlan(plan, { lang }), "utf8");
+        writeFileSync(path, explainPlan(plan, { lang, test }), "utf8");
         explainPaths[lang] = resolve(path);
       }
     });
