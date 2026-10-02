@@ -1,26 +1,30 @@
-import { FlaskConical, PenLine, Rocket, Scale, type LucideIcon } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import type { DataSource } from '../api/client';
 import type { Approval, PiiReport, Plan, SignLog, TestResult } from '../api/contracts';
 import type { ApplicationView, Decision, DeploymentStatus, DeploymentView, StageExecution, StageName } from '../api/types';
 import { ErrorNotice } from '../components/ErrorNotice';
 import { Modal } from '../components/Modal';
-import { Collapsible, DemoBadge, Empty, Hash, IconTile, JsonBlock, Kv, MoreToggle, PageTitle, Pill, RawToggle, type Tone } from '../components/ui';
+import { Collapsible, DemoBadge, Empty, Hash, JsonBlock, Kv, MoreToggle, PageTitle, Pill, RawToggle, type Tone } from '../components/ui';
 import { usePolling } from '../hooks/usePolling';
 import { STAGE_ORDER, artifactsOf, findArtifact, latestStages, parseJsonArtifact } from '../lib/artifacts';
 import { compactJson, fmtTime, relTime, targetLabel } from '../lib/format';
 import { pickLang, useLang, type DictKey } from '../lib/i18n';
 import { Markdown, prepareExplain } from '../lib/markdown';
 import { applicationPath, hrefFor } from '../lib/router';
-import { summarizeDeployment, type DeploymentSummary, type ProofLink, type StepSummary } from '../lib/summary';
+import { summarizeDeployment, type DeploymentSummary, type ProofLink } from '../lib/summary';
 
 const PROGRESSING: DeploymentStatus[] = ['queued', 'running', 'awaiting_approval'];
 const STATUS_KEY: Record<DeploymentStatus, DictKey> = { queued: 'statusQueued', running: 'statusRunning', awaiting_approval: 'statusAwaiting', blocked: 'statusBlocked', failed: 'statusFailed', succeeded: 'statusSucceeded' };
 const STATUS_TONE: Record<DeploymentStatus, Tone> = { queued: 'info', running: 'info', awaiting_approval: 'warning', blocked: 'danger', failed: 'danger', succeeded: 'success' };
 const DECISION_TONE: Record<Decision, Tone> = { allow: 'success', needs_approval: 'warning', block: 'danger' };
 const DECISION_LABEL: Record<Decision, string> = { allow: 'ALLOW', needs_approval: 'NEEDS_APPROVAL', block: 'BLOCK' };
-const STEP_ICON: Record<StageName, LucideIcon> = { test: FlaskConical, policy: Scale, sign: PenLine, deploy: Rocket };
 const STEP_DETAIL_KEY: Record<StageName, DictKey> = { test: 'testDetail', policy: 'policyDetail', sign: 'signDetail', deploy: 'deployDetail' };
+const TONE_ICON: Record<Tone, string> = { success: '✓', warning: '!', danger: '✕', info: '…', muted: '–' };
+
+/** 재생 테스트 조건 이름(none/restart/replace)을 화면 말로. */
+function conditionName(t: (key: DictKey) => string, name: string): string {
+  return name === 'none' ? t('conditionNone') : name === 'restart' ? t('conditionRestart') : name === 'replace' ? t('conditionReplace') : name;
+}
 
 export function DeploymentDetail({ id, source }: { id: string; source: DataSource }) {
   const { t, lang } = useLang();
@@ -44,8 +48,6 @@ export function DeploymentDetail({ id, source }: { id: string; source: DataSourc
   }, [applicationId, source]);
 
   const summary = useMemo(() => (view ? summarizeDeployment(view, lang) : null), [view, lang]);
-  const [selected, setSelected] = useState<StageName | null>(null);
-  const current: StageName = selected ?? summary?.focusStep ?? 'policy';
 
   if (poll.loading && !view) return <Empty>{t('loading')}</Empty>;
   if (!view || !summary) return <ErrorNotice error={poll.error ?? new Error('no data')} />;
@@ -61,16 +63,11 @@ export function DeploymentDetail({ id, source }: { id: string; source: DataSourc
             <a className="crumb-link" href={hrefFor(applicationPath(d.applicationId))}>{appName}</a> <span className="muted">v{d.version}</span>
           </>
         }
-        sub={
-          <span className={`conclusion conclusion-${summary.tone}`}>
-            <span className="conclusion-dot" aria-hidden />
-            {summary.conclusion}
-          </span>
-        }
         right={
           <div className="title-badges">
             {summary.decision && <Pill tone={DECISION_TONE[summary.decision]}>{DECISION_LABEL[summary.decision]}</Pill>}
             <Pill tone={STATUS_TONE[d.status]}>{t(STATUS_KEY[d.status])}</Pill>
+            {d.deploymentPerformed && <Pill tone="success">{t('deployed')}</Pill>}
             {progressing && (
               <span className="live">
                 {t('refreshing2s')}
@@ -81,33 +78,61 @@ export function DeploymentDetail({ id, source }: { id: string; source: DataSourc
         }
       />
 
-      <div className="pipeline">
-        <aside className="steps-col">
-          {summary.steps.map((step) => (
-            <StepCard key={step.name} step={step} selected={step.name === current} onSelect={() => setSelected(step.name)} />
-          ))}
-        </aside>
-        <div className="detail-col">
-          <section className={`card detail-card tint-${summary.steps.find((s) => s.name === current)?.tone ?? 'muted'}`}>
-            <h2 className="card-title">{t(STEP_DETAIL_KEY[current])}</h2>
-            {current === 'test' && <TestDetail view={view} summary={summary} />}
-            {current === 'policy' && <PolicyDetail view={view} summary={summary} source={source} onChanged={poll.refresh} appName={appName} />}
-            {current === 'sign' && <SignDetail view={view} summary={summary} />}
-            {current === 'deploy' && <DeployDetail view={view} summary={summary} />}
-          </section>
-          <section className="card">
-            <div className="card-head">
-              <h2 className="card-title">{t('proofChain')}</h2>
-              {source.kind === 'mock' && <DemoBadge small />}
-            </div>
-            <ul className="proof-list frost">
-              {summary.proof.map((link) => (
-                <ProofRow key={link.id} link={link} />
-              ))}
-            </ul>
-          </section>
-        </div>
+      <Stepper view={view} summary={summary} />
+
+      <section className={`headline-card headline-${summary.tone}`}>
+        <span className="headline-icon" aria-hidden>{TONE_ICON[summary.tone]}</span>
+        <p className="headline-text">{summary.conclusion}</p>
+      </section>
+
+      <div className="grid-2">
+        <section className="card">
+          <h2 className="card-title">{t(STEP_DETAIL_KEY.test)}</h2>
+          <TestDetail view={view} summary={summary} />
+        </section>
+        <section className={`card ${summary.decision ? `tint-${DECISION_TONE[summary.decision]}` : ''}`}>
+          <h2 className="card-title">{t(STEP_DETAIL_KEY.policy)}</h2>
+          <PolicyDetail view={view} summary={summary} source={source} onChanged={poll.refresh} appName={appName} />
+        </section>
       </div>
+
+      {summary.requires.length > 0 && (
+        <section className="card">
+          <h2 className="card-title">{t('requires')}</h2>
+          <div className="requires">
+            {summary.requires.map((r) => (
+              <div key={`${r.id}-${r.ruleId}`} className="require">
+                <div className="require-title">{r.title}</div>
+                {r.why && <div className="require-why">{r.why}</div>}
+                <div className="require-unlock">{r.unlocks.length ? `${t('fixUnlocks')}: ${r.unlocks.map(targetLabel).join(', ')}` : t('fixUnlocksNone')}</div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <div className="grid-2">
+        <section className="card">
+          <h2 className="card-title">{t(STEP_DETAIL_KEY.sign)}</h2>
+          <SignDetail view={view} summary={summary} />
+        </section>
+        <section className="card">
+          <h2 className="card-title">{t(STEP_DETAIL_KEY.deploy)}</h2>
+          <DeployDetail view={view} summary={summary} />
+        </section>
+      </div>
+
+      <section className="card">
+        <div className="card-head">
+          <h2 className="card-title">{t('proofChain')}</h2>
+          {source.kind === 'mock' && <DemoBadge small />}
+        </div>
+        <ul className="proof-list">
+          {summary.proof.map((link) => (
+            <ProofRow key={link.id} link={link} />
+          ))}
+        </ul>
+      </section>
 
       <section className="card card-collapsed">
         <Collapsible title={t('techDetails')}>
@@ -139,19 +164,92 @@ export function DeploymentDetail({ id, source }: { id: string; source: DataSourc
   );
 }
 
-// ---------------------------------------------------------------- left column
+// ---------------------------------------------------------------- stepper (빠른 파악용)
 
-function StepCard({ step, selected, onSelect }: { step: StepSummary; selected: boolean; onSelect: () => void }) {
-  const Icon = STEP_ICON[step.name];
+interface StepItem {
+  key: string;
+  label: string;
+  short: string;
+  tone: Tone;
+}
+
+function Stepper({ view, summary }: { view: DeploymentView; summary: DeploymentSummary }) {
+  const { t } = useLang();
+  const d = view.deployment;
+  const [test, policy, sign, deploy] = summary.steps;
+  const result = summary.parsed.test;
+  const failedCondition = result?.facts?.conditions?.find((c) => c.failed);
+  const testShort = !test?.stage
+    ? t('shortNotRun')
+    : result
+      ? failedCondition
+        ? `${conditionName(t, failedCondition.name)} ${failedCondition.matched}/${failedCondition.total}`
+        : `${result.match.matched}/${result.match.total}`
+      : test.tone === 'success'
+        ? t('shortPassed')
+        : test.tone === 'danger'
+          ? t('shortFailed')
+          : test.tone === 'info'
+            ? t('shortRunning')
+            : t('shortPending');
+
+  const policyShort = summary.decision ? DECISION_LABEL[summary.decision] : policy?.stage ? (policy.tone === 'info' ? t('shortRunning') : t('shortPending')) : t('shortNotRun');
+
+  let approvalShort = '-';
+  let approvalTone: Tone = 'muted';
+  if (summary.decision === 'allow') approvalShort = t('shortAuto');
+  else if (summary.decision === 'needs_approval') {
+    if (d.approver) {
+      approvalShort = t('shortApproved');
+      approvalTone = 'success';
+    } else if (d.status === 'awaiting_approval') {
+      approvalShort = t('shortAwaiting');
+      approvalTone = 'warning';
+    } else approvalShort = t('shortPending');
+  } else if (summary.decision === 'block') approvalShort = t('shortNotRun');
+
+  const signShort = !sign?.stage ? t('shortNotRun') : summary.parsed.sign ? (summary.parsed.sign.signature_ref.startsWith('dry-run:') ? t('shortDryRun') : t('shortSigned')) : sign.tone === 'danger' ? t('shortRefused') : sign.tone === 'info' ? t('shortRunning') : t('shortPending');
+
+  const dr = summary.parsed.deployResult;
+  const deployShort = !deploy?.stage
+    ? t('shortNotRun')
+    : dr
+      ? dr.decision === 'activated'
+        ? dr.routing.result === 'ok'
+          ? t('shortDeployed')
+          : t('shortSwitchFailed')
+        : dr.decision === 'held'
+          ? t('shortHeld')
+          : dr.decision === 'rolled_back'
+            ? t('shortRolledBack')
+            : t('shortError')
+      : deploy.stage.status === 'skipped'
+        ? t('shortSkipped')
+        : deploy.tone === 'info'
+          ? t('shortRunning')
+          : deploy.tone === 'danger'
+            ? t('shortError')
+            : t('shortPending');
+
+  const items: StepItem[] = [
+    { key: 'test', label: t('stepTest'), short: testShort, tone: test?.tone ?? 'muted' },
+    { key: 'policy', label: t('stepPolicy'), short: policyShort, tone: policy?.tone ?? 'muted' },
+    { key: 'approval', label: t('stepApproval'), short: approvalShort, tone: approvalTone },
+    { key: 'sign', label: t('stepSign'), short: signShort, tone: sign?.tone ?? 'muted' },
+    { key: 'deploy', label: t('stepDeploy'), short: deployShort, tone: deploy?.tone ?? 'muted' },
+  ];
+
   return (
-    <button type="button" className={`card step-card tint-${step.tone} ${selected ? 'step-selected' : ''}`} onClick={onSelect} aria-pressed={selected}>
-      <IconTile icon={Icon} tone={step.tone === 'muted' ? 'accent' : step.tone} size={40} />
-      <span className="step-text">
-        <span className="step-name">{step.label}</span>
-        <span className={`step-result tone-${step.tone}`}>{step.result}</span>
-        {step.duration && <span className="step-duration">{step.duration}</span>}
-      </span>
-    </button>
+    <ol className="stepper card" aria-label="pipeline">
+      {items.map((item, i) => (
+        <li key={item.key} className={`step step-${item.tone}`}>
+          <span className="step-dot" aria-hidden>{TONE_ICON[item.tone]}</span>
+          {i < items.length - 1 && <span className="step-line" aria-hidden />}
+          <span className="step-label">{item.label}</span>
+          <span className={`step-short tone-${item.tone}`}>{item.short}</span>
+        </li>
+      ))}
+    </ol>
   );
 }
 
@@ -178,10 +276,10 @@ function ProofRow({ link }: { link: ProofLink }) {
           <span className="proof-detail">{link.detail}</span>
         </div>
         <Pill tone={state.tone}>{t(state.key)}</Pill>
+        <button type="button" className="link-btn" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+          {open ? t('hideDetails') : t('techDetails')}
+        </button>
       </div>
-      <button type="button" className="link-btn proof-more" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
-        {open ? t('hideDetails') : t('techDetails')}
-      </button>
       {open && (
         <div className="proof-legs">
           {link.legs.map((leg) => (
@@ -227,7 +325,7 @@ function PolicyDetail({ view, summary, source, onChanged, appName }: { view: Dep
           <div className="field-label">{t('failoverLabel')}</div>
           <div className="field-value">
             {summary.failoverAllowed === null ? <span className="muted">{t('none')}</span> : summary.failoverAllowed ? t('failoverOn') : t('failoverOff')}
-            {summary.failoverWhy && <span className="small muted"> ({summary.failoverWhy})</span>}
+            {summary.failoverWhy && <div className="small muted">{summary.failoverWhy}</div>}
           </div>
         </div>
       </div>
@@ -245,31 +343,12 @@ function PolicyDetail({ view, summary, source, onChanged, appName }: { view: Dep
 
       {needsApproval && <ApprovalCard view={view} source={source} onChanged={onChanged} />}
 
-      {summary.requires.length > 0 ? (
-        <div>
-          <div className="field-label">{t('requires')}</div>
-          <div className="requires frost">
-            {summary.requires.map((r) => (
-              <div key={`${r.id}-${r.ruleId}`} className="require">
-                <div className="require-title">{r.title}</div>
-                {r.why && <div className="require-why">{r.why}</div>}
-                <div className="require-unlock">
-                  {r.unlocks.length ? `${t('fixUnlocks')}: ${r.unlocks.map(targetLabel).join(', ')}` : t('fixUnlocksNone')}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : (
-        decision === 'allow' && <p className="muted">{t('nothingToFix')}</p>
-      )}
-
-      {skeleton && <p className="muted">{t('stubPolicy')}</p>}
+      {skeleton && <p className="small muted">{t('stubPolicy')}</p>}
 
       {!skeleton && pii?.ok && pii.value.pii && pii.value.pii.length > 0 && (
         <div>
           <div className="field-label">{t('piiTitle')}</div>
-          <table className="table small frost">
+          <table className="table small">
             <tbody>
               {pii.value.pii.map((p, i) => (
                 <tr key={i}>
@@ -293,17 +372,13 @@ function PolicyDetail({ view, summary, source, onChanged, appName }: { view: Dep
         )}
         <MoreToggle>
           <div className="stack">
-            {summary.requires.length > 0 && (
-              <Kv columns={1} items={summary.requires.map((r) => [r.title, <span className="mono small">{r.id} ({r.ruleId})</span>])} />
-            )}
+            {summary.requires.length > 0 && <Kv columns={1} items={summary.requires.map((r) => [r.title, <span className="mono small">{r.id} ({r.ruleId})</span>])} />}
             {stage && <StageRaw stage={stage} />}
           </div>
         </MoreToggle>
       </div>
 
-      {explainOpen && explain && (
-        <ExplainModal source={explain.content} title={`${appName} v${d.version}`} onClose={() => setExplainOpen(false)} lang={lang} setLang={setLang} hasKo={Boolean(explainKo)} hasJa={Boolean(explainJa)} />
-      )}
+      {explainOpen && explain && <ExplainModal source={explain.content} title={`${appName} v${d.version}`} onClose={() => setExplainOpen(false)} lang={lang} setLang={setLang} hasKo={Boolean(explainKo)} hasJa={Boolean(explainJa)} />}
     </div>
   );
 }
@@ -326,7 +401,7 @@ function ExplainModal({ source, title, onClose, lang, setLang, hasKo, hasJa }: {
         </div>
       }
     >
-      <div lang={lang} className="frost explain-body">
+      <div lang={lang} className="explain-body">
         <Markdown source={prepared.body} />
         {prepared.technical && (
           <RawToggle label={t('techDetails')}>
@@ -397,7 +472,7 @@ function ApprovalCard({ view, source, onChanged }: { view: DeploymentView; sourc
     }
   };
   return (
-    <div className="approval frost">
+    <div className="approval">
       <div className="approval-head">
         <strong>{t('approvalTitle')}</strong>
         {awaiting ? <Pill tone="warning">{t('awaitingApproval')}</Pill> : d.approver ? <Pill tone="success">{t('approved')}</Pill> : <Pill tone="muted">{t('none')}</Pill>}
@@ -431,7 +506,7 @@ function TestDetail({ view, summary }: { view: DeploymentView; summary: Deployme
   if (!result) {
     return (
       <div className="stack">
-        <Empty>{t('noTestResult')}</Empty>
+        {parsed && !parsed.ok ? <ErrorNotice error={new Error(parsed.error)} /> : <Empty>{t('noTestResult')}</Empty>}
         {parsed && !parsed.ok && (
           <MoreToggle>
             <JsonBlock raw={parsed.raw} />
@@ -442,8 +517,6 @@ function TestDetail({ view, summary }: { view: DeploymentView; summary: Deployme
     );
   }
   const conditions = result.facts?.conditions;
-  const conditionName = (name: string) => (name === 'none' ? t('conditionNone') : name === 'restart' ? t('conditionRestart') : name === 'replace' ? t('conditionReplace') : name);
-  const testReasons = summary.reasons.filter((r) => !r.startsWith('SQLite') && true);
   return (
     <div className="stack">
       <div className="row">
@@ -454,16 +527,16 @@ function TestDetail({ view, summary }: { view: DeploymentView; summary: Deployme
           </span>
         )}
       </div>
-      {stub && <p className="muted">{t('stubTest')}</p>}
+      {stub && <p className="small muted">{t('stubTest')}</p>}
       {conditions && conditions.length > 0 && (
         <div className="conditions">
           {conditions.map((c) => {
             const pct = c.total ? Math.round((c.matched / c.total) * 100) : 0;
             return (
-              <div key={c.name} className="condition frost">
+              <div key={c.name} className="condition">
                 <div className="condition-head">
-                  <span>{conditionName(c.name)}</span>
-                  <span>
+                  <span>{conditionName(t, c.name)}</span>
+                  <span className={c.failed ? 'tone-danger' : 'tone-success'}>
                     <strong>{c.matched}</strong>/{c.total}
                   </span>
                 </div>
@@ -488,13 +561,6 @@ function TestDetail({ view, summary }: { view: DeploymentView; summary: Deployme
             );
           })}
         </div>
-      )}
-      {testReasons.length > 0 && (
-        <ul className="reasons">
-          {summary.reasons.map((line) => (
-            <li key={line}>{line}</li>
-          ))}
-        </ul>
       )}
       <MoreToggle>
         <div className="stack">
@@ -548,7 +614,7 @@ function SignDetail({ view, summary }: { view: DeploymentView; summary: Deployme
       <div className="row">
         <Pill tone={refused ? 'danger' : dryRun ? 'muted' : 'success'}>{step?.result}</Pill>
       </div>
-      <p>{refused ? t('signLineRefused') : dryRun ? t('signLineDry') : t('signLineOk')}</p>
+      <p className="small">{refused ? t('signLineRefused') : dryRun ? t('signLineDry') : t('signLineOk')}</p>
       <Kv
         columns={3}
         items={[

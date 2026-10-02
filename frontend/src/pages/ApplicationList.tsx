@@ -64,7 +64,7 @@ export function ApplicationList({ source }: { source: DataSource }) {
             {rows.map(({ view, route, routeError }) => (
               <li key={view.application.id}>
                 <a className="app-row" href={hrefFor(applicationPath(view.application.id))}>
-                  <IconTile icon={Boxes} tone="accent" size={40} />
+                  <IconTile icon={Boxes} tone="accent" size={32} />
                   <span className="app-row-main">
                     <span className="app-row-name">{view.application.name}</span>
                     <span className="small muted mono">{view.application.publicHost ?? view.application.slug}</span>
@@ -82,7 +82,7 @@ export function ApplicationList({ source }: { source: DataSource }) {
                     ) : (
                       <Pill tone="muted">{t('noRouteShort')}</Pill>
                     )}
-                    <ArrowRight size={18} className="app-row-arrow" aria-hidden />
+                    <ArrowRight size={16} className="app-row-arrow" aria-hidden />
                   </span>
                 </a>
               </li>

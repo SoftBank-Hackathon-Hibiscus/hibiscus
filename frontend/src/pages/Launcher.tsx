@@ -40,7 +40,7 @@ export function Launcher() {
       <div className="launch-grid">
         {CARDS.map((card) => (
           <a key={card.id} className="card launch-card" href={`${configToSearch({ mode: 'mock', scenario: card.id })}#${paths.get(card.id) ?? ''}`}>
-            <IconTile icon={card.icon} tone={card.tone} />
+            <IconTile icon={card.icon} tone={card.tone} size={36} />
             <span className="launch-title">{t(card.title)}</span>
             <span className="launch-line">{t(card.line)}</span>
             <span className="launch-foot">
@@ -48,7 +48,7 @@ export function Launcher() {
                 <span className="pill-dot" aria-hidden />
                 {t(card.badge)}
               </span>
-              <ArrowRight size={18} className="launch-arrow" aria-hidden />
+              <ArrowRight size={16} className="launch-arrow" aria-hidden />
             </span>
           </a>
         ))}
