@@ -322,7 +322,6 @@ export class GithubService {
                 { source_revision: push.after },
                 link.userId,
                 'webhook',
-                true,
               ).id,
             );
         }

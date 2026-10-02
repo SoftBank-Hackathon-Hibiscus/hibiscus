@@ -70,8 +70,10 @@ export class DeployStage implements StageRunner {
     }
 
     const { deployment, application, paths } = context;
-    // 레지스트리 digest 가 아니면 서명할 수도, 배포할 수도 없다.
-    // sourceRevisionVerified 는 backend-v2 가 아직 항상 false 로 저장해서 여기서는 막지 않는다 (리뷰 코멘트 4번)
+    // 실제 parity 결과와 소스·이미지의 연결을 확인한 실행만 배포한다.
+    if (!deployment.sourceRevisionVerified) {
+      return this.failed('Real deploy requires a verified source revision');
+    }
     if (deployment.digestSource !== 'registry') {
       return this.failed('Real deploy requires a registry image digest');
     }

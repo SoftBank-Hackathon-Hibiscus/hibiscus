@@ -154,6 +154,8 @@ export class PolicyStage implements StageRunner {
         paths.decisionsLog,
         '--source-revision',
         deployment.sourceRevision,
+        '--classifier',
+        'heuristic',
         '--json',
         '--explain',
       ],

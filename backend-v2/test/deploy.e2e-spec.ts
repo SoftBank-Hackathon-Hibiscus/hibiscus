@@ -17,6 +17,7 @@ import { AgentJobService } from '../src/agent/agent-job.service.js';
 import type { AgentJobResultDto } from '../src/agent/dto/agent-job.dto.js';
 import { AuthService } from '../src/auth/auth.service.js';
 import { DeploymentRepository } from '../src/deployment/deployment.repository.js';
+import { DeploymentArtifactService } from '../src/deployment/deployment-artifact.service.js';
 import { DeployStage } from '../src/deployment/stages/deploy.stage.js';
 import { DeploymentPaths } from '../src/deployment/types/deployment.type.js';
 import type { DeployResult } from '../src/deployment/types/deploy-result.type.js';
@@ -65,6 +66,8 @@ describe('deploy stage (e2e)', () => {
       JWT_REFRESH_SECRET: randomBytes(32).toString('hex'),
       GITHUB_APP_CLIENT_ID: 'Iv1.test-client',
       GITHUB_APP_CLIENT_SECRET: 'test-client-secret',
+      ALLOWED_GITHUB_IDS: '1',
+      HEALTH_MONITOR_ENABLED: 'false',
       DEPLOY_MODE: 'real',
       GCP_PROJECT_ID: 'test-project',
       GCP_REGION: 'asia-northeast3',
@@ -103,6 +106,8 @@ describe('deploy stage (e2e)', () => {
       'JWT_REFRESH_SECRET',
       'GITHUB_APP_CLIENT_ID',
       'GITHUB_APP_CLIENT_SECRET',
+      'ALLOWED_GITHUB_IDS',
+      'HEALTH_MONITOR_ENABLED',
       'DEPLOY_MODE',
       'GCP_PROJECT_ID',
       'GCP_REGION',
@@ -152,8 +157,9 @@ describe('deploy stage (e2e)', () => {
       id: randomUUID(),
       applicationId,
       trigger: 'manual',
-      sourceRevision: '0123456789abcdef',
-      sourceRevisionVerified: false,
+      sourceRevision: '0123456789abcdef0123456789abcdef01234567',
+      // This isolated deploy fixture represents a completed registry parity run.
+      sourceRevisionVerified: true,
       imageDigest: digest,
       digestSource: 'registry',
       requester: userId,
@@ -187,6 +193,50 @@ describe('deploy stage (e2e)', () => {
         signed_at: new Date().toISOString(),
       }),
     );
+    // The worker normally stores policy/sign evidence before entering deploy.
+    // Seed the same DB evidence for this isolated stage test; routing now requires it.
+    const repository = app.get(DeploymentRepository);
+    const timestamp = new Date().toISOString();
+    const execution = {
+      id: randomUUID(),
+      deploymentId,
+      sequence: 3,
+      attempt: 1,
+      stage: 'sign' as const,
+      status: 'succeeded' as const,
+      exitCode: 0,
+      startedAt: timestamp,
+      finishedAt: timestamp,
+      artifacts: {},
+      summary: null,
+      error: null,
+    };
+    repository.createStage(execution);
+    const captured = app
+      .get(DeploymentArtifactService)
+      .capture(paths, execution, repository.find(deploymentId)!);
+    expect(captured.error).toBeUndefined();
+    repository.checkpoint(
+      captured.artifacts,
+      captured.auditLogs,
+      (artifacts) => {
+        repository.updateStage(execution.id, { artifacts });
+      },
+    );
+    repository.savePolicyResult({
+      deploymentId,
+      decision: 'allow',
+      planHash: 'b'.repeat(64),
+      targets: ['onprem', 'cloud_run'],
+      failoverAllowed: true,
+      requires: [],
+      planPath: null,
+      piiPath: null,
+      planArtifactId: null,
+      piiArtifactId: null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
     return paths;
   }
 

@@ -42,6 +42,8 @@ describe.skipIf(!liveFile)('real parity through the Backend worker', () => {
       JWT_REFRESH_SECRET: randomBytes(32).toString('hex'),
       GITHUB_APP_CLIENT_ID: 'local-rehearsal',
       GITHUB_APP_CLIENT_SECRET: 'local-only',
+      ALLOWED_GITHUB_IDS: '424242',
+      HEALTH_MONITOR_ENABLED: 'false',
     });
     delete process.env.ANTHROPIC_API_KEY;
     const { AppModule } = await import('../src/app.module.js');
@@ -83,6 +85,7 @@ describe.skipIf(!liveFile)('real parity through the Backend worker', () => {
         .send({ source_revision: input.sourceRevision })
         .expect(201);
       expect(created.body.digestSource).toBe('placeholder');
+      expect(created.body.sourceRevisionVerified).toBe(false);
       const repository = app.get(DeploymentRepository);
       const wait = async (id: string) => {
         const deadline = Date.now() + 240_000;

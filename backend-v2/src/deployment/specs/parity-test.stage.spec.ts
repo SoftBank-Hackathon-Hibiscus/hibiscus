@@ -93,55 +93,59 @@ describe('registry parity connection', () => {
     expect(result.deploymentPatch).toBeUndefined();
     expect(run).not.toHaveBeenCalled();
   });
-  it('keeps a completed mismatch available to policy and only then verifies source identity', async () => {
-    const { context, config, digest } = setup();
-    const run = vi.fn().mockImplementation(() => {
-      writeFileSync(
-        join(context.paths.test, 'stage_result.json'),
-        JSON.stringify({
-          status: 'succeeded',
-          exitCode: 0,
-          summary: { stub: false, test_passed: false },
-        }),
-      );
-      writeFileSync(
-        join(context.paths.test, 'test_result.json'),
-        JSON.stringify({
-          run_id: 'test-run',
-          app: 'guestbook',
-          source_revision: 'b'.repeat(40),
-          digest,
-          passed: false,
-        }),
-      );
-      return Promise.resolve({
-        code: 0,
-        signal: null,
-        stdout: '',
-        stderr: '',
-        timedOut: false,
+  it.each([true, false])(
+    'verifies source identity only after completed parity (passed=%s)',
+    async (passed) => {
+      const { context, config, digest } = setup();
+      const run = vi.fn().mockImplementation(() => {
+        writeFileSync(
+          join(context.paths.test, 'stage_result.json'),
+          JSON.stringify({
+            status: 'succeeded',
+            exitCode: 0,
+            summary: { stub: false, test_passed: passed },
+          }),
+        );
+        writeFileSync(
+          join(context.paths.test, 'test_result.json'),
+          JSON.stringify({
+            run_id: 'test-run',
+            app: 'guestbook',
+            source_revision: 'b'.repeat(40),
+            digest,
+            passed,
+          }),
+        );
+        return Promise.resolve({
+          code: 0,
+          signal: null,
+          stdout: '',
+          stderr: '',
+          timedOut: false,
+        });
       });
-    });
-    const result = await new ParityTestStage(config, { run }).run(context);
-    expect(result.status).toBe('succeeded');
-    expect(result.summary).toMatchObject({ stub: false, test_passed: false });
-    expect(result.deploymentPatch).toEqual({
-      imageDigest: digest,
-      digestSource: 'registry',
-      sourceRevisionVerified: true,
-    });
-  });
+      const result = await new ParityTestStage(config, { run }).run(context);
+      expect(result.status).toBe('succeeded');
+      expect(result.summary).toMatchObject({
+        stub: false,
+        test_passed: passed,
+      });
+      expect(result.deploymentPatch).toEqual({
+        imageDigest: digest,
+        digestSource: 'registry',
+        sourceRevisionVerified: true,
+      });
+    },
+  );
   it('does not verify the source after a timeout', async () => {
     const { context, config } = setup();
-    const run = vi
-      .fn()
-      .mockResolvedValue({
-        code: null,
-        signal: null,
-        stdout: '',
-        stderr: '',
-        timedOut: true,
-      });
+    const run = vi.fn().mockResolvedValue({
+      code: null,
+      signal: null,
+      stdout: '',
+      stderr: '',
+      timedOut: true,
+    });
     const result = await new ParityTestStage(config, { run }).run(context);
     expect(result.status).toBe('failed');
     expect(result.deploymentPatch).toBeUndefined();

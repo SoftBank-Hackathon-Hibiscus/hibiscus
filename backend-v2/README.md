@@ -69,7 +69,7 @@ src/
 - 서비스 파일에는 서비스 클래스 하나만 둡니다. 인증 가드는 `auth/guards/jwt-auth.guard.ts`에 둡니다.
 - Deployment의 `stages/`가 단계별 실행 책임을 가집니다.
 - 공통 명령 실행은 `infrastructure/`에 둡니다. 계약 스키마 검사는 테스트에서만 수행합니다.
-- 수동 요청은 Git 검사를 수행하지 않으므로 `sourceRevisionVerified=false`입니다. HMAC을 검증하고 연결된 저장소·브랜치와 일치한 GitHub Push Webhook은 `true`입니다.
+- 수동 요청과 HMAC을 검증한 GitHub Push Webhook 모두 처음에는 `sourceRevisionVerified=false`입니다. 웹훅 검증은 요청의 출처를 확인하며 실제 시험한 이미지의 소스를 증명하지 않습니다. registry parity가 run ID·소스 SHA·digest를 대조하고 산출물 저장까지 성공한 뒤에만 `true`가 됩니다. 이 값은 이미지와 소스의 연결을 뜻하며, 앱 테스트 통과 여부와 배포 허용 여부는 별도로 판단합니다. 실서명과 실배포에는 이 값과 registry digest가 모두 필요합니다.
 
 ## 데이터 관계
 
