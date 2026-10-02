@@ -124,7 +124,10 @@ export class PolicyStage implements StageRunner {
       this.config.get('backend.parityTestMode', { infer: true }) === 'registry'
         ? join(paths.test, 'parity', 'source')
         : application.sourcePath;
-    if (!existsSync(sourcePath)) {
+    if (
+      this.config.get('backend.parityTestMode', { infer: true }) === 'registry' &&
+      !existsSync(sourcePath)
+    ) {
       return {
         status: 'failed',
         artifacts: {},

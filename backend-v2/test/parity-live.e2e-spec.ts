@@ -78,7 +78,7 @@ describe.skipIf(!liveFile)('real parity through the Backend worker', () => {
         })
         .expect(201);
       const created = await post(
-        `/applications/${application.body.id}/deployments`,
+        `/applications/${application.body.application.id}/deployments`,
       )
         .send({ source_revision: input.sourceRevision })
         .expect(201);
@@ -147,7 +147,7 @@ describe.skipIf(!liveFile)('real parity through the Backend worker', () => {
 
       // A different source revision must fail before building or policy evaluation.
       const rejected = await post(
-        `/applications/${application.body.id}/deployments`,
+        `/applications/${application.body.application.id}/deployments`,
       )
         .send({ source_revision: '0'.repeat(40) })
         .expect(201);
