@@ -1398,6 +1398,50 @@ main {
   gap: 4px;
 }
 
+/* ---- application list ---- */
+.app-rows {
+  list-style: none;
+  margin: 0;
+  padding: 6px 0;
+}
+.app-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 4px;
+  border-top: 1px solid var(--line);
+  text-decoration: none;
+  color: var(--ink);
+  border-radius: var(--radius-sm);
+}
+.app-rows li:first-child .app-row {
+  border-top: 0;
+}
+.app-row:hover {
+  background: rgba(255, 255, 255, 0.55);
+}
+.app-row-main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+.app-row-name {
+  font-size: 17px;
+  font-weight: 700;
+}
+.app-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.app-row-arrow {
+  color: var(--ink-3);
+}
+.app-row:hover .app-row-arrow {
+  color: var(--accent-ink);
+}
+
 /* ---- connect checklist ---- */
 .connect {
   max-width: 820px;

@@ -6,7 +6,7 @@ import { ErrorNotice } from '../components/ErrorNotice';
 import { Collapsible, Empty, PageTitle } from '../components/ui';
 import type { ConnectionState } from '../hooks/useConnection';
 import { useLang } from '../lib/i18n';
-import { applicationPath, deploymentPath, hrefFor, navigate } from '../lib/router';
+import { APPLICATIONS_PATH, applicationPath, deploymentPath, hrefFor, navigate } from '../lib/router';
 
 /** real 모드 홈. 백엔드 → 토큰 → 앱 선택 순서의 체크리스트. 실패해도 mock 으로 돌아가지 않는다. */
 export function Connect({ source, connection, onTokenChange, onRecheck }: { source: DataSource; connection: ConnectionState; onTokenChange: () => void; onRecheck: () => void }) {
@@ -81,6 +81,9 @@ export function Connect({ source, connection, onTokenChange, onRecheck }: { sour
           {tokenOk && (
             <div className="check-body">
               <TokenBar onChange={onTokenChange} />
+              <div>
+                <a className="btn btn-primary" href={hrefFor(APPLICATIONS_PATH)}>{t('openApps')}</a>
+              </div>
             </div>
           )}
         </li>

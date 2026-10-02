@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 export type Route =
   | { page: 'deployment'; id: string }
   | { page: 'application'; id: string }
+  | { page: 'applications' }
   | { page: 'none' };
 
 export function parseHash(hash: string = window.location.hash): Route {
@@ -11,8 +12,11 @@ export function parseHash(hash: string = window.location.hash): Route {
   if (match?.[1]) return { page: 'deployment', id: decodeURIComponent(match[1]) };
   match = /^\/applications\/([^/?#]+)/.exec(path);
   if (match?.[1]) return { page: 'application', id: decodeURIComponent(match[1]) };
+  if (/^\/applications\/?$/.test(path)) return { page: 'applications' };
   return { page: 'none' };
 }
+
+export const APPLICATIONS_PATH = '/applications';
 
 export function useHashRoute(): Route {
   const [route, setRoute] = useState<Route>(() => parseHash());

@@ -5,8 +5,9 @@ import { TokenBar } from './components/TokenBar';
 import { DemoBadge } from './components/ui';
 import { useConnection, type ConnectionState } from './hooks/useConnection';
 import { LangProvider, useLang } from './lib/i18n';
-import { hrefFor, useHashRoute } from './lib/router';
+import { APPLICATIONS_PATH, hrefFor, useHashRoute } from './lib/router';
 import { ApplicationDetail } from './pages/ApplicationDetail';
+import { ApplicationList } from './pages/ApplicationList';
 import { Connect } from './pages/Connect';
 import { DeploymentDetail } from './pages/DeploymentDetail';
 import { Launcher } from './pages/Launcher';
@@ -49,6 +50,9 @@ function Shell() {
         </div>
         <div className="topbar-right">
           {isReal && route.page !== 'none' && <TokenBar onChange={onTokenChange} />}
+          {isReal && connection.state.level === 'ok' && route.page !== 'applications' && (
+            <a className="topbar-link" href={hrefFor(APPLICATIONS_PATH)}>{t('appsTitle')}</a>
+          )}
           {isReal ? (
             <a className="topbar-link" href={`${configToSearch({ mode: 'mock', scenario: 1 })}#`}>{t('backToDemo')}</a>
           ) : (
@@ -63,6 +67,7 @@ function Shell() {
       <main>
         {route.page === 'deployment' && <DeploymentDetail key={`${route.id}-${tokenVersion}`} id={route.id} source={source} />}
         {route.page === 'application' && <ApplicationDetail key={`${route.id}-${tokenVersion}`} id={route.id} source={source} />}
+        {route.page === 'applications' && <ApplicationList key={`apps-${tokenVersion}`} source={source} />}
         {route.page === 'none' && !isReal && <Launcher />}
         {route.page === 'none' && isReal && <Connect source={source} connection={connection.state} onTokenChange={onTokenChange} onRecheck={connection.recheck} />}
       </main>
