@@ -36,6 +36,22 @@ def _cmd_doctor(args) -> int:
     return EXIT_OK
 
 
+def _cmd_build(args) -> int:
+    from .process import SubprocessRunner
+    from .registry_build import build_and_push
+
+    result = build_and_push(app=Path(args.app), image_repo=args.image_repo, out_dir=Path(args.out_dir),
+                            run_id=args.run_id, platforms=tuple(args.platforms.split(",")),
+                            builder=args.builder, timeout=args.timeout, runner=SubprocessRunner())
+    if args.json:
+        _print_json(result)
+    else:
+        print(f"이미지: {result['image']['reference']}")
+        print(f"소스: {result['source']['commit']}")
+        print(f"빌드 기록: {Path(args.out_dir) / 'build_manifest.json'}")
+    return EXIT_OK
+
+
 def _cmd_demo(args) -> int:
     from .demo import run_demo
 
@@ -205,6 +221,17 @@ def build_parser() -> argparse.ArgumentParser:
     self_test.add_argument("--docker", action="store_true")
     self_test.add_argument("-v", "--verbose", action="store_true")
     self_test.set_defaults(handler=_cmd_self_test)
+
+    build = sub.add_parser("build", help="커밋된 앱을 레지스트리에 업로드하고 index digest 확인")
+    build.add_argument("--app", required=True, help="Dockerfile이 있는 Git 앱 폴더")
+    build.add_argument("--image-repo", required=True, help="태그 없는 registry/이미지 경로")
+    build.add_argument("--run-id", required=True)
+    build.add_argument("--out-dir", required=True, help="새 빌드 결과 폴더 (앱 폴더 밖)")
+    build.add_argument("--platforms", default="linux/amd64,linux/arm64")
+    build.add_argument("--builder", help="사용할 buildx builder 이름")
+    build.add_argument("--timeout", type=int, default=900, help="빌드·pull 제한 시간(초)")
+    build.add_argument("--json", action="store_true")
+    build.set_defaults(handler=_cmd_build)
     return parser
 
 
