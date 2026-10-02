@@ -103,4 +103,4 @@ parity 의 `result.json`(`parity/mocks/test_result.json` 형식)은 이 계약�
 | 날짜 | PR | 내용 |
 |---|---|---|
 | 2026-10-01 | contracts/publish-current | main 의 Plan, RollbackRequest, RollbackPlan, DecisionLog, SignResult, SignLog 를 그대로 공개 |
-| 2026-10-02 | TBD | TestResult 공개 및 런타임 의미 규칙 문서화 |
+| 2026-10-02 | #28 | TestResult 공개 및 런타임 의미 규칙 문서화 |
