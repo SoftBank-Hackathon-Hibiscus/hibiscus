@@ -1,34 +1,36 @@
-/* Hibiscus 데모 콘솔. 안개 낀 청회색 바탕 위의 유리 표면, 세이지 강조색 하나, 낮은 채도의 상태색.
-   유리는 상단 바, 큰 섹션 카드, 모달에만. 안쪽 행·표·배지는 평면. */
+/* Hibiscus 데모 콘솔. 사진 배경 위의 유리 표면. 유리는 상단 바·큰 섹션 카드·단계 카드·모달에만,
+   글자가 많은 안쪽 영역은 젖빛 층(.frost), 표·행·배지는 평면. 색은 세이지 강조색 하나와 낮은 채도의 상태색. */
 :root {
   --bg-base: #f4f7f6;
   --card: #f1f5f4;
-  --glass: rgba(255, 255, 255, 0.72);
-  --glass-strong: rgba(255, 255, 255, 0.88);
-  --glass-line: rgba(255, 255, 255, 0.78);
-  --glass-shadow: 0 10px 30px rgba(47, 62, 70, 0.1), 0 1px 2px rgba(47, 62, 70, 0.05);
+  --glass: rgba(255, 255, 255, 0.48);
+  --glass-strong: rgba(255, 255, 255, 0.6);
+  --frost: rgba(255, 255, 255, 0.72);
+  --glass-line: rgba(255, 255, 255, 0.75);
+  --glass-line-top: rgba(255, 255, 255, 0.95);
+  --glass-shadow: 0 18px 50px rgba(47, 62, 70, 0.1), 0 2px 6px rgba(47, 62, 70, 0.04);
   --line: rgba(47, 62, 70, 0.1);
   --line-strong: rgba(47, 62, 70, 0.22);
   --ink: #2f3e46;
-  --ink-2: #5c6b73;
-  --ink-3: #8a979e;
+  --ink-2: #5a6970;
+  --ink-3: #87949b;
   --accent: #5e8b7e;
   --accent-ink: #44736a;
   --accent-soft: rgba(94, 139, 126, 0.16);
-  --success: #3f6b5e;
-  --success-soft: rgba(94, 139, 126, 0.16);
+  --success: #3b6a5d;
+  --success-soft: rgba(94, 139, 126, 0.18);
   --warning: #8a6424;
-  --warning-soft: rgba(214, 183, 131, 0.3);
-  --danger: #9c4a58;
-  --danger-soft: rgba(232, 174, 183, 0.42);
+  --warning-soft: rgba(214, 183, 131, 0.32);
+  --danger: #9a4350;
+  --danger-soft: rgba(232, 174, 183, 0.46);
   --info: #3d6a9e;
   --info-soft: rgba(167, 199, 231, 0.42);
   --muted-soft: rgba(47, 62, 70, 0.07);
   --sans: 'Pretendard Variable', Pretendard, 'Noto Sans KR', 'Noto Sans JP', 'Apple SD Gothic Neo', 'Segoe UI', system-ui, sans-serif;
   --mono: 'JetBrains Mono', 'Cascadia Code', Consolas, 'SF Mono', Menlo, monospace;
-  --radius: 18px;
-  --radius-sm: 11px;
-  --blur: 14px;
+  --radius: 22px;
+  --radius-sm: 14px;
+  --blur: 22px;
 }
 
 * {
@@ -46,20 +48,27 @@ body {
   min-height: 100vh;
   background: var(--bg-base);
 }
-/* 배경 레이어 하나를 viewport 전체에 고정. 거의 흰 바탕 위에 아주 흐린 glow 세 개, 스크롤해도 끊기지 않는다. */
+/* 배경: 사진 한 장을 viewport 에 고정. 사진이 없거나 아직 안 왔으면 아래 그라데이션이 보인다. */
 body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  pointer-events: none;
+  background-image: url('/background.webp'), linear-gradient(180deg, #f6f8f7 0%, #eef3f2 100%);
+  background-size: cover, auto;
+  background-position: center center, center;
+  background-repeat: no-repeat;
+}
+/* 사진 위의 옅은 흰 막 */
+body::after {
   content: '';
   position: fixed;
   inset: 0;
   z-index: -1;
   pointer-events: none;
-  background:
-    radial-gradient(640px 640px at 8% 0%, rgba(167, 199, 231, 0.18), rgba(167, 199, 231, 0) 70%),
-    radial-gradient(720px 720px at 100% 100%, rgba(94, 139, 126, 0.14), rgba(94, 139, 126, 0) 70%),
-    radial-gradient(560px 560px at 55% 45%, rgba(167, 199, 231, 0.1), rgba(167, 199, 231, 0) 70%),
-    linear-gradient(180deg, #f6f8f7 0%, #f2f5f4 100%);
+  background: rgba(255, 255, 255, 0.14);
 }
-/* 한국어는 단어 중간에서 끊지 않는다. 일본어는 기본 줄바꿈. */
 html[lang='ko'] body {
   word-break: keep-all;
   overflow-wrap: anywhere;
@@ -142,25 +151,42 @@ code {
   }
 }
 
-/* ---- glass surface ---- */
-.glass,
+/* ---- 유리 표면 ---- */
 .topbar,
 .card,
 .modal {
   background: var(--glass);
   border: 1px solid var(--glass-line);
+  border-top-color: var(--glass-line-top);
   box-shadow: var(--glass-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.9);
-  -webkit-backdrop-filter: blur(var(--blur)) saturate(1.2);
-  backdrop-filter: blur(var(--blur)) saturate(1.2);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(160%);
+  backdrop-filter: blur(var(--blur)) saturate(160%);
 }
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .glass,
   .topbar,
   .card,
   .modal {
     background: var(--card);
-    border-color: rgba(255, 255, 255, 0.9);
   }
+}
+/* 상태색을 아주 옅게 섞은 유리 */
+.tint-danger {
+  background: linear-gradient(rgba(232, 174, 183, 0.22), rgba(232, 174, 183, 0.22)), var(--glass);
+}
+.tint-success {
+  background: linear-gradient(rgba(94, 139, 126, 0.14), rgba(94, 139, 126, 0.14)), var(--glass);
+}
+.tint-warning {
+  background: linear-gradient(rgba(214, 183, 131, 0.2), rgba(214, 183, 131, 0.2)), var(--glass);
+}
+.tint-info {
+  background: linear-gradient(rgba(167, 199, 231, 0.18), rgba(167, 199, 231, 0.18)), var(--glass);
+}
+/* 글자가 많은 안쪽: 젖빛 층. 유리가 아니라 평면 */
+.frost {
+  background: var(--frost);
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  border-radius: var(--radius-sm);
 }
 
 /* ---- frame ---- */
@@ -169,13 +195,11 @@ code {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 12px 32px;
-  border-left: 0;
-  border-right: 0;
-  border-top: 0;
-  border-radius: 0;
+  padding: 10px 22px;
+  border-radius: 999px;
   position: sticky;
-  top: 0;
+  top: 12px;
+  margin: 12px 24px 0;
   z-index: 5;
 }
 .topbar-left,
@@ -195,10 +219,10 @@ code {
   text-decoration: none;
 }
 .brand-mark {
-  width: 32px;
-  height: 32px;
-  border-radius: 10px;
-  background: var(--accent);
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: rgba(94, 139, 126, 0.9);
   color: #fff;
   display: inline-flex;
   align-items: center;
@@ -216,7 +240,7 @@ code {
   font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.08em;
-  padding: 4px 10px;
+  padding: 4px 11px;
   border-radius: 999px;
   background: var(--warning-soft);
   color: var(--warning);
@@ -254,14 +278,13 @@ code {
   background: var(--danger-soft);
   color: var(--danger);
 }
-/* 세그먼트 토글: 선택된 쪽이 더 밝고 불투명 */
 .lang-switch {
   display: inline-flex;
   padding: 3px;
   gap: 2px;
   border: 1px solid var(--glass-line);
   border-radius: 999px;
-  background: rgba(47, 62, 70, 0.08);
+  background: rgba(47, 62, 70, 0.07);
 }
 .lang-switch button {
   font: inherit;
@@ -279,12 +302,12 @@ code {
   cursor: default;
 }
 .lang-switch .lang-on {
-  background: rgba(255, 255, 255, 0.95);
+  background: rgba(255, 255, 255, 0.96);
   color: var(--ink);
   box-shadow: 0 1px 3px rgba(47, 62, 70, 0.15);
 }
 main {
-  padding: 40px 32px 80px;
+  padding: 34px 32px 80px;
 }
 .page {
   max-width: 1160px;
@@ -323,7 +346,7 @@ main {
   flex-wrap: wrap;
 }
 .page-sub {
-  margin-top: 6px;
+  margin-top: 8px;
   color: var(--ink-2);
   font-size: 16px;
   max-width: 72ch;
@@ -348,26 +371,45 @@ main {
   color: var(--ink-3);
   font-size: 13px;
 }
+/* 결론 한 문장: 옅게 틴트된 유리 띠 */
 .conclusion {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
-  font-size: 19px;
+  gap: 12px;
+  font-size: 18px;
   font-weight: 700;
   color: var(--ink);
+  padding: 10px 16px 10px 12px;
+  border-radius: 999px;
+  background: var(--glass-strong);
+  border: 1px solid var(--glass-line);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(160%);
+  backdrop-filter: blur(var(--blur)) saturate(160%);
 }
 .conclusion-dot {
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
   flex: none;
   background: var(--ink-3);
 }
+.conclusion-success {
+  background: linear-gradient(rgba(94, 139, 126, 0.16), rgba(94, 139, 126, 0.16)), var(--glass-strong);
+  color: var(--success);
+}
 .conclusion-success .conclusion-dot {
   background: var(--accent);
 }
+.conclusion-warning {
+  background: linear-gradient(rgba(214, 183, 131, 0.24), rgba(214, 183, 131, 0.24)), var(--glass-strong);
+  color: var(--warning);
+}
 .conclusion-warning .conclusion-dot {
   background: #c9a46b;
+}
+.conclusion-danger {
+  background: linear-gradient(rgba(232, 174, 183, 0.3), rgba(232, 174, 183, 0.3)), var(--glass-strong);
+  color: var(--danger);
 }
 .conclusion-danger .conclusion-dot {
   background: #d98a99;
@@ -421,20 +463,20 @@ main {
   color: var(--ink-2);
   background: var(--muted-soft);
 }
-/* 아이콘 타일: 반투명 유리 네모, 아이콘만 색 */
+/* 아이콘: 둥근 반투명 원 */
 .tile {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 12px;
+  border-radius: 50%;
   flex: none;
-  background: rgba(255, 255, 255, 0.6);
-  border: 1px solid var(--glass-line);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.62);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95), 0 2px 6px rgba(47, 62, 70, 0.06);
   color: var(--accent-ink);
 }
 .tile svg {
-  stroke-width: 1.75;
+  stroke-width: 1.6;
 }
 .tile-success {
   color: var(--success);
@@ -518,13 +560,21 @@ main {
   font-size: 16px;
   font-weight: 600;
 }
+.reasons {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 15.5px;
+}
 .notice {
   display: flex;
   gap: 12px;
   padding: 12px 14px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--frost);
 }
 .notice-icon {
   font-weight: 800;
@@ -539,19 +589,15 @@ main {
   font-size: 14px;
 }
 .notice-success {
-  background: var(--success-soft);
   color: var(--success);
 }
 .notice-warning {
-  background: var(--warning-soft);
   color: var(--warning);
 }
 .notice-danger {
-  background: var(--danger-soft);
   color: var(--danger);
 }
 .notice-info {
-  background: var(--info-soft);
   color: var(--info);
 }
 .notice-muted {
@@ -563,19 +609,21 @@ main {
   align-items: center;
   padding: 16px 20px;
   border-radius: var(--radius);
+  background: var(--glass-strong);
+  border: 1px solid var(--glass-line);
+  box-shadow: var(--glass-shadow);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(160%);
+  backdrop-filter: blur(var(--blur)) saturate(160%);
 }
 .banner-warning {
-  border-left: 5px solid #c9a46b;
+  background: linear-gradient(rgba(214, 183, 131, 0.22), rgba(214, 183, 131, 0.22)), var(--glass-strong);
 }
 .banner-info {
-  border-left: 5px solid #a7c7e7;
+  background: linear-gradient(rgba(167, 199, 231, 0.2), rgba(167, 199, 231, 0.2)), var(--glass-strong);
 }
 .banner-title {
   font-size: 18px;
   font-weight: 800;
-  display: flex;
-  align-items: center;
-  gap: 6px;
 }
 .banner-body {
   color: var(--ink-2);
@@ -600,16 +648,21 @@ main {
   flex-direction: column;
   gap: 18px;
 }
-/* 버튼: 주 버튼은 세이지 반투명, 보조는 흰 유리 */
+.stack-sm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+/* 버튼: 주 버튼은 세이지 반투명, 보조는 흰 유리, ghost 는 글자만 */
 .btn {
   font: inherit;
   padding: 8px 16px;
   border-radius: 999px;
   border: 1px solid var(--glass-line);
-  background: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.66);
   color: var(--ink);
   cursor: pointer;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 1px 2px rgba(47, 62, 70, 0.06);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95), 0 1px 3px rgba(47, 62, 70, 0.08);
   transition: background 0.15s, transform 0.15s;
 }
 .btn:hover {
@@ -625,12 +678,22 @@ main {
 }
 .btn-primary {
   background: rgba(94, 139, 126, 0.86);
-  border-color: rgba(255, 255, 255, 0.5);
+  border-color: rgba(255, 255, 255, 0.55);
   color: #fff;
   font-weight: 600;
 }
 .btn-primary:hover {
   background: rgba(94, 139, 126, 1);
+}
+.btn-ghost {
+  background: transparent;
+  box-shadow: none;
+  border-color: var(--line-strong);
+  color: var(--ink-2);
+}
+.btn-ghost:hover {
+  background: rgba(255, 255, 255, 0.6);
+  color: var(--ink);
 }
 .icon-btn {
   width: 34px;
@@ -649,26 +712,39 @@ main {
 }
 .link-btn {
   font: inherit;
-  font-size: 13.5px;
+  font-size: 13px;
   background: none;
   border: 0;
   padding: 0;
-  color: var(--accent-ink);
+  color: var(--ink-2);
   cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
 }
-.more-body,
+.link-btn:hover {
+  color: var(--ink);
+}
+.more {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+  width: 100%;
+}
+.more-body {
+  width: 100%;
+  padding: 14px 16px;
+}
 .raw-body {
-  margin-top: 14px;
-  padding-top: 14px;
-  border-top: 1px dashed var(--line-strong);
+  margin-top: 10px;
 }
 .input {
   font: inherit;
   padding: 7px 12px;
   border: 1px solid var(--line-strong);
-  border-radius: var(--radius-sm);
+  border-radius: 999px;
   min-width: 160px;
-  background: rgba(255, 255, 255, 0.75);
+  background: rgba(255, 255, 255, 0.78);
   color: var(--ink);
 }
 .input:focus {
@@ -710,6 +786,14 @@ main {
   padding: 5px 8px;
   font-size: 13.5px;
 }
+.table.frost {
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: hidden;
+}
+.table.frost td {
+  padding: 8px 12px;
+}
 .step-detail {
   display: flex;
   flex-wrap: wrap;
@@ -719,7 +803,7 @@ main {
 .prose {
   margin: 0;
   padding: 12px 14px;
-  background: rgba(255, 255, 255, 0.55);
+  background: rgba(255, 255, 255, 0.7);
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   font-family: var(--mono);
@@ -794,18 +878,19 @@ main {
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: rgba(47, 62, 70, 0.22);
-  -webkit-backdrop-filter: blur(4px);
-  backdrop-filter: blur(4px);
+  background: rgba(255, 255, 255, 0.18);
+  -webkit-backdrop-filter: blur(7px);
+  backdrop-filter: blur(7px);
 }
 .modal {
-  --blur: 20px;
+  --blur: 24px;
   width: min(760px, calc(100vw - 48px));
   max-height: min(78vh, 760px);
   display: flex;
   flex-direction: column;
   border-radius: var(--radius);
-  background: var(--glass-strong);
+  background: rgba(255, 255, 255, 0.56);
+  box-shadow: 0 30px 80px rgba(47, 62, 70, 0.18), 0 2px 6px rgba(47, 62, 70, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.95);
 }
 .modal-head {
   flex: none;
@@ -829,7 +914,7 @@ main {
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 20px 28px 30px;
+  padding: 18px 22px 24px;
   scrollbar-width: thin;
   scrollbar-color: rgba(47, 62, 70, 0.25) transparent;
 }
@@ -839,6 +924,10 @@ main {
 .modal-body::-webkit-scrollbar-thumb {
   background: rgba(47, 62, 70, 0.25);
   border-radius: 4px;
+}
+.explain-body {
+  padding: 18px 24px 20px;
+  background: rgba(255, 255, 255, 0.78);
 }
 .md {
   max-width: 720px;
@@ -873,6 +962,10 @@ main {
 .md strong {
   font-weight: 800;
 }
+.raw-body .md {
+  font-size: 13px;
+  color: var(--ink-2);
+}
 
 /* ---- launcher ---- */
 .launcher {
@@ -891,7 +984,7 @@ main {
   text-decoration: none;
   color: var(--ink);
   min-height: 180px;
-  transition: transform 0.18s, box-shadow 0.18s, background 0.18s;
+  transition: transform 0.18s, background 0.18s;
 }
 .launch-card:hover,
 .launch-card:focus-visible {
@@ -946,9 +1039,8 @@ main {
   transform: translateY(-2px);
 }
 .step-selected {
-  background: var(--glass-strong);
-  border-color: var(--accent);
-  box-shadow: var(--glass-shadow), 0 0 0 3px var(--accent-soft);
+  border-color: rgba(255, 255, 255, 0.95);
+  box-shadow: var(--glass-shadow), 0 0 0 3px rgba(94, 139, 126, 0.25);
 }
 .step-text {
   display: flex;
@@ -961,12 +1053,13 @@ main {
   font-weight: 700;
   font-size: 16px;
 }
-.step-meta {
-  font-size: 13.5px;
-  color: var(--ink-2);
+.step-result {
+  font-size: 14px;
+  font-weight: 600;
 }
-.step-card .pill {
-  display: none;
+.step-duration {
+  font-size: 12.5px;
+  color: var(--ink-3);
 }
 .detail-col {
   display: flex;
@@ -987,27 +1080,29 @@ main {
 .requires {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  padding: 4px 0;
 }
 .require {
-  border: 1px solid var(--line);
-  border-left: 4px solid #c9a46b;
-  border-radius: var(--radius-sm);
   padding: 12px 16px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  background: rgba(255, 255, 255, 0.5);
+  gap: 4px;
+  border-top: 1px solid var(--line);
 }
-.require-hint {
+.require:first-child {
+  border-top: 0;
+}
+.require-title {
   font-size: 17px;
-  font-weight: 600;
+  font-weight: 700;
 }
-.require-meta {
-  display: flex;
-  gap: 14px;
-  flex-wrap: wrap;
-  font-size: 13px;
+.require-why {
+  color: var(--ink-2);
+}
+.require-unlock {
+  font-size: 13.5px;
+  color: var(--accent-ink);
+  font-weight: 600;
 }
 .rules {
   list-style: none;
@@ -1024,11 +1119,7 @@ main {
   align-items: baseline;
 }
 .approval {
-  border: 1px solid var(--line);
-  border-left: 4px solid #c9a46b;
-  border-radius: var(--radius-sm);
   padding: 14px 16px;
-  background: rgba(255, 255, 255, 0.5);
 }
 .approval-head {
   display: flex;
@@ -1043,28 +1134,21 @@ main {
 .proof-list {
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: 6px 16px;
   display: flex;
   flex-direction: column;
 }
 .proof-row {
   border-top: 1px solid var(--line);
+  padding: 10px 0;
 }
 .proof-row:first-child {
   border-top: 0;
 }
-.proof-btn {
-  width: 100%;
+.proof-line {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 12px;
-  padding: 11px 0;
-  background: none;
-  border: 0;
-  font: inherit;
-  color: inherit;
-  cursor: pointer;
-  text-align: left;
 }
 .proof-mark {
   width: 24px;
@@ -1078,6 +1162,7 @@ main {
   flex: none;
   background: var(--muted-soft);
   color: var(--ink-3);
+  margin-top: 1px;
 }
 .proof-mark-success {
   background: var(--success-soft);
@@ -1087,21 +1172,29 @@ main {
   background: var(--danger-soft);
   color: var(--danger);
 }
-.proof-title {
+.proof-text {
   flex: 1;
-  font-weight: 600;
-}
-.proof-body {
-  padding: 0 0 12px 36px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 1px;
+  min-width: 0;
+}
+.proof-title {
+  font-weight: 700;
+}
+.proof-detail {
+  color: var(--ink-2);
+  font-size: 14px;
+}
+.proof-more {
+  margin: 4px 0 0 36px;
 }
 .proof-legs {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 16px;
   font-size: 13px;
+  margin: 6px 0 0 36px;
 }
 .conditions {
   display: grid;
@@ -1109,10 +1202,7 @@ main {
   gap: 14px;
 }
 .condition {
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
   padding: 12px 14px;
-  background: rgba(255, 255, 255, 0.5);
 }
 .condition-head {
   display: flex;
@@ -1180,25 +1270,18 @@ main {
   overflow: hidden;
   transition: box-shadow 0.2s, border-color 0.2s;
 }
-.target-active {
-  background: var(--glass-strong);
-}
 .target-active-success {
-  border-color: var(--accent);
-  box-shadow: var(--glass-shadow), 0 0 0 4px var(--accent-soft);
+  box-shadow: var(--glass-shadow), 0 0 0 3px rgba(94, 139, 126, 0.3);
 }
 .target-active-danger {
-  border-color: #d98a99;
-  box-shadow: var(--glass-shadow), 0 0 0 4px var(--danger-soft);
+  box-shadow: var(--glass-shadow), 0 0 0 3px rgba(232, 174, 183, 0.6);
 }
 .target-active-muted {
-  border-color: var(--ink-3);
+  box-shadow: var(--glass-shadow), 0 0 0 3px rgba(47, 62, 70, 0.15);
 }
 .target-missing {
   border-style: dashed;
-  border-color: var(--line-strong);
   box-shadow: none;
-  background: rgba(255, 255, 255, 0.3);
 }
 .traffic-strip {
   margin: 0 -24px;
@@ -1262,7 +1345,7 @@ main {
 .history {
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: 4px 16px;
   display: flex;
   flex-direction: column;
 }
@@ -1331,16 +1414,15 @@ main {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  border-left: 5px solid var(--line-strong);
 }
 .check-ok {
-  border-left-color: var(--accent);
+  background: linear-gradient(rgba(94, 139, 126, 0.12), rgba(94, 139, 126, 0.12)), var(--glass);
 }
 .check-warn {
-  border-left-color: #c9a46b;
+  background: linear-gradient(rgba(214, 183, 131, 0.18), rgba(214, 183, 131, 0.18)), var(--glass);
 }
 .check-fail {
-  border-left-color: #d98a99;
+  background: linear-gradient(rgba(232, 174, 183, 0.2), rgba(232, 174, 183, 0.2)), var(--glass);
 }
 .check-head {
   display: flex;
@@ -1359,19 +1441,16 @@ main {
   align-items: center;
   justify-content: center;
   font-weight: 800;
-  background: var(--muted-soft);
+  background: rgba(255, 255, 255, 0.7);
   color: var(--ink-3);
 }
 .check-ok .check-mark {
-  background: var(--success-soft);
   color: var(--success);
 }
 .check-warn .check-mark {
-  background: var(--warning-soft);
   color: var(--warning);
 }
 .check-fail .check-mark {
-  background: var(--danger-soft);
   color: var(--danger);
 }
 .check-state {
@@ -1399,11 +1478,11 @@ main {
   gap: 14px;
   align-items: baseline;
   padding: 10px 14px;
-  border: 1px solid var(--line);
+  border: 1px solid rgba(255, 255, 255, 0.85);
   border-radius: var(--radius-sm);
   text-decoration: none;
   color: var(--ink);
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--frost);
 }
 .app-link:hover {
   border-color: var(--accent);
@@ -1443,7 +1522,8 @@ main {
     padding: 16px 16px 48px;
   }
   .topbar {
-    padding: 10px 16px;
+    margin: 8px 12px 0;
+    padding: 8px 14px;
   }
   .stats,
   .kv-2,
