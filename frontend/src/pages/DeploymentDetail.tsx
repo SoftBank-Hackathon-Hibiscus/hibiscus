@@ -4,7 +4,9 @@ import type { DataSource } from '../api/client';
 import type { Approval, DeployResult, PiiReport, Plan, PlanRequire, SignLog, TestResult } from '../api/contracts';
 import type { ApplicationView, Decision, DeploymentStatus, DeploymentView, StageExecution, StageName } from '../api/types';
 import { ErrorNotice } from '../components/ErrorNotice';
+import { Modal } from '../components/Modal';
 import { Collapsible, DemoBadge, Empty, Hash, IconTile, JsonBlock, Kv, MoreToggle, Notice, PageTitle, Pill, RawToggle, type Tone } from '../components/ui';
+import { Markdown } from '../lib/markdown';
 import { usePolling } from '../hooks/usePolling';
 import { STAGE_ORDER, artifactsOf, findArtifact, latestStages, parseJsonArtifact } from '../lib/artifacts';
 import { deriveDeployDisplay } from '../lib/deployState';
@@ -96,7 +98,7 @@ export function DeploymentDetail({ id, source }: { id: string; source: DataSourc
           <section className="card detail-card">
             <h2 className="card-title">{t(STEP_DETAIL_KEY[current])}</h2>
             {current === 'test' && <TestDetail view={view} summary={summary} />}
-            {current === 'policy' && <PolicyDetail view={view} summary={summary} source={source} onChanged={poll.refresh} />}
+            {current === 'policy' && <PolicyDetail view={view} summary={summary} source={source} onChanged={poll.refresh} appName={app?.application.name ?? d.applicationId} />}
             {current === 'sign' && <SignDetail view={view} summary={summary} />}
             {current === 'deploy' && <DeployDetail view={view} summary={summary} />}
           </section>
@@ -196,15 +198,18 @@ function ProofRow({ link }: { link: ProofLink }) {
 
 // ---------------------------------------------------------------- policy
 
-function PolicyDetail({ view, summary, source, onChanged }: { view: DeploymentView; summary: DeploymentSummary; source: DataSource; onChanged: () => void }) {
-  const { t, lang } = useLang();
+function PolicyDetail({ view, summary, source, onChanged, appName }: { view: DeploymentView; summary: DeploymentSummary; source: DataSource; onChanged: () => void; appName: string }) {
+  const { t, lang, setLang } = useLang();
   const d = view.deployment;
   const skeleton = d.executionMode === 'skeleton';
   const latest = latestStages(view.stages);
   const stage = latest.policy;
   const plan = summary.parsed.plan;
   const pii = parseJsonArtifact<PiiReport>(findArtifact(view, 'pii', stage));
-  const explain = findArtifact(view, lang === 'ja' ? 'explain.ja' : 'explain.ko', stage) ?? findArtifact(view, 'explain.ko', stage);
+  const explainKo = findArtifact(view, 'explain.ko', stage);
+  const explainJa = findArtifact(view, 'explain.ja', stage);
+  const explain = (lang === 'ja' ? explainJa : explainKo) ?? explainKo ?? explainJa;
+  const [explainOpen, setExplainOpen] = useState(false);
   const planHash = view.policyResult?.planHash ?? plan?.plan_hash ?? null;
   const decision = summary.decision;
   const needsApproval = d.decision === 'needs_approval' || d.status === 'awaiting_approval';
@@ -243,16 +248,39 @@ function PolicyDetail({ view, summary, source, onChanged }: { view: DeploymentVi
         decision === 'allow' && <p className="muted">{t('nothingToFix')}</p>
       )}
 
+      <div className="row">
+        {!skeleton && explain && (
+          <button type="button" className="btn btn-primary btn-small" onClick={() => setExplainOpen(true)}>
+            {t('explainOpen')}
+          </button>
+        )}
+      </div>
+      {explainOpen && explain && (
+        <Modal
+          title={
+            <>
+              {appName} v{d.version} <span className="muted">· {t('policyDecision')}</span>
+            </>
+          }
+          onClose={() => setExplainOpen(false)}
+          toolbar={
+            (explainKo || explainJa) && (
+              <div className="lang-switch" role="group" aria-label="language">
+                <button type="button" className={lang === 'ko' ? 'lang-on' : ''} onClick={() => setLang('ko')} disabled={!explainKo}>KO</button>
+                <button type="button" className={lang === 'ja' ? 'lang-on' : ''} onClick={() => setLang('ja')} disabled={!explainJa}>JA</button>
+              </div>
+            )
+          }
+        >
+          <div lang={lang}>
+            <Markdown source={explain.content} />
+          </div>
+        </Modal>
+      )}
       <MoreToggle>
         <div className="stack">
           {skeleton && <p className="muted">{t('stubPolicy')}</p>}
           {!skeleton && plan && <RulesView plan={plan} />}
-          {!skeleton && explain && (
-            <div>
-              <div className="field-label">{t('explain')}</div>
-              <pre className="prose" lang={lang}>{explain.content}</pre>
-            </div>
-          )}
           {!skeleton && pii?.ok && (
             <div>
               <div className="field-label">
