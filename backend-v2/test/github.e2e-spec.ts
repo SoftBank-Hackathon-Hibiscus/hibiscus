@@ -280,7 +280,7 @@ describe('GitHub management and Webhook (e2e)', () => {
     expect(row).toMatchObject({
       requester: userId,
       sourceRevision: payload.after,
-      sourceRevisionVerified: true,
+      sourceRevisionVerified: false,
       trigger: 'webhook',
     });
   });
