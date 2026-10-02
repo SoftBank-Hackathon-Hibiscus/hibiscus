@@ -21,6 +21,7 @@ export type JobAction = "candidate" | "activate" | "rollback" | "discard";
 export interface AgentHealthCheck {
   enabled: boolean;
   path: string;
+  version_path?: string;
   method: "GET" | "HEAD";
   interval_seconds: number;
   timeout_seconds: number;
@@ -67,7 +68,7 @@ export interface HealthCheckResult {
   pass: boolean;
   url: string;
   checks: Array<{
-    name: "health";
+    name: "health" | "version";
     pass: boolean;
     ms: number;
     status?: number;
