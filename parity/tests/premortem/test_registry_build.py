@@ -103,7 +103,7 @@ class RegistryBuildTest(unittest.TestCase):
             self.build()
         self.assertEqual(caught.exception.code, code)
         self.assertFalse((self.out / "build_manifest.json").exists())
-        self.assertEqual(json.loads((self.out / "build_error.json").read_text())["error_code"], code)
+        self.assertEqual(json.loads((self.out / "build_error.json").read_text(encoding="utf-8"))["error_code"], code)
 
     def test_committed_source_to_index_to_local_config(self):
         (self.app / "ignored.txt").write_text("must not enter the build", encoding="utf-8")
@@ -127,7 +127,7 @@ class RegistryBuildTest(unittest.TestCase):
             if args[1:4] == ["buildx", "imagetools", "inspect"] or args[1] == "pull":
                 self.assertIn("@sha256:", args[-1])
                 self.assertNotIn(":build-", args[-1])
-        self.assertEqual(json.loads((self.out / "build_manifest.json").read_text()), result)
+        self.assertEqual(json.loads((self.out / "build_manifest.json").read_text(encoding="utf-8")), result)
 
     def test_attestation_descriptor_is_not_a_runtime_platform(self):
         self.runner.set_index(self.runner.descriptors + [{"digest": "sha256:" + "b" * 64,
