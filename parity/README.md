@@ -3,11 +3,12 @@
 > 모든 명령은 이 `parity/` 폴더에서 실행합니다. 검증 대상 방명록 앱은 레포의 `sample-app/`에 있습니다.
 
 1. 실제 사용 흐름을 **기록 프록시**로 녹화한다. 요청·응답 한 쌍씩 JSONL 파일로 남기며, 비밀값은 가려서 저장한다.
-2. 컨테이너를 새로 만들어 같은 요청을 **재생**한다. 이때 "요청 10번 뒤 `docker restart`" 같은 **조건**을 끼워 넣고, 응답이 기록과 같은지 비교한다.
+2. 컨테이너를 새로 만들어 같은 요청을 **재생**한다. `none`(조건 없음), `restart`(재시작), `replace`(컨테이너 교체) 조건에서 응답이 기록과 같은지 비교한다.
 3. 결과를 JSON 한 파일로 낸다: 조건별 일치 수, 불일치 목록, 그리고 원인 후보가 되는 **사실**(컨테이너 안의 sqlite 파일, 업로드 폴더 등).
 
-환경 실행기 연결, 컨테이너 교체 시험, 정책 담당자에게 원본 결과를 전달하는 방법은
-[INTEGRATION.md](INTEGRATION.md)에 있습니다. 기존 `test`/`verify` 명령과 결과 JSON 형식은 그대로입니다.
+회의에서 정한 기본 연결, 오류 처리, 교체 시험은 [MEETING.md](MEETING.md)에 있습니다.
+이전 어댑터 실험 및 원본 인계 파일 제안은 [INTEGRATION.md](INTEGRATION.md)에 보존합니다.
+기본 결과 JSON의 최상위 키와 타입은 유지하며, 실행 상태·해시는 별도 진단 파일에 저장합니다.
 커밋된 앱을 레지스트리에 빌드·업로드하고 index digest를 기록하는 방법은
 [premortem의 레지스트리 빌드](premortem/README.md#레지스트리-빌드)에 있습니다.
 
@@ -18,10 +19,20 @@
 필요한 것: **Python 3.9 이상**, **Docker**(데몬 실행 중. `verify`만 쓸 때는 필요 없음). parity 기록·재생은 파이썬 외부 패키지를 쓰지 않습니다. `premortem`의 AI 수정 기능은 AI 출력 형식 검사에 jsonschema가 필요하므로 `pip install -r requirements.txt`로 설치합니다(없으면 AI 출력을 거부합니다).
 
 ```bash
-# 데모 한 번에 실행 (빌드 → 실행 → 기록 → 노이즈 탐지 → test → 요약)
+# 기존 2조건 데모 (빌드 → 실행 → 기록 → 노이즈 탐지 → none/restart → 요약)
 bash scripts/demo.sh                                            # macOS / Linux / Git Bash
 powershell -ExecutionPolicy Bypass -File scripts\demo.ps1       # Windows
 ```
+
+회의에서 정한 3조건 연결과 반복 실행을 확인하려면 별도 스크립트를 사용합니다.
+
+```text
+python scripts/demo_meeting.py
+```
+
+이 스크립트의 기존 실측은 두 회차 모두 `none: 20/20, restart: 14/20, replace: 13/20`입니다.
+`demo.sh`·`demo.ps1`의 2조건 결과와 구분합니다. 실행 범위와 원본은 [MEETING.md](MEETING.md)에 있습니다.
+기존 두 스크립트는 `none,restart`를 명시하는 개별 데모이며 **Policy 제출용 결과가 아닙니다**.
 
 > ⚠️ 데모와 `noise`/`test` 명령은 `--container`로 지정한 컨테이너를 **지우고 다시 만듭니다**(`docker rm -f` → `docker run`). 운영 중인 컨테이너를 지정하면 안 됩니다.
 
@@ -38,23 +49,31 @@ python -m parity record --target http://localhost:8080 --out records/session.jso
 # 2) 노이즈 탐지: 초기 상태에서 2번 재생해 "재생할 때마다" 달라지는 필드를 찾는다 → records/session.noise.json
 python -m parity noise --record records/session.jsonl --target http://localhost:8080 --container guestbook
 
-# 3) test: 조건별 재생 → result.json
+# 3) test: 3조건 재생 → result.json + result.diagnostics.json
 python -m parity test --record records/session.jsonl --target http://localhost:8080 \
-  --container guestbook --conditions none,restart --out result.json
+  --container guestbook --conditions none,restart,replace --restart-after 10 --out result.json
 
-# 결과 요약: "none: 20/20, restart: 14/20, 불일치 6건" + 불일치 목록
+# 이 샘플의 기대 요약: "none: 20/20, restart: 14/20, replace: 13/20, 불일치 13건"
 python -m parity summary result.json
 ```
 
-재시작 지점 고르기 (`test`의 옵션, 요청 번호는 1부터):
+`test`에서 `--conditions`를 생략하면 **`none,restart,replace` 세 조건을 모두 실행**합니다.
+주영님이 호출하는 파이프라인에서도 세 조건을 명시하기로 했습니다. 로컬 개별 검사에서는
+`--conditions none` 같은 부분 선택이 가능하지만, **Policy에 제출할 결과는 세 조건 모두 필요**합니다.
+회의 데모는 계속 세 조건을 명시하며, 기존 실측은 이번 기본값 변경 후 재실행 결과가 아닙니다.
+
+재시작·교체 지점 고르기 (`test`의 옵션, 요청 번호는 1부터이며 두 조건에 같은 옵션 적용):
 
 | 옵션 | 동작 |
 |---|---|
-| (없음) | 가운데에서 한 번 재시작 (요청이 20개면 10번 뒤) |
-| `--restart-after 3,7` | 3번, 7번 요청 뒤에 재시작 |
-| `--restart-every` | 모든 요청 사이에 재시작 (1~19번 뒤) |
+| (없음) | 가운데에서 한 번 조건 적용 (요청이 20개면 10번 뒤) |
+| `--restart-after 3,7` | 3번, 7번 요청 뒤에 조건 적용 |
+| `--restart-every` | 모든 요청 사이에 조건 적용 (20개 요청이면 1~19번 뒤) |
 
-재시작한 뒤에는 `/healthz`가 200을 돌려줄 때까지 최대 30초 기다립니다(`--health-path`, `--health-timeout`으로 바꿀 수 있음). 30초 안에 살아나지 않으면 그 조건의 재생을 멈추고 `replay` 항목에 `error`를 남깁니다.
+`restart`는 기존 컨테이너를 재시작하고, `replace`는 같은 이미지·이름·고정 포트로 컨테이너를 새로 만듭니다.
+그 뒤 `/healthz`가 200을 돌려줄 때까지 최대 30초 기다립니다(`--health-path`, `--health-timeout`으로 변경).
+준비나 재생이 중단되면 `passed=false`와 `replay[].error`를 남기고 종료 코드 2로 끝납니다.
+마지막 요청 뒤나 기록 범위 밖의 장애 지점, 장애를 적용할 수 없는 1개 요청 기록은 `test`에서 거부합니다.
 
 ### 배포 후 확인: `verify` (Docker 조작 없음, http/https)
 
@@ -80,7 +99,13 @@ python -m parity verify --record records/session.jsonl --target https://guestboo
 ## 출력 JSON 필드 (`test` → result.json, `verify` → verify.json)
 
 형식의 기준은 [`mocks/test_result.json`](mocks/test_result.json)입니다. 키 순서와 타입이 같다는 것을 `tests/test_report.py`와 `tests/test_https_verify.py`가 검사합니다.
-데모를 실제로 돌린 결과는 [`examples/demo_result.json`](examples/demo_result.json)에 있습니다 (다른 파트 연동 확인용).
+기존 2조건 데모 결과는 [`examples/demo_result.json`](examples/demo_result.json), 회의 3조건 실측은
+[`examples/meeting_result.json`](examples/meeting_result.json)과 [진단 파일](examples/meeting_result.diagnostics.json)에 있습니다.
+이 파일을 공유한 것과 정책·승인·서명까지 연결해 실행한 것은 구분합니다.
+류진님의 [PR #12 보고](https://github.com/SoftBank-Hackathon-Hibiscus/hibiscus/pull/12)에서는
+이 원본 샘플의 정규화와 정책 입력 두 경로를 확인했고, `block` 및 `fix_restart_failure`, `managed_db`,
+`object_storage`를 받았다고 합니다. 이는 팀원이 공유한 검증 보고이며, 여기서 PR 소스를 직접 검토하거나
+파이프라인 전체를 실행한 결과는 아닙니다. 세부 판정과 남은 연결은 [MEETING.md](MEETING.md)에 구분했습니다.
 
 | 필드 | 타입 | 뜻 |
 |---|---|---|
@@ -94,9 +119,9 @@ python -m parity verify --record records/session.jsonl --target https://guestboo
 
 ### commit 값의 의미
 
-- `test`: 명령을 실행한 폴더 아래 작업 트리가 **HEAD와 정확히 같을 때만**(수정·스테이징·미추적 파일이 하나도 없을 때) `git rev-parse --short HEAD` 값을 씁니다. 하나라도 있으면 `"unknown"`이며, 이유는 실행 로그에 `[test] commit=unknown: 미추적 파일 N개 …`처럼 남습니다. git 저장소가 아니어도 `"unknown"`입니다.
+- `test`: 명령을 실행한 폴더 아래 작업 트리가 **HEAD와 정확히 같을 때만**(수정·스테이징·미추적 파일이 하나도 없을 때) `git rev-parse --short HEAD` 값을 씁니다. 하나라도 있거나 git 저장소가 아니면 `"unknown"`입니다. 현재 실행 경로는 이 값만 결과에 담으며, `unknown`의 상세 이유를 로그로 출력하지 않습니다.
 - `verify`: 항상 `"unknown"`입니다. 원격 대상이 어떤 코드로 배포됐는지 이 도구가 확인할 방법이 없기 때문입니다.
-- **한계:** 깨끗한 커밋이 기록돼도, 그것은 "실행 시점의 로컬 코드가 그 커밋과 같았다"는 뜻일 뿐입니다. **검사한 이미지가 그 커밋으로 빌드됐다는 증명은 아닙니다.** 이미지를 먼저 빌드하고 코드를 바꾼 뒤 커밋했다면 둘은 다릅니다. 이미지와 코드를 묶으려면 빌드할 때 이미지에 리비전 라벨을 넣고 그 값을 읽는 방식이 필요합니다(아직 구현하지 않음).
+- **한계:** 깨끗한 커밋이 기록돼도, 그것은 "실행 시점의 로컬 도구 코드가 그 커밋과 같았다"는 뜻일 뿐입니다. **검사한 이미지가 그 커밋으로 빌드됐다는 증명은 아닙니다.** 팀 공통 식별자로는 파이프라인의 `run_id`, 앱 소스 Git SHA, 레지스트리 digest를 사용하기로 했습니다. 주영님이 빌드·최초 실행·digest 기록을 맡으며, 실제 값을 전달하는 연결은 아직 확인이 필요합니다. 진단 파일의 `registry_digest`·`source_revision`은 현재 `null`입니다.
 
 ### `facts[]` 항목
 
@@ -113,7 +138,7 @@ python -m parity verify --record records/session.jsonl --target https://guestboo
 
 | 필드 | 뜻 |
 |---|---|
-| `condition` | 어느 조건에서 어긋났는지 (`none`/`restart`) |
+| `condition` | 어느 조건에서 어긋났는지 (`none`/`restart`/`replace`) |
 | `index` | 기록 파일의 요청 번호 (1부터) |
 | `request` | `"GET /posts"` 형태 (쿼리의 비밀값은 가려짐) |
 | `expected` / `actual` | 기록 당시 응답 / 재생 응답. `"상태코드 본문"` 한 줄이며, 200자가 넘으면 `…`로 자름. JSON 본문의 비밀 필드는 가려서 씀. 연결 실패면 `0 <connection error: …>` |
@@ -194,28 +219,32 @@ python -m parity verify --record records/session.jsonl --target https://guestboo
 
 `../sample-app/app.py`에는 운영 환경에서 흔한 결함 3개를 **일부러** 넣었습니다. `TLS_CERT`/`TLS_KEY` 환경변수를 주면 HTTPS로 뜹니다(`verify` 테스트용).
 
-| 결함 | `restart` 조건에서 | 데모 결과 |
-|---|---|---|
-| 세션을 프로세스 메모리에 저장 | 로그인이 풀린다 → `/me` 401 | 불일치, `related_fact: null` |
-| 시작할 때마다 `DROP TABLE` | 글 목록이 비워진다 → `/posts` | 불일치, `related_fact: /app/data/data.db` |
-| 업로드를 컨테이너 내부에 저장 | **드러나지 않음** (restart는 파일을 지우지 않음) | 일치, `facts`에만 `local_upload`로 보고됨 |
+| 결함 | `restart` | `replace` | 관련 근거 |
+|---|---|---|---|
+| 세션을 프로세스 메모리에 저장 | 로그인이 풀림 → `/me` 401 | 동일하게 로그인 풀림 | `related_fact: null` |
+| 시작할 때마다 `DROP TABLE` | 글 목록이 비워짐 → `/posts` | 동일하게 글 목록 비워짐 | `/app/data/data.db` |
+| 업로드를 컨테이너 내부에 저장 | 파일 유지, 응답 일치 | 16번 `GET /uploads`에서 `cat.png` 유실 검출 | `local_upload` 사실과 원본 불일치 |
 
-실측 (가운데 한 번 재시작): `none: 20/20, restart: 14/20, 불일치 6건`
-(`--restart-after 3,7` → 14/20, `--restart-every` → 10/20)
+기존 2조건 데모 실측: `none: 20/20, restart: 14/20, 불일치 6건`.
+`--restart-after 3,7` → 14/20, `--restart-every` → 10/20은 1차 구현 당시 Docker 실측이며 이후 수정 전체에 대한 재실행 결과는 아닙니다.
+
+회의 데모는 10번 요청 뒤 조건을 적용했고, 두 회차 모두 `none: 20/20, restart: 14/20, replace: 13/20`을 확인했습니다.
+불일치 13건은 restart 6건 + replace 7건입니다. 결함을 의도대로 검출했으므로 앱 판정은 `passed=false`입니다.
+수정 앱의 통과나 AI 수정·정책·서명·Cloud Run 연결을 검증한 결과는 아닙니다.
 
 ---
 
 ## 알려진 한계
 
 - **기록한 요청 범위까지만 검증합니다.** 기록에 없는 경로나 입력, 다른 사용자 흐름은 검사되지 않습니다.
-- **조건은 현재 재시작(`docker restart`)만 지원합니다.** `docker restart`는 컨테이너의 파일을 지우지 않으므로, 업로드 파일처럼 "컨테이너 안에 저장된 파일" 문제는 재생 결과로는 드러나지 않고 `facts`로만 보고됩니다.
+- **조건은 `none`, `restart`, `replace`를 지원합니다.** 재시작만으로 드러나지 않던 업로드 유실은 `replace`로 검사합니다. 다중 인스턴스 분산이나 클라우드의 유휴 CPU 제한은 현재 조건에 포함되지 않습니다.
 - **`commit`은 이미지의 출처를 증명하지 않습니다.** 위 "commit 값의 의미" 참고. 미추적·수정 파일이 있으면 `"unknown"`, `verify`는 항상 `"unknown"`입니다.
 - **`verify`는 대상의 상태를 초기화하지 않습니다.** 이미 데이터가 있는 환경에서는 상태에 의존하는 응답(`GET /posts` 등)이 기록과 달라 불일치로 나옵니다. `facts`도 수집하지 않습니다.
 - **비밀값은 이름 규칙으로만 가립니다.** JSON·form이 아닌 본문(HTML, 바이너리)이나, 비밀스럽지 않은 이름의 필드에 담긴 비밀값은 가리지 못합니다. 요청 본문·쿼리의 비밀값(예: 로그인 비밀번호)을 가리면 재생 때 원래와 다른 요청이 가므로 해당 요청은 불일치가 날 수 있습니다(경고 출력).
-- **노이즈 판정은 보수적입니다.** 재생끼리 같은 값이 기록과만 다르면 실제 차이로 봅니다. 그래서 기록 환경과 재생 환경이 다르면(호스트명·버전 문자열 등) 불일치가 납니다. 매번 달라지는 HTML 본문(CSRF 토큰 등)은 자동으로 제외되지 않습니다. 필요하면 사람이 `rules`에 `"body"`를 넣을 수 있고, 그러면 그 요청은 상태코드만 검증됩니다(로드할 때 경고).
+- **노이즈 판정은 보수적입니다.** 재생끼리 같은 값이 기록과만 다르면 실제 차이로 봅니다. 그래서 기록 환경과 재생 환경이 다르면(호스트명·버전 문자열 등) 불일치가 납니다. 매번 달라지는 HTML 본문(CSRF 토큰 등)은 자동으로 제외되지 않습니다. `test`는 `body`·`*`처럼 본문 전체를 제외하는 규칙을 거부합니다. `verify`의 기존 로더는 `body` 규칙에 경고만 하므로, 검출기가 만든 같은 규칙 파일을 사용하고 본문 전체를 수동으로 제외하지 않습니다.
 - `related_fact`는 경로 이름 규칙으로 붙이는 힌트입니다. 규칙은 guestbook 경로에 맞춰져 있으므로 다른 앱에 쓰려면 `RELATED_RULES`를 고쳐야 합니다.
 - `facts`는 `docker diff`에 보이는 파일만 찾습니다. 볼륨·tmpfs 안의 파일, 프로세스 메모리 상태(세션, 캐시)는 보이지 않습니다.
-- 컨테이너를 다시 만들 때는 이미지, 이름, `-p`, `-e`, `-v`, `--tmpfs`, `--network`, CMD만 복원합니다. `--mount`, `--entrypoint`, 리소스 제한 등은 빠지고, 네임드 볼륨은 내용이 남아 있어 초기 상태가 아닐 수 있습니다.
+- 재생성은 샘플 앱과 기본 bridge 실행기 범위입니다. 실제 이미지 ID·이름·고정 TCP 포트, 환경변수, 명시적 `-v`·`--tmpfs`, 라벨, 기본 보안·리소스 제한, 사용자·작업 폴더·entrypoint·CMD를 지원 범위 안에서 유지합니다. 자동 포트, `--mount`, 익명 볼륨, 사용자 네트워크 등 지원하지 않는 설정은 삭제 전에 거부합니다. 외부 볼륨의 데이터는 초기화하지 않습니다. 자세한 범위는 [MEETING.md](MEETING.md)를 참고합니다.
 - 요청은 한 번에 하나씩 순서대로 재생합니다. 동시 요청 때문에 생기는 문제는 재현하지 않습니다. `Transfer-Encoding: chunked` 요청 본문은 기록하지 못합니다.
 
 ---
@@ -232,11 +261,18 @@ parity/
   compare.py          2단계  응답 비교 (필드 단위, 노이즈로도 무시 못 하는 차이)
   noise.py            2단계  노이즈 판정 (후보 → 적용 규칙)
   facts.py                   컨테이너 상태 사실 수집 (docker diff)
-  conditions.py       3단계  조건: none, restart (재생 훅으로 연결)
+  conditions.py       3단계  조건: none, restart, replace (재생 훅으로 연결)
+  execution.py        3단계  test 실행 경계, 기준·이미지 유지 확인, 실패 결과·진단 저장
   report.py           3단계  결과 JSON 생성, related_fact 규칙, commit 판정, 요약
-  docker_ops.py              docker CLI 호출, /healthz 대기
+  docker_ops.py              고정 설정 재생성, 실제 이미지 ID 확인, docker CLI 호출, /healthz 대기
+  premortem_adapter.py       별도 환경 실행기 연결용 어댑터 (기본 test 경로와 구분)
+  handoff.py                 원본 결과와 제공받은 식별정보 인계 (제안 형식)
 mocks/test_result.json       결과 JSON 형식 기준
 examples/demo_result.json    데모 실제 결과 (sample-app, none + restart)
-scripts/                     simulate_usage.py, demo.sh, demo.ps1
+examples/meeting_result.json 회의 데모 실제 결과 (none + restart + replace)
+scripts/                     simulate_usage.py, 기존 demo.sh/demo.ps1, demo_meeting.py
 tests/                       python -m unittest
 ```
+
+## 결과를 읽는 방법
+일치 수가 전체 요청 수보다 적으면 기록과 다른 응답이 있다는 뜻입니다. 의도적으로 결함을 넣은 샘플에서는 실패 판정이 정상적인 검출 결과일 수 있습니다.
