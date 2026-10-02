@@ -15,7 +15,7 @@ export function readConfig(search: string = window.location.search): AppConfig {
   const params = new URLSearchParams(search);
   const mode: Mode = params.get('mode') === 'real' ? 'real' : 'mock';
   const raw = Number(params.get('scenario') ?? '1');
-  const scenario: ScenarioId = raw === 2 || raw === 3 || raw === 4 ? raw : 1;
+  const scenario: ScenarioId = raw === 2 || raw === 3 || raw === 4 || raw === 5 ? raw : 1;
   return { mode, scenario };
 }
 

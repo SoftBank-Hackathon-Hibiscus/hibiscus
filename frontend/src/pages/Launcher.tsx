@@ -1,4 +1,4 @@
-import { ArrowRight, CloudOff, PackageCheck, ShieldAlert, ShieldX } from 'lucide-react';
+import { ArrowRight, CloudOff, PackageCheck, ShieldAlert, ShieldX, UserCheck } from 'lucide-react';
 import { configToSearch } from '../api';
 import { Collapsible, IconTile, PageTitle } from '../components/ui';
 import { useLang, type DictKey } from '../lib/i18n';
@@ -19,6 +19,7 @@ const CARDS: CardCopy[] = [
   { id: 2, icon: PackageCheck, tone: 'success', title: 's2Title', line: 's2Line', badge: 's2Badge' },
   { id: 3, icon: ShieldAlert, tone: 'warning', title: 's3Title', line: 's3Line', badge: 's3Badge' },
   { id: 4, icon: CloudOff, tone: 'warning', title: 's4Title', line: 's4Line', badge: 's4Badge' },
+  { id: 5, icon: UserCheck, tone: 'warning', title: 's5Title', line: 's5Line', badge: 's5Badge' },
 ];
 
 /** mock 시나리오를 고르는 얇은 시작판. 앱 관리 기능이 아니다. */
