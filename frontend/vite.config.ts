@@ -15,10 +15,13 @@ const proxiedPrefixes = [
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const target = env.VITE_BACKEND_URL || 'http://127.0.0.1:8080';
+  // 팀 VM 처럼 다른 호스트로 보낼 때는 Host 헤더를 대상 주소로 바꿔야 그쪽 리버스 프록시가 받는다.
+  // 로컬(127.0.0.1/localhost)은 그대로 둔다 (Gateway 미들웨어가 Host 로 앱을 찾는데, 로컬 Host 는 어떤 앱과도 겹치지 않는다).
+  const local = /^https?:\/\/(127\.0\.0\.1|localhost)(:|\/|$)/.test(target);
   const proxy = Object.fromEntries(
     proxiedPrefixes.map((prefix) => [
       prefix,
-      { target, changeOrigin: false, secure: false },
+      { target, changeOrigin: !local, secure: false },
     ]),
   );
   return {

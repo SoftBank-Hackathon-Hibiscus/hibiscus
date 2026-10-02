@@ -276,14 +276,19 @@ function describeDeploy(lang: Lang, stage: StageExecution | undefined, result: D
       if (result.targets.some((x) => x.phase === 'discard' && x.result === 'ok')) lines.push(t('deployLineDiscarded'));
       break;
     }
-    case 'rolled_back':
-      lines.push(t('deployLineRolledBack'));
+    case 'rolled_back': {
+      // main 2cca2c3: 대표 경로 변경 실패도 전환한 대상을 모두 되돌린 뒤 rolled_back 으로 기록한다
+      lines.push(r.result === 'error' ? t('deployLineRouteFailRolledBack') : t('deployLineRolledBack'));
+      for (const s of result.targets.filter((x) => x.phase === 'rollback' && x.result === 'ok')) lines.push(t('rollbackOk', { target: targetLabel(s.target) }));
       break;
+    }
     case 'error': {
-      lines.push(t('deployLineError'));
+      lines.push(r.result === 'error' ? t('deployLineRouteFailError') : t('deployLineError'));
+      const rollbackFailedTargets = result.targets.filter((x) => x.phase === 'rollback' && x.result === 'error');
+      for (const s of rollbackFailedTargets) lines.push(t('rollbackFailed', { target: targetLabel(s.target) }));
       const cloudActivated = result.targets.some((x) => x.target === 'cloud_run' && x.phase === 'activate' && x.result === 'ok');
-      const rollbackFailed = result.targets.some((x) => x.phase === 'rollback' && x.result === 'error');
-      if (cloudActivated || rollbackFailed) lines.push(t('deployLineErrorCloud'));
+      const cloudRestored = result.targets.some((x) => x.target === 'cloud_run' && x.phase === 'rollback' && x.result === 'ok');
+      if (cloudActivated && !cloudRestored) lines.push(t('deployLineErrorCloud'));
       break;
     }
   }
@@ -336,13 +341,20 @@ function buildProof(view: DeploymentView, input: ProofInput): ProofLink[] {
             : pick('테스트부터 서명까지 하나의 실행으로 이어졌어요.', 'テストから署名まで1つの実行としてつながっています。');
 
   // 같은 코드 (source ↔ image)
+  // 현재 main 은 GitHub push 요청이면 재생 테스트 없이도 true 를 기록한다 (#33 미병합).
+  // 테스트가 stub 이었다면 커밋↔이미지 연결을 실제로 확인한 것이 아니므로 "확인 전"으로 둔다.
+  const testStub = (latestStages(view.stages).test?.summary as { stub?: unknown } | null)?.stub === true;
+  const sourceState: ProofLink['state'] = d.sourceRevisionVerified ? (testStub ? 'pending' : 'ok') : 'unverified';
   const sourceLink: ProofLink = {
     id: 'source',
     title: t('proofSource'),
-    state: d.sourceRevisionVerified ? 'ok' : 'unverified',
-    detail: d.sourceRevisionVerified
-      ? pick('이 커밋에서 만든 이미지인지 확인했어요.', 'このコミットから作ったイメージであることを確認しました。')
-      : pick('커밋과 이미지의 연결은 아직 확인하지 않았어요. 빌드 검증을 거치면 확인돼요.', 'コミットとイメージのつながりはまだ確認していません。ビルド検証を経ると確認されます。'),
+    state: sourceState,
+    detail:
+      sourceState === 'ok'
+        ? pick('이 커밋에서 만든 이미지인지 확인했어요.', 'このコミットから作ったイメージであることを確認しました。')
+        : sourceState === 'pending'
+          ? pick('요청은 GitHub가 확인했지만, 이 실행은 실제 재생 테스트를 하지 않아 커밋과 이미지의 연결은 아직 확인할 수 없어요.', 'リクエストは GitHub が確認しましたが、この実行は実際の再生テストを行っていないため、コミットとイメージのつながりはまだ確認できません。')
+          : pick('커밋과 이미지의 연결은 아직 확인하지 않았어요. 빌드 검증을 거치면 확인돼요.', 'コミットとイメージのつながりはまだ確認していません。ビルド検証を経ると確認されます。'),
     legs: [
       { label: t('commit'), value: d.sourceRevision },
       { label: t('digest'), value: d.imageDigest },

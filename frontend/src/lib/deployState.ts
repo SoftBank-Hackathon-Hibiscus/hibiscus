@@ -51,10 +51,10 @@ export function deriveDeployDisplay(stage: StageExecution | undefined, result: D
         return { tone: 'success', title: '배포 완료, 트래픽 전환됨', details, decisionLabel, routingLabel, routingTone };
       }
       if (routing.result === 'error') {
+        // main 2cca2c3 부터 routing 실패는 rolled_back / error 로 기록된다. 이 가지는 구 버전 결과를 위한 방어용 fallback.
         details.push(`전환 실패 원인: ${routing.error ?? '미기록'}`);
-        details.push('새 버전 컨테이너·revision 은 서빙 가능 상태이지만 route 는 이전 target 을 가리킴. 수동 route 변경이 필요함');
-        details.push('백엔드(#26)는 이 조합을 succeeded 로 기록하므로 stage 상태만 보면 안 됨');
-        return { tone: 'warning', title: '새 버전은 떴지만 트래픽 전환 실패', details, decisionLabel, routingLabel, routingTone };
+        details.push('새 버전은 떠 있지만 route 는 이전 target 을 가리킴. 수동 route 변경이 필요함');
+        return { tone: 'danger', title: '새 버전은 떴지만 트래픽 전환 실패', details, decisionLabel, routingLabel, routingTone };
       }
       details.push(`route 를 바꾸지 않음 (${routing.reason ?? '이유 미기록'})`);
       return { tone: 'warning', title: '활성화됐지만 트래픽 전환 안 함', details, decisionLabel, routingLabel, routingTone };
