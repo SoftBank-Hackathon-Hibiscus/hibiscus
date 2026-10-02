@@ -49,6 +49,7 @@ npm run sign -- --plan plan.json --requester <요청자> --image-repo <저장소
 
 - `--image-repo`: 태그 없는 저장소 주소. 없으면 `IMAGE_REPO` 환경변수 (deploy coordinator와 같은 이름)
 - `--key`: 없으면 `SIGNER_COSIGN_KEY` 환경변수. 비밀번호는 `COSIGN_PASSWORD` 환경변수로만
+- `--no-tlog`: 없으면 `SIGNER_NO_TLOG=1` 환경변수. backend는 CLI 인자 안 바꾸고 환경변수만 켜면 됨
 - 종료 코드: 0 서명함 / 1 서명 거절 / 2 실행 오류
 
 ## 배포 쪽 서명 확인

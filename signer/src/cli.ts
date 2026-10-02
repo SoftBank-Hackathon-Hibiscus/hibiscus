@@ -14,7 +14,8 @@ const USAGE = `사용법
 
   --image-repo  태그 없는 이미지 저장소 (예: asia-northeast3-docker.pkg.dev/<프로젝트>/<저장소>/<이미지>). 없으면 IMAGE_REPO 환경변수
   --key         cosign 개인키 경로. 없으면 SIGNER_COSIGN_KEY 환경변수. 비밀번호는 COSIGN_PASSWORD 환경변수
-  --no-tlog     Rekor 에 안 올리고 서명 (Rekor 장애 대비). 배포 쪽 verify 에도 --insecure-ignore-tlog=true 필요
+  --no-tlog     Rekor 에 안 올리고 서명 (Rekor 장애 대비). 없으면 SIGNER_NO_TLOG=1 환경변수
+                배포 쪽 verify 에도 --insecure-ignore-tlog=true 필요
   --dry-run     cosign 을 부르지 않고 signature_ref 를 dry-run:... 으로 채움 (연결 확인용, 실제 배포에 쓰지 말 것)
 
 종료 코드: 0 서명함 / 1 서명 거절 / 2 실행 오류`;
@@ -55,7 +56,7 @@ async function main(argv: string[]): Promise<number> {
 
   if (command === "sign") {
     const dryRun = values["dry-run"] === true;
-    const noTlog = values["no-tlog"] === true;
+    const noTlog = values["no-tlog"] === true || process.env.SIGNER_NO_TLOG === "1";
     const signer = dryRun
       ? new DryRunSigner()
       : new CosignSigner(required(values.key ?? process.env.SIGNER_COSIGN_KEY, "key"), "cosign", { noTlog });
