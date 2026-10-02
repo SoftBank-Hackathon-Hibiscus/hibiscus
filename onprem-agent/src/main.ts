@@ -7,8 +7,7 @@ import { CosignImageVerifier } from "./image-verifier.js";
 import { JobExecutor } from "./job-executor.js";
 import { JobRunner } from "./job-runner.js";
 import { StateStore } from "./state-store.js";
-import { TunnelClient } from "./tunnel-client.js";
-import { ManagedTunnelTargetAuthorizer } from "./tunnel-target-authorizer.js";
+import { SshTunnel } from "./ssh-tunnel.js";
 
 const config = loadConfig();
 const commands = new CommandRunner(config.commandTimeoutMs);
@@ -22,10 +21,7 @@ const executor = new JobExecutor(
   new HttpHealthChecker(),
 );
 const jobs = new JobRunner(config, backend, executor);
-const tunnel = new TunnelClient(
-  config,
-  new ManagedTunnelTargetAuthorizer(state),
-);
+const tunnel = new SshTunnel(config, backend, state);
 
 const stop = () => {
   jobs.stop();

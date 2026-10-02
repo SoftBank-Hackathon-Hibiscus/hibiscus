@@ -1,21 +1,3 @@
-export interface ReadyMessage {
-  type: "ready";
-  protocol_version: 1;
-  session_id: string;
-}
-
-export interface OpenMessage {
-  type: "open";
-  protocol_version: 1;
-  session_id: string;
-  channel_id: string;
-  target_id: string;
-  local_host: "127.0.0.1";
-  local_port: number;
-}
-
-export type ControlMessage = ReadyMessage | OpenMessage;
-
 export type JobAction = "candidate" | "activate" | "rollback" | "discard";
 
 export interface AgentHealthCheck {
@@ -113,6 +95,13 @@ export interface BackendAgentClient {
   nextJob(): Promise<AgentJob | undefined>;
   submitResult(result: AgentJobResult): Promise<void>;
   heartbeat(serving: ServingContainer | null): Promise<void>;
+  forwards(): Promise<SshForward[]>;
+}
+
+export interface SshForward {
+  target_id: string;
+  gateway_port: number;
+  local_port: number;
 }
 
 export interface ContainerRuntime {
@@ -138,11 +127,5 @@ export interface SignatureVerifier {
 export interface HealthProbe {
   check(job: AgentJob, candidate: ManagedContainer): Promise<HealthCheckResult>;
 }
-
-export interface TunnelTargetAuthorizer {
-  authorize(message: OpenMessage): Promise<number | undefined>;
-}
-
-export class FatalTunnelError extends Error {}
 
 export class FatalAgentError extends Error {}

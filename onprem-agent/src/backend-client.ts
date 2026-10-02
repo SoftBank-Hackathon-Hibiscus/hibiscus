@@ -4,6 +4,7 @@ import type {
   AgentJobResult,
   BackendAgentClient,
   ServingContainer,
+  SshForward,
 } from "./types.js";
 import { FatalAgentError } from "./types.js";
 
@@ -40,6 +41,11 @@ export class BackendClient implements BackendAgentClient {
       }),
     });
     await response.body?.cancel();
+  }
+
+  async forwards(): Promise<SshForward[]> {
+    const response = await this.request("agent/v1/forwards", { method: "GET" });
+    return (await response.json()) as SshForward[];
   }
 
   private async request(path: string, init: RequestInit): Promise<Response> {

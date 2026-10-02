@@ -95,8 +95,6 @@ function candidateJob(): AgentJob {
 function agentConfig(): AgentConfig {
   return {
     apiUrl: new URL("http://127.0.0.1:8080"),
-    controlUrl: new URL("ws://127.0.0.1:8080/agent/v1/tunnel/control"),
-    dataUrl: new URL("ws://127.0.0.1:8080/agent/v1/tunnel/data"),
     agentId: "agent-1",
     token: "x".repeat(32),
     cosignPublicKey: "/keys/cosign.pub",
@@ -110,9 +108,14 @@ function agentConfig(): AgentConfig {
     cosignCommand: "cosign",
     cosignAllowInsecureRegistry: false,
     cosignInsecureIgnoreTlog: false,
-    reconnectMinMs: 1_000,
-    reconnectMaxMs: 30_000,
-    handshakeTimeoutMs: 10_000,
-    localConnectTimeoutMs: 3_000,
+    sshHost: "backend.example.com",
+    sshPort: 22,
+    sshUser: "hibiscus-agent",
+    sshIdentityFile: "/keys/agent_ed25519",
+    sshKnownHostsFile: "/keys/known_hosts",
+    sshCommand: "ssh",
+    sshForwardPollIntervalMs: 2_000,
+    sshServerAliveIntervalSeconds: 15,
+    sshServerAliveCountMax: 3,
   };
 }

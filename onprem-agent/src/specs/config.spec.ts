@@ -3,10 +3,14 @@ import test from "node:test";
 import { loadConfig } from "../config.js";
 
 const requiredEnvironment = {
-  BACKEND_TUNNEL_URL: "wss://backend.example.com/agent/v1/tunnel/control",
+  BACKEND_API_URL: "https://backend.example.com",
   AGENT_ID: "agent-1",
   AGENT_TOKEN: "a".repeat(32),
   COSIGN_PUBLIC_KEY: "./cosign.pub",
+  SSH_HOST: "backend.example.com",
+  SSH_USER: "hibiscus-agent",
+  SSH_IDENTITY_FILE: "./agent_ed25519",
+  SSH_KNOWN_HOSTS_FILE: "./known_hosts",
 };
 
 void test("parses explicit false security options as false", () => {

@@ -10,12 +10,10 @@
     "smoke": "npm run build && node scripts/live-smoke.mjs"
   },
   "dependencies": {
-    "ws": "^8.18.3",
     "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
-    "@types/ws": "^8.18.1",
     "oxlint": "^1.58.0",
     "oxlint-tsgolint": "^7.0.2001",
     "typescript": "^6.0.2"
