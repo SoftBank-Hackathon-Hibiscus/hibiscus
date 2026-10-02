@@ -1,9 +1,12 @@
 """윤선님 parity 재생기로 실제 앱을 검사하는 경로(run 명령). 가짜 Docker로 실행한다."""
 
+import itertools
 import json
 import sys
 import tempfile
+import threading
 import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
 
@@ -12,6 +15,9 @@ from premortem.adapters.parity_adapter import load_parity_adapter
 from premortem.cli import main
 from premortem.config import CORE_CONDITIONS, Settings
 from premortem.errors import EXIT_ERROR, PremortemError
+from premortem.evidence import EvidenceLog
+from premortem.gate import overall_status
+from premortem.lifecycle import ConditionRunner
 from premortem.process import CommandResult
 from premortem.runner import execute_run
 from premortem.scenarios import Scenario
@@ -124,6 +130,127 @@ class RunCommandInputTest(unittest.TestCase):
 
     def test_bad_run_id_is_rejected_before_docker(self):
         self.assertEqual(main([*self.base, "--run-id", "../x"]), EXIT_ERROR)
+
+
+class ReadinessReplayTest(unittest.TestCase):
+    """실제 HTTP·parity 재생기에서 조건 주입 후 health 실패와 부분 결과를 확인한다."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.health_status = 200
+        self.body_mismatch = False
+        self.requests = []
+        test = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_GET(self):
+                if self.path == "/healthz":
+                    status, body = test.health_status, b"health"
+                else:
+                    test.requests.append(self.path)
+                    status = 200
+                    body = json.dumps({"ok": not (test.body_mismatch and self.path == "/request/1")}).encode()
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.thread = threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
+        self.thread.start()
+        self.addCleanup(self.close_server)
+        self.root = Path(self.tmp.name)
+        self.session = self.root / "session.jsonl"
+        records = [{"index": i,
+                    "request": {"method": "GET", "path": f"/request/{i}", "headers": [],
+                                "body": "", "body_encoding": "utf8"},
+                    "response": {"status": 200, "headers": [["Content-Type", "application/json"]],
+                                 "body": '{"ok": true}', "body_encoding": "utf8"}}
+                   for i in range(1, 4)]
+        self.session.write_text("".join(json.dumps(row) + "\n" for row in records), encoding="utf-8")
+        self.noise = self.root / "session.noise.json"
+        self.noise.write_text('{"rules": []}', encoding="utf-8")
+
+    def close_server(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join()
+
+    def run_condition(self, condition, health_after, body_mismatch=False):
+        test = self
+        self.requests.clear()
+
+        class Docker(FakeDocker):
+            def create(self, image_id, run_id, name, port, sequence):
+                replacing = name == "replace" and any(c[0] == "create" and c[1] == name for c in self.calls)
+                test.health_status = health_after if replacing else 200
+                test.body_mismatch = body_mismatch and name != "none"
+                return super().create(image_id, run_id, name, port, sequence)
+
+            def host_port(self, container_id, port):
+                return test.server.server_address[1]
+
+            def restart(self, container_id, run_id):
+                super().restart(container_id, run_id)
+                test.health_status = health_after
+
+        docker = Docker(internal_ok=health_after == 200, proc_net="")
+        run_id = f"{condition}-{health_after}-{int(body_mismatch)}"
+        run_dir = self.root / run_id
+        run_dir.mkdir()
+        evidence = EvidenceLog(run_id, run_dir, 2_000_000)
+        required = ["none", condition]
+        scenario = Scenario("readiness", "test", self.root, self.session, self.noise, 8080, "/healthz", 0.1,
+                            (2,), tuple(required), (), {})
+        ticks = itertools.count()
+        runner = ConditionRunner(docker, evidence, load_parity_adapter(), scenario, run_id, IMAGE_ID, 3,
+                                 sleep=lambda s: None, clock=lambda: next(ticks) * 0.01)
+        results = runner.run_all(required, [2])
+        self.assertEqual(results[0]["status"], "passed")
+        self.assertEqual(docker.containers, {})
+        return results, evidence
+
+    def test_restart_and_replace_stop_when_health_returns_503(self):
+        for condition in ("restart", "replace"):
+            with self.subTest(condition=condition):
+                results, evidence = self.run_condition(condition, 503)
+                failed = results[1]
+                self.assertEqual(failed["status"], "failed")
+                self.assertEqual(overall_status(["none", condition], results), "failed")
+                self.assertEqual((failed["expected_count"], failed["executed_count"], failed["matched_count"]),
+                                 (3, 2, 2))
+                self.assertEqual(self.requests, ["/request/1", "/request/2", "/request/3",
+                                                 "/request/1", "/request/2"])
+                self.assertEqual([(m["request_index"], m["kind"]) for m in failed["mismatches"]], [(3, "readiness")])
+                self.assertIn("readiness_failed", failed["reason"])
+                self.assertTrue(all(eid in evidence.by_id() for m in failed["mismatches"] for eid in m["evidence_ids"]))
+
+    def test_readiness_failure_preserves_prior_http_mismatches(self):
+        for condition in ("restart", "replace"):
+            with self.subTest(condition=condition):
+                results, _ = self.run_condition(condition, 503, body_mismatch=True)
+                failed = results[1]
+                self.assertEqual(failed["status"], "failed")
+                self.assertEqual((failed["expected_count"], failed["executed_count"], failed["matched_count"]),
+                                 (3, 2, 1))
+                self.assertEqual([(m["request_index"], m["kind"]) for m in failed["mismatches"]],
+                                 [(1, "body"), (3, "readiness")])
+
+    def test_restart_and_replace_continue_when_health_returns_200(self):
+        for condition in ("restart", "replace"):
+            with self.subTest(condition=condition):
+                results, _ = self.run_condition(condition, 200)
+                passed = results[1]
+                self.assertEqual(overall_status(["none", condition], results), "passed")
+                self.assertEqual((passed["expected_count"], passed["executed_count"], passed["matched_count"]),
+                                 (3, 3, 3))
+                self.assertEqual(passed["mismatches"], [])
+                self.assertEqual(self.requests, ["/request/1", "/request/2", "/request/3"] * 2)
 
 
 if __name__ == "__main__":
