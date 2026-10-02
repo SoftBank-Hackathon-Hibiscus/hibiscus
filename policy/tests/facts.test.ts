@@ -153,6 +153,64 @@ describe("test_result.facts: 정책이 읽는 키만 타입 고정", () => {
       });
     });
 
+    describe("match 는 요약값: matched ≤ total 이고, conditions 가 있으면 none 조건의 결과와 같아야 한다 (--test 직접 입력도 변환기 출력과 같은 모양)", () => {
+      /** base(fixtures/01-allow, match 20/20)에 match 와 facts 를 덮어쓴 입력의 이슈 목록 */
+      const issuesOf = (match: unknown, facts: unknown = {}) => {
+        const r = TestResultSchema.safeParse({ ...base, match, facts });
+        return r.success ? [] : r.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`);
+      };
+      const none = (matched: number, total = 20) => ({ name: "none", total, matched, failed: matched < total, mismatches: Array.from({ length: total - matched }, (_, i) => ({ index: i + 1, request: "GET /me" })) });
+
+      it("match.matched > match.total 은 conditions 유무와 관계없이 거부한다", () => {
+        expect(issuesOf({ total: 20, matched: 21 }).join("\n")).toMatch(/^match\.matched: match\.matched\(21\)는 match\.total\(20\) 이하여야 합니다$/m);
+        expect(issuesOf({ total: 0, matched: 1 }).join("\n")).toMatch(/match\.matched/);
+        expect(issuesOf({ total: 20, matched: 21 }, { conditions: [none(20), passAll("restart"), passAll("replace")] }).join("\n")).toMatch(/match\.matched\(21\)는 match\.total\(20\) 이하/);
+        // 경계: matched == total 은 통과
+        expect(issuesOf({ total: 20, matched: 20 })).toEqual([]);
+        expect(issuesOf({ total: 0, matched: 0 })).toEqual([]);
+      });
+
+      it("conditions 가 있으면 match 는 none 조건의 total / matched 와 같아야 한다", () => {
+        // match 20/20 인데 none 20/10
+        expect(issuesOf({ total: 20, matched: 20 }, { conditions: [none(10), passAll("restart"), passAll("replace")] }).join("\n")).toMatch(
+          /^match\.matched: facts\.conditions 가 있으면 match\.matched\(20\)는 none 조건의 matched\(10\)와 같아야 합니다$/m,
+        );
+        // total 이 다르면 total 로 잡는다
+        expect(issuesOf({ total: 24, matched: 24 }, { conditions: [none(24, 20), passAll("restart"), passAll("replace")] }).join("\n")).toMatch(
+          /^match\.total: facts\.conditions 가 있으면 match\.total\(24\)은 none 조건의 total\(20\)과 같아야 합니다$/m,
+        );
+        // 둘 다 다르면 둘 다 잡는다 (path 로 어느 값인지 알 수 있다)
+        const both = issuesOf({ total: 24, matched: 21 }, { conditions: [none(10), passAll("restart"), passAll("replace")] }).join("\n");
+        expect(both).toMatch(/^match\.total: /m);
+        expect(both).toMatch(/^match\.matched: /m);
+        // none 이 아닌 조건(restart / replace)의 수치와는 비교하지 않는다
+        expect(issuesOf({ total: 20, matched: 20 }, { conditions: [none(20), { ...passAll("restart"), matched: 15, failed: true, mismatches: Array.from({ length: 5 }, (_, i) => ({ index: i + 1, request: "GET /me" })) }, passAll("replace")] })).toEqual([]);
+      });
+
+      it("conditions 가 있고 match 가 none 과 같으면 통과한다", () => {
+        expect(issuesOf({ total: 20, matched: 20 }, { conditions: [none(20), passAll("restart"), passAll("replace")] })).toEqual([]);
+        expect(issuesOf({ total: 20, matched: 10 }, { conditions: [none(10), passAll("restart"), passAll("replace")] })).toEqual([]);
+        // 순서가 달라도 none 을 찾는다
+        expect(issuesOf({ total: 20, matched: 10 }, { conditions: [passAll("replace"), passAll("restart"), none(10)] })).toEqual([]);
+      });
+
+      it("passed 는 none 과 달라도 통과한다 (테스트 파트 원본의 종합값 보존용)", () => {
+        const r = TestResultSchema.safeParse({ ...base, passed: false, match: { total: 20, matched: 20 }, facts: { conditions: [none(20), passAll("restart"), passAll("replace")] } });
+        expect(r.success).toBe(true);
+        expect(r.success && r.data.passed).toBe(false);
+        expect(TestResultSchema.safeParse({ ...base, passed: true, match: { total: 20, matched: 10 }, facts: { conditions: [none(10), passAll("restart"), passAll("replace")] } }).success).toBe(true);
+      });
+
+      it("conditions 가 없는 기존 입력은 match 범위 검사만 받는다", () => {
+        expect(issuesOf({ total: 20, matched: 17 })).toEqual([]);
+        expect(issuesOf({ total: 24, matched: 24 }, { db: "postgres" })).toEqual([]);
+        // none 이 빠진 conditions 는 ConditionFactsSchema 가 거부하고, match 비교 이슈는 따로 내지 않는다
+        const missingNone = issuesOf({ total: 24, matched: 24 }, { conditions: [passAll("restart"), passAll("replace")] }).join("\n");
+        expect(missingNone).toMatch(/facts\.conditions/);
+        expect(missingNone).not.toMatch(/^match\./m);
+      });
+    });
+
     it("conditions 가 없는 기존 fixtures 는 그대로 통과하고 결과도 같다", () => {
       const pii = PiiReportSchema.parse({ run_id: base.run_id, pii: [] });
       expect(TestResultSchema.safeParse(base).success).toBe(true);

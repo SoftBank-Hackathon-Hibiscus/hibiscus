@@ -94,6 +94,8 @@ export type ConditionName = z.infer<typeof ConditionNameSchema>;
 export function isConditionName(value: string): value is ConditionName {
   return (CONDITION_NAMES as readonly string[]).includes(value);
 }
+/** 기준 조건. test_result.match 는 이 조건의 결과다 (변환기 src/adapters/parity.ts 가 넣고, TestResultSchema 가 같은지 검사한다) */
+export const BASELINE_CONDITION = "none" as const satisfies ConditionName;
 
 export const ConditionFactSchema = z
   .looseObject({
@@ -211,11 +213,29 @@ export const TestResultSchema = z
     match: z
       .object({
         total: z.number().int().nonnegative().describe("재생한 요청 수"),
-        matched: z.number().int().nonnegative().describe("응답이 일치한 요청 수"),
+        matched: z.number().int().nonnegative().describe("응답이 일치한 요청 수 (total 이하)"),
       })
       .describe("재생 결과 요약. facts.conditions 가 있으면 기준 조건 none 의 결과 (조건별 수치는 facts.conditions 에)"),
     failures: z.array(z.unknown()).default([]).describe("실패한 요청 목록. 형식은 테스트 파트가 정한다 (정책 엔진은 내용을 보지 않음)"),
     facts: FactsSchema.default({}),
+  })
+  .superRefine((test, ctx) => {
+    // match 는 요약값이라 조건별 검사와 같은 fail-closed 를 둔다 (JSON Schema 에는 표현되지 않는 검사).
+    // --handoff(변환기)는 none 조건의 결과를 match 에 넣으므로 항상 만족하고, --test(직접 입력)도 같은 조건을 보장한다.
+    // passed 는 테스트 파트 원본의 종합값 보존용이라 none 과 비교하지 않는다.
+    const { match } = test;
+    if (match.matched > match.total) {
+      ctx.addIssue({ code: "custom", path: ["match", "matched"], message: `match.matched(${match.matched})는 match.total(${match.total}) 이하여야 합니다` });
+    }
+    // conditions 가 있으면 match 는 기준 조건 none 의 결과와 같아야 한다 (none 이 없는 입력은 ConditionFactsSchema 가 이미 거부한다)
+    const baseline = test.facts.conditions?.find((c) => c.name === BASELINE_CONDITION);
+    if (baseline === undefined) return;
+    if (match.total !== baseline.total) {
+      ctx.addIssue({ code: "custom", path: ["match", "total"], message: `facts.conditions 가 있으면 match.total(${match.total})은 none 조건의 total(${baseline.total})과 같아야 합니다` });
+    }
+    if (match.matched !== baseline.matched) {
+      ctx.addIssue({ code: "custom", path: ["match", "matched"], message: `facts.conditions 가 있으면 match.matched(${match.matched})는 none 조건의 matched(${baseline.matched})와 같아야 합니다` });
+    }
   })
   .describe("테스트 파트가 만드는 테스트 판정 결과");
 export type TestResult = z.infer<typeof TestResultSchema>;

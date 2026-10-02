@@ -50,7 +50,7 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991,
-          "description": "응답이 일치한 요청 수"
+          "description": "응답이 일치한 요청 수 (total 이하)"
         }
       },
       "required": [

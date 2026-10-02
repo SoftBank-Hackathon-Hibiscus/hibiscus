@@ -132,7 +132,7 @@ flowchart LR
 | `passed` | boolean | 필수 | 재생 테스트 통과 여부 (테스트 파트 원본의 종합값). facts.conditions 가 없으면 R1 이 이 값으로 차단하고, 있으면 조건별 사실로 판단한다 |
 | `match` | object | 필수 | 재생 결과 요약. facts.conditions 가 있으면 기준 조건 none 의 결과 (조건별 수치는 facts.conditions 에) |
 | `match.total` | integer | 필수 | 재생한 요청 수 |
-| `match.matched` | integer | 필수 | 응답이 일치한 요청 수 |
+| `match.matched` | integer | 필수 | 응답이 일치한 요청 수 (total 이하) |
 | `failures` | any[] | 선택 (기본값 `[]`) | 실패한 요청 목록. 형식은 테스트 파트가 정한다 (정책 엔진은 내용을 보지 않음) |
 | `facts` | object | 선택 (기본값 `{}`) | 테스트 중 관찰한 사실. 정의된 키(db, writes_local_file, migration, conditions, storage)는 타입이 고정되고, 그 밖의 키는 자유 |
 | `facts.db` | "sqlite" \| "postgres" \| "mysql" \| "none" | 선택 | 앱이 쓰는 DB. 소문자만. R5 가 읽는다. 관찰하지 못했으면 키를 생략한다 (none 은 'DB 없음' 을 확인했을 때만) |
