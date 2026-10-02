@@ -437,6 +437,27 @@ describe("변환 거부 / 경고", () => {
     expect(() => adaptParityHandoff(variant([{ condition: "none", total: 20, matched: 21 }, ALL_PASS[1]!, ALL_PASS[2]!], []))).toThrow(/matched\(21\)가 total\(20\)보다/);
   });
 
+  it("요청 번호 범위: 변환기와 TestResultSchema 가 같은 기준(1 이상 total 이하)으로 거부한다", () => {
+    const at = (index: number): Mismatch => ({ ...guestbookMismatch("replace", 11), index });
+    // index == total(20) 은 변환기도 통과시키고, 그 결과는 스키마도 통과한다
+    const edge = adaptParityHandoff(withReplace(19, [at(20)]));
+    expect(edge.test.facts.conditions!.find((c) => c.name === "replace")!.mismatches.map((m) => m.index)).toEqual([20]);
+    expect(TestResultSchema.safeParse(edge.test).success).toBe(true);
+    // index > total: 변환기는 거부한다
+    expect(() => adaptParityHandoff(withReplace(19, [at(21)]))).toThrow(ParityAdapterError);
+    expect(() => adaptParityHandoff(withReplace(19, [at(21)]))).toThrow(/replace: 요청 번호 21 가 total\(20\)을 넘습니다/);
+    // 같은 값을 --test 로 직접 넣어도 스키마가 같은 이유로 거부한다 (두 입력 경로의 검증 강도가 같다)
+    const direct = { ...edge.test, facts: { ...edge.test.facts, conditions: edge.test.facts.conditions!.map((c) => (c.name === "replace" ? { ...c, mismatches: [{ ...c.mismatches[0]!, index: 21 }] } : c)) } };
+    const r = TestResultSchema.safeParse(direct);
+    expect(r.success).toBe(false);
+    expect(r.success ? "" : r.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("\n")).toMatch(/facts\.conditions\.2\.mismatches\.0\.index: 요청 번호 21 가 total\(20\)을 넘습니다/);
+    // 하한 0 은 양쪽 모두 입력 스키마(positive)에서 거부한다. 입력 검사를 건너뛰고 변환기에 바로 넣어도 출력 검사(TestResultSchema)가 막는다
+    expect(ParityHandoffSchema.safeParse(withReplace(19, [at(0)])).success).toBe(false);
+    expect(() => adaptParityHandoff(withReplace(19, [at(0)]))).toThrow(/index/);
+    const zero = { ...direct, facts: { ...direct.facts, conditions: direct.facts.conditions.map((c) => (c.name === "replace" ? { ...c, mismatches: [{ ...c.mismatches[0]!, index: 0 }] } : c)) } };
+    expect(TestResultSchema.safeParse(zero).success).toBe(false);
+  });
+
   it("같은 조건 안에 같은 요청 번호가 두 번 있으면 거부, 다른 조건의 같은 번호는 정상", () => {
     const me11 = guestbookMismatch("replace", 11);
     // replace 20/18 에 11 번이 두 번: 불일치 수(2)는 total - matched 와 맞아서 수 검사로는 잡히지 않는다

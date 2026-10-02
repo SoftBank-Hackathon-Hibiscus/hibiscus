@@ -30,6 +30,19 @@ describe("CosignSigner", () => {
     ]);
   });
 
+  it("noTlog 면 --use-signing-config=false --tlog-upload=false 를 붙임", async () => {
+    const dir = tmp();
+    const key = join(dir, "cosign.key");
+    writeFileSync(key, "dummy");
+    const { bin, argsFile } = fakeCosign(dir);
+
+    await new CosignSigner(key, bin, { noTlog: true }).sign(`${REPO}@${DIGEST}`, { run_id: "r-1" });
+
+    expect(readFileSync(argsFile, "utf8").trim().split("\n")).toEqual([
+      "sign", "--yes", "--key", key, "--use-signing-config=false", "--tlog-upload=false", "-a", "run_id=r-1", `${REPO}@${DIGEST}`,
+    ]);
+  });
+
   it("cosign 이 실패하면 SIGN_FAILED (stderr 마지막 줄 포함)", async () => {
     const dir = tmp();
     const key = join(dir, "cosign.key");

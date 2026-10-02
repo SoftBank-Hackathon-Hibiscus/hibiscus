@@ -2,10 +2,12 @@
 
 import hashlib
 import json
+import os
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from premortem.errors import PremortemError
 from premortem.process import CommandResult, SubprocessRunner
@@ -81,6 +83,8 @@ class RegistryBuildTest(unittest.TestCase):
         (self.app / ".gitignore").write_text("ignored.txt\n", encoding="utf-8")
         self.git("init", "-q")
         self.git("add", ".")
+        # Windows 파일 시스템에서도 커밋의 실행 여부를 명시한다.
+        self.git("update-index", "--chmod=+x", "app/start.sh")
         self.git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "fixture")
         self.runner = RegistryRunner()
         self.out = self.root / "build"
@@ -108,7 +112,13 @@ class RegistryBuildTest(unittest.TestCase):
         self.assertEqual(result["source"]["commit"], self.git("rev-parse", "HEAD"))
         self.assertEqual(result["source"]["subdir"], "app")
         self.assertFalse((self.out / "source" / "ignored.txt").exists())
-        self.assertTrue((self.out / "source" / "start.sh").stat().st_mode & 0o111)
+        self.assertTrue(self.git("ls-tree", "HEAD", "app/start.sh").startswith("100755 "))
+        self.assertEqual((self.out / "source" / "start.sh").read_bytes(),
+                         (self.app / "start.sh").read_bytes())
+        # Windows chmod/stat에는 POSIX 실행 비트가 없다.
+        if os.name != "nt":
+            self.assertTrue((self.out / "source" / "start.sh").stat().st_mode & 0o111)
+            self.assertFalse((self.out / "source" / "Dockerfile").stat().st_mode & 0o111)
         self.assertEqual(image["registry_digest"], self.runner.index)
         self.assertEqual(image["local_image_id"], CONFIG_ID)
         self.assertNotEqual(image["registry_digest"], image["local_image_id"])
@@ -124,6 +134,30 @@ class RegistryBuildTest(unittest.TestCase):
             "platform": {"os": "unknown", "architecture": "unknown"},
             "annotations": {"vnd.docker.reference.type": "attestation-manifest"}}])
         self.assertEqual(set(self.build()["image"]["platforms"]), {"linux/amd64", "linux/arm64"})
+
+    def test_source_changed_after_pull_is_not_success(self):
+        run = self.runner.run
+
+        def mutate_after_pull(args, timeout):
+            result = run(args, timeout)
+            if args[:2] == ["docker", "pull"]:
+                (self.out / "source/start.sh").write_text("changed after pull", encoding="utf-8")
+            return result
+
+        with patch.object(self.runner, "run", side_effect=mutate_after_pull):
+            self.assert_failed("SOURCE_CHANGED")
+
+    def test_excluded_file_added_after_inspect_is_not_success(self):
+        run = self.runner.run
+
+        def mutate_after_inspect(args, timeout):
+            result = run(args, timeout)
+            if args[:3] == ["docker", "image", "inspect"]:
+                (self.out / "source/.env").write_text("injected=true", encoding="utf-8")
+            return result
+
+        with patch.object(self.runner, "run", side_effect=mutate_after_inspect):
+            self.assert_failed("SOURCE_CHANGED")
 
     def test_dirty_source_stops_before_docker(self):
         (self.app / "start.sh").write_text("changed", encoding="utf-8")

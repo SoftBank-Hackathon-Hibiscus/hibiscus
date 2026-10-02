@@ -21,15 +21,23 @@ export function imageRefOf(imageRepo: string, digest: string): string {
   return `${imageRepo}@${digest}`;
 }
 
+export interface CosignOptions {
+  /** Rekor(투명성 로그)에 안 올림. 이렇게 서명한 이미지는 verify 에도 --insecure-ignore-tlog=true 필요 */
+  noTlog?: boolean;
+}
+
 export class CosignSigner implements ImageSigner {
   constructor(
     private readonly keyPath: string,
     private readonly cosignBin = "cosign",
+    private readonly options: CosignOptions = {},
   ) {}
 
   async sign(imageRef: string, annotations: Record<string, string>): Promise<string> {
     if (!existsSync(this.keyPath)) throw new SignerError("KEY_MISSING", `cosign 키 파일이 없음: ${this.keyPath}`);
     const args = ["sign", "--yes", "--key", this.keyPath];
+    // v3 는 --use-signing-config=false 없이 --tlog-upload=false 만 주면 에러
+    if (this.options.noTlog) args.push("--use-signing-config=false", "--tlog-upload=false");
     for (const [key, value] of Object.entries(annotations)) args.push("-a", `${key}=${value}`);
     args.push(imageRef);
     try {

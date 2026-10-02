@@ -86,6 +86,25 @@ describe("test_result.facts: 정책이 읽는 키만 타입 고정", () => {
       expect(issues({ conditions: trio({ ...dup, mismatches: [me(11)] }) }).join("\n")).toMatch(/mismatches 는 total - matched \(2\)개여야 하는데 1개/);
     });
 
+    it("mismatches[].index 는 1 이상 total 이하 (--test 직접 입력도 --handoff 변환기와 같은 범위)", () => {
+      const me = (index: number) => ({ index, request: "GET /me" });
+      const replaceAt = (total: number, index: number) => ({ name: "replace", total, matched: total - 1, failed: true, mismatches: [me(index)] });
+      // index == total 은 마지막 요청이라 허용
+      expect(TestResultSchema.safeParse(withFacts({ conditions: trio(replaceAt(20, 20)) })).success).toBe(true);
+      expect(TestResultSchema.safeParse(withFacts({ conditions: trio(replaceAt(2, 2)) })).success).toBe(true);
+      // index > total 거부 (재현: total=2, matched=1, index=3. 수는 total - matched 와 맞아서 수 검사로는 잡히지 않는다)
+      expect(issues({ conditions: trio(replaceAt(2, 3)) }).join("\n")).toMatch(/facts\.conditions\.2\.mismatches\.0\.index: 요청 번호 3 가 total\(2\)을 넘습니다/);
+      expect(issues({ conditions: trio(replaceAt(20, 21)) }).join("\n")).toMatch(/mismatches\.0\.index: 요청 번호 21 가 total\(20\)을 넘습니다/);
+      // 두 번째 항목이 넘으면 그 항목의 path 로 잡는다
+      const second = { name: "replace", total: 20, matched: 18, failed: true, mismatches: [me(5), me(99)] };
+      expect(issues({ conditions: trio(second) }).join("\n")).toMatch(/facts\.conditions\.2\.mismatches\.1\.index: 요청 번호 99 가 total\(20\)을 넘습니다/);
+      // 하한: 0 이하는 ConditionMismatchSchema 의 positive 가 거부한다 (변환기 ParityMismatchSchema 도 positive)
+      expect(issues({ conditions: trio(replaceAt(20, 0)) }).join("\n")).toMatch(/facts\.conditions\.2\.mismatches\.0\.index/);
+      expect(issues({ conditions: trio(replaceAt(20, -1)) }).join("\n")).toMatch(/facts\.conditions\.2\.mismatches\.0\.index/);
+      // none 조건도 독립적으로 잡는다
+      expect(issues({ conditions: [{ ...replaceAt(2, 3), name: "none" }, passAll("restart"), passAll("replace")] }).join("\n")).toMatch(/facts\.conditions\.0\.mismatches\.0\.index: 요청 번호 3 가 total\(2\)을 넘습니다/);
+    });
+
     describe("mismatches[].related_* 는 facts.storage 와 facts.db / facts.writes_local_file 로 뒷받침돼야 한다 (R1c 가 맡긴 것을 R5 / R6 가 읽을 수 있게)", () => {
       const pii = PiiReportSchema.parse({ run_id: base.run_id, pii: [] });
 
@@ -131,6 +150,64 @@ describe("test_result.facts: 정책이 읽는 키만 타입 고정", () => {
         // kind 나 storage 중 하나만 있는 반쪽 조회값은 거부
         expect(issues({ ...sqliteEvidence, conditions: trio({ ...hintOnly, mismatches: [{ ...hintOnly.mismatches[0], related_kind: "sqlite" }] }) }).join("\n")).toMatch(/related_storage: related_kind 나 related_storage 가 있으면 related_fact, related_storage, related_kind 가 모두 있어야/);
         expect(issues({ ...sqliteEvidence, conditions: trio({ ...hintOnly, mismatches: [{ index: 13, request: "GET /posts", related_storage: "container_layer", related_kind: "sqlite" }] }) }).join("\n")).toMatch(/related_fact: related_kind 나 related_storage 가 있으면/);
+      });
+    });
+
+    describe("match 는 요약값: matched ≤ total 이고, conditions 가 있으면 none 조건의 결과와 같아야 한다 (--test 직접 입력도 변환기 출력과 같은 모양)", () => {
+      /** base(fixtures/01-allow, match 20/20)에 match 와 facts 를 덮어쓴 입력의 이슈 목록 */
+      const issuesOf = (match: unknown, facts: unknown = {}) => {
+        const r = TestResultSchema.safeParse({ ...base, match, facts });
+        return r.success ? [] : r.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`);
+      };
+      const none = (matched: number, total = 20) => ({ name: "none", total, matched, failed: matched < total, mismatches: Array.from({ length: total - matched }, (_, i) => ({ index: i + 1, request: "GET /me" })) });
+
+      it("match.matched > match.total 은 conditions 유무와 관계없이 거부한다", () => {
+        expect(issuesOf({ total: 20, matched: 21 }).join("\n")).toMatch(/^match\.matched: match\.matched\(21\)는 match\.total\(20\) 이하여야 합니다$/m);
+        expect(issuesOf({ total: 0, matched: 1 }).join("\n")).toMatch(/match\.matched/);
+        expect(issuesOf({ total: 20, matched: 21 }, { conditions: [none(20), passAll("restart"), passAll("replace")] }).join("\n")).toMatch(/match\.matched\(21\)는 match\.total\(20\) 이하/);
+        // 경계: matched == total 은 통과
+        expect(issuesOf({ total: 20, matched: 20 })).toEqual([]);
+        expect(issuesOf({ total: 0, matched: 0 })).toEqual([]);
+      });
+
+      it("conditions 가 있으면 match 는 none 조건의 total / matched 와 같아야 한다", () => {
+        // match 20/20 인데 none 20/10
+        expect(issuesOf({ total: 20, matched: 20 }, { conditions: [none(10), passAll("restart"), passAll("replace")] }).join("\n")).toMatch(
+          /^match\.matched: facts\.conditions 가 있으면 match\.matched\(20\)는 none 조건의 matched\(10\)와 같아야 합니다$/m,
+        );
+        // total 이 다르면 total 로 잡는다
+        expect(issuesOf({ total: 24, matched: 24 }, { conditions: [none(24, 20), passAll("restart"), passAll("replace")] }).join("\n")).toMatch(
+          /^match\.total: facts\.conditions 가 있으면 match\.total\(24\)은 none 조건의 total\(20\)과 같아야 합니다$/m,
+        );
+        // 둘 다 다르면 둘 다 잡는다 (path 로 어느 값인지 알 수 있다)
+        const both = issuesOf({ total: 24, matched: 21 }, { conditions: [none(10), passAll("restart"), passAll("replace")] }).join("\n");
+        expect(both).toMatch(/^match\.total: /m);
+        expect(both).toMatch(/^match\.matched: /m);
+        // none 이 아닌 조건(restart / replace)의 수치와는 비교하지 않는다
+        expect(issuesOf({ total: 20, matched: 20 }, { conditions: [none(20), { ...passAll("restart"), matched: 15, failed: true, mismatches: Array.from({ length: 5 }, (_, i) => ({ index: i + 1, request: "GET /me" })) }, passAll("replace")] })).toEqual([]);
+      });
+
+      it("conditions 가 있고 match 가 none 과 같으면 통과한다", () => {
+        expect(issuesOf({ total: 20, matched: 20 }, { conditions: [none(20), passAll("restart"), passAll("replace")] })).toEqual([]);
+        expect(issuesOf({ total: 20, matched: 10 }, { conditions: [none(10), passAll("restart"), passAll("replace")] })).toEqual([]);
+        // 순서가 달라도 none 을 찾는다
+        expect(issuesOf({ total: 20, matched: 10 }, { conditions: [passAll("replace"), passAll("restart"), none(10)] })).toEqual([]);
+      });
+
+      it("passed 는 none 과 달라도 통과한다 (테스트 파트 원본의 종합값 보존용)", () => {
+        const r = TestResultSchema.safeParse({ ...base, passed: false, match: { total: 20, matched: 20 }, facts: { conditions: [none(20), passAll("restart"), passAll("replace")] } });
+        expect(r.success).toBe(true);
+        expect(r.success && r.data.passed).toBe(false);
+        expect(TestResultSchema.safeParse({ ...base, passed: true, match: { total: 20, matched: 10 }, facts: { conditions: [none(10), passAll("restart"), passAll("replace")] } }).success).toBe(true);
+      });
+
+      it("conditions 가 없는 기존 입력은 match 범위 검사만 받는다", () => {
+        expect(issuesOf({ total: 20, matched: 17 })).toEqual([]);
+        expect(issuesOf({ total: 24, matched: 24 }, { db: "postgres" })).toEqual([]);
+        // none 이 빠진 conditions 는 ConditionFactsSchema 가 거부하고, match 비교 이슈는 따로 내지 않는다
+        const missingNone = issuesOf({ total: 24, matched: 24 }, { conditions: [passAll("restart"), passAll("replace")] }).join("\n");
+        expect(missingNone).toMatch(/facts\.conditions/);
+        expect(missingNone).not.toMatch(/^match\./m);
       });
     });
 

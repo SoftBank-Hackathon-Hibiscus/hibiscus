@@ -132,7 +132,7 @@ flowchart LR
 | `passed` | boolean | 필수 | 재생 테스트 통과 여부 (테스트 파트 원본의 종합값). facts.conditions 가 없으면 R1 이 이 값으로 차단하고, 있으면 조건별 사실로 판단한다 |
 | `match` | object | 필수 | 재생 결과 요약. facts.conditions 가 있으면 기준 조건 none 의 결과 (조건별 수치는 facts.conditions 에) |
 | `match.total` | integer | 필수 | 재생한 요청 수 |
-| `match.matched` | integer | 필수 | 응답이 일치한 요청 수 |
+| `match.matched` | integer | 필수 | 응답이 일치한 요청 수 (total 이하) |
 | `failures` | any[] | 선택 (기본값 `[]`) | 실패한 요청 목록. 형식은 테스트 파트가 정한다 (정책 엔진은 내용을 보지 않음) |
 | `facts` | object | 선택 (기본값 `{}`) | 테스트 중 관찰한 사실. 정의된 키(db, writes_local_file, migration, conditions, storage)는 타입이 고정되고, 그 밖의 키는 자유 |
 | `facts.db` | "sqlite" \| "postgres" \| "mysql" \| "none" | 선택 | 앱이 쓰는 DB. 소문자만. R5 가 읽는다. 관찰하지 못했으면 키를 생략한다 (none 은 'DB 없음' 을 확인했을 때만) |
@@ -150,7 +150,7 @@ flowchart LR
 | `facts.conditions[].matched` | integer | 필수 | 응답이 일치한 요청 수 (total 이하) |
 | `facts.conditions[].failed` | boolean | 필수 | 이 조건에서 어긋난 요청이 하나라도 있는지. matched < total 과 같아야 한다. R1 / R1b / R1c 가 읽는다 |
 | `facts.conditions[].mismatches` | object[] | 필수 | 어긋난 요청 목록 (total - matched 개). 없으면 빈 배열 |
-| `facts.conditions[].mismatches[].index` | integer | 필수 | 기록 파일의 요청 번호 (1부터) |
+| `facts.conditions[].mismatches[].index` | integer | 필수 | 기록 파일의 요청 번호 (1부터 그 조건의 total 까지) |
 | `facts.conditions[].mismatches[].request` | string | 필수 | 요청 한 줄 (예: "GET /posts") |
 | `facts.conditions[].mismatches[].related_fact` | string | 선택 | 관련 있어 보이는 저장 사실의 path (테스트 파트의 힌트. 원인 증명이 아님). 없으면 키를 생략한다 |
 | `facts.conditions[].mismatches[].related_storage` | string | 선택 | related_fact 가 가리키는 사실의 storage (예: container_layer). related_fact 가 없으면 생략. 있으면 facts.storage 에 같은 path·kind·storage 항목이 있어야 한다 |
