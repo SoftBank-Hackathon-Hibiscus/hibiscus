@@ -41,6 +41,36 @@ export class DeploymentRepository {
       .get();
   }
 
+  findPolicyResult(deploymentId: string): PolicyResult | undefined {
+    return this.database.db
+      .select()
+      .from(policyResults)
+      .where(eq(policyResults.deploymentId, deploymentId))
+      .get();
+  }
+
+  hasSuccessfulSignResult(deploymentId: string): boolean {
+    return Boolean(
+      this.database.db
+        .select({ id: deploymentArtifacts.id })
+        .from(deploymentArtifacts)
+        .innerJoin(
+          stageExecutions,
+          eq(deploymentArtifacts.stageExecutionId, stageExecutions.id),
+        )
+        .where(
+          and(
+            eq(deploymentArtifacts.deploymentId, deploymentId),
+            eq(deploymentArtifacts.name, 'sign_result'),
+            eq(stageExecutions.stage, 'sign'),
+            eq(stageExecutions.status, 'succeeded'),
+          ),
+        )
+        .limit(1)
+        .get(),
+    );
+  }
+
   list(applicationId: string): Deployment[] {
     return this.database.db
       .select()
@@ -59,11 +89,7 @@ export class DeploymentRepository {
       .where(eq(stageExecutions.deploymentId, id))
       .orderBy(asc(stageExecutions.sequence), asc(stageExecutions.attempt))
       .all();
-    const policyResult = this.database.db
-      .select()
-      .from(policyResults)
-      .where(eq(policyResults.deploymentId, id))
-      .get();
+    const policyResult = this.findPolicyResult(id);
     const artifacts = this.listArtifacts(id);
     const auditLogs = this.database.db
       .select()

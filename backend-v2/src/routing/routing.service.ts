@@ -35,6 +35,7 @@ export class RoutingService {
     if (!deployment || deployment.applicationId !== applicationId) {
       throw new NotFoundException('Deployment not found for application');
     }
+    this.requireAllowedTarget(deployment.id, input.kind);
 
     let agentId: string | null = null;
     let localPort: number | null = null;
@@ -119,6 +120,7 @@ export class RoutingService {
     if (!target.enabled) {
       throw new ConflictException('Routing target is disabled');
     }
+    this.requireAllowedTarget(target.deploymentId, target.kind);
     const route = this.repository.changeRoute(
       applicationId,
       target.id,
@@ -169,6 +171,26 @@ export class RoutingService {
   private requireApplication(id: string): void {
     if (!this.applications.find(id)) {
       throw new NotFoundException('Application not found');
+    }
+  }
+
+  private requireAllowedTarget(
+    deploymentId: string,
+    kind: 'onprem' | 'cloud_run',
+  ): void {
+    const policy = this.deployments.findPolicyResult(deploymentId);
+    if (
+      !policy ||
+      policy.decision === 'block' ||
+      !policy.targets.includes(kind)
+    ) {
+      throw new ConflictException('Deployment policy does not allow target');
+    }
+    if (
+      !policy.planHash ||
+      !this.deployments.hasSuccessfulSignResult(deploymentId)
+    ) {
+      throw new ConflictException('Deployment policy is not signed');
     }
   }
 

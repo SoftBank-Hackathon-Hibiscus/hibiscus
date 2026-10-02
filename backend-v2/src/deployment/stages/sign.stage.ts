@@ -102,15 +102,21 @@ export class SignStage implements StageRunner {
 
   private async runCli(context: StageContext): Promise<StageOutcome> {
     const { application, deployment, paths, approval } = context;
-    if (
-      this.config.get('backend.signerMode', { infer: true }) === 'real' &&
-      deployment.digestSource !== 'registry'
-    ) {
-      return {
-        status: 'failed',
-        artifacts: {},
-        error: 'Real signing requires a registry image digest',
-      };
+    if (this.config.get('backend.signerMode', { infer: true }) === 'real') {
+      if (!deployment.sourceRevisionVerified) {
+        return {
+          status: 'failed',
+          artifacts: {},
+          error: 'Real signing requires a verified source revision',
+        };
+      }
+      if (deployment.digestSource !== 'registry') {
+        return {
+          status: 'failed',
+          artifacts: {},
+          error: 'Real signing requires a registry image digest',
+        };
+      }
     }
     const repoRoot = this.config.get('backend.repoRoot', { infer: true });
     const planPath = join(paths.policy, 'plan.json');

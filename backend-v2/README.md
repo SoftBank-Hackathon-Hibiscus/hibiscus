@@ -64,7 +64,7 @@ src/
 - 서비스 파일에는 서비스 클래스 하나만 둡니다. 인증 가드는 `auth/guards/jwt-auth.guard.ts`에 둡니다.
 - Deployment의 `stages/`가 단계별 실행 책임을 가집니다.
 - 공통 명령 실행은 `infrastructure/`에 둡니다. 계약 스키마 검사는 테스트에서만 수행합니다.
-- Git 검사는 수행하지 않습니다. `sourceRevisionVerified`는 `false`로 저장합니다.
+- 수동 요청은 Git 검사를 수행하지 않으므로 `sourceRevisionVerified=false`입니다. HMAC을 검증하고 연결된 저장소·브랜치와 일치한 GitHub Push Webhook은 `true`입니다.
 
 ## 데이터 관계
 
@@ -222,11 +222,12 @@ GitHub App 사용자 토큰과 GitHub refresh token은 AES-256-GCM으로 암호�
 
 Webhook은 원본 요청 바이트의 HMAC-SHA256을 `X-Hub-Signature-256`과 상수 시간 비교합니다. [GitHub 서명 검증 문서](https://docs.github.com/en/webhooks/using-webhooks/validating-webhook-deliveries).
 
-- 선택한 브랜치의 push만 기존 배포 큐에 넣습니다. trigger는 `webhook`, source revision은 push commit SHA입니다.
+- 선택한 브랜치의 push만 기존 배포 큐에 넣습니다. trigger는 `webhook`, source revision은 push commit SHA이고 검증 상태는 `true`입니다.
 - Delivery ID와 payload hash를 DB에 저장합니다. 같은 이벤트 재전송은 배포를 다시 생성하지 않습니다. 같은 ID에 다른 내용이면 409입니다.
 - 수신 기록과 배포 생성은 한 DB 트랜잭션입니다. 실패하면 모두 취소합니다. 이후 재전송할 수 있습니다.
 - 태그 push, 삭제 push, 선택하지 않은 브랜치는 배포하지 않습니다.
 - App 설치 삭제·중단, 저장소 접근 제거, 사용자 인증 취소 이벤트는 해당 연결을 비활성화합니다. 인증 취소 시 GitHub 자격 증명도 삭제합니다.
+- Webhook에는 빌드된 이미지 Digest가 없으므로 현재는 placeholder Digest를 저장합니다. 빌드 단계가 Registry Digest를 저장하기 전에는 실제 서명을 진행하지 않습니다.
 
 `GITHUB_WEBHOOK_SECRET`은 최소 32자입니다. 없으면 Webhook은 503을 반환합니다. `GITHUB_APP_SLUG`는 설치 URL 생성용입니다. `GITHUB_TOKEN_ENCRYPTION_KEY`는 `openssl rand -hex 32`로 생성하고 운영에서 고정 보관하세요. 생략하면 JWT refresh 서명 키에서 별도 키를 파생합니다. 이때 JWT refresh 서명 키를 변경하면 GitHub 재로그인이 필요합니다. App private key와 installation token은 현재 방식에서 사용하지 않습니다.
 
@@ -240,6 +241,8 @@ Webhook은 원본 요청 바이트의 HMAC-SHA256을 `X-Hub-Signature-256`과 �
 ```
 
 승인은 `POST /deployments/:id/approve`에 빈 본문 `{}`를 보냅니다. `approver`는 보내지 않습니다. 본인 배포는 승인할 수 없습니다.
+
+실제 서명은 검증된 Source Revision과 Registry Image Digest가 모두 있을 때만 진행합니다.
 
 ## API
 
@@ -273,6 +276,7 @@ Routing Target은 특정 Deployment의 실행 위치입니다.
 
 - `onprem`: 할당된 `agent_id`와 `local_port`를 사용합니다.
 - `cloud_run`: HTTPS `url`을 사용합니다.
+- 성공한 서명 결과가 있고 정책 `targets`가 허용한 종류만 Target으로 만들거나 현재 Route로 선택할 수 있습니다.
 - `PATCH /applications/:id/routing`은 `target_id`, `expected_revision`, 선택 `reason`을 받습니다.
 - Revision이 다르면 `409`를 반환합니다. 동시 변경으로 새 Route를 덮어쓰지 않습니다.
 - Target Health는 `healthy`, `unhealthy`, `unknown`을 저장합니다. `expires_at`이 지나면 조회 결과는 `unknown`입니다.

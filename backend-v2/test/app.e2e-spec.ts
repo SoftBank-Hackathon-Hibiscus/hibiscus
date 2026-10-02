@@ -983,6 +983,19 @@ describe('deployment API (e2e)', () => {
     expect(
       deploymentView.stages.map((stage: { stage: string }) => stage.stage),
     ).toEqual(['test', 'policy']);
+    await api()
+      .post(`/applications/${application.application.id}/targets`)
+      .send({
+        deployment_id: deployment.id,
+        kind: 'cloud_run',
+        url: 'https://blocked.example.run.app',
+      })
+      .expect(409)
+      .expect((response) => {
+        expect(response.body.message).toBe(
+          'Deployment policy does not allow target',
+        );
+      });
   });
 
   it('requires a different user to approve a protected deployment', async () => {
