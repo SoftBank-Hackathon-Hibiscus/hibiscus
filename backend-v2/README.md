@@ -54,7 +54,7 @@ src/
 ├── deployment/   Version, Pipeline, Stage, Policy Result
 ├── agent/        Agent와 Application 연결
 ├── routing/      Target, 현재 Route, Health 상태
-├── ssh-tunnel/   VM loopback SSH 전달 연결과 상태 확인
+├── ssh-tunnel/   내장 SSH 서버, loopback 전달과 상태 확인
 ├── gateway/      Host 선택과 On-Prem·Cloud Run Reverse Proxy
 ├── health/       Target 점검과 자동 Failover
 ├── auth/         GitHub 로그인, JWT 발급·검증·갱신
@@ -301,7 +301,7 @@ Gateway 진입 방법은 두 개입니다.
 
 Gateway는 요청과 응답을 스트리밍합니다. Hop-by-hop 헤더는 전달하지 않습니다. 쓰기 요청도 자동 재전송하지 않습니다. `GATEWAY_IDLE_TIMEOUT_MS` 동안 데이터가 없으면 요청을 종료합니다.
 
-Agent는 Backend API에서 전달 목록을 폴링합니다. 그 뒤 `ssh2` 연결 하나에 여러 remote forward를 설정합니다.
+Agent는 Backend API에서 전달 목록을 폴링합니다. 그 뒤 Backend의 `ssh2` Tunnel Server에 연결합니다. SSH 연결 하나에 여러 remote forward를 설정합니다.
 
 ```text
 Gateway request
@@ -324,26 +324,21 @@ Docker container
 - Agent는 ED25519 키를 직접 생성하고 공개키만 Backend에 등록합니다.
 - SSH 등록 token은 기본 10분 뒤 만료되며 한 번만 사용할 수 있습니다.
 - Agent token을 폐기하면 등록한 SSH 공개키도 폐기합니다.
+- Backend는 Agent 공개키를 DB에서 확인합니다.
+- Backend는 해당 Agent에 할당된 `gateway_port`만 허용합니다.
+- Backend는 SSH Shell, 명령 실행, SFTP, Agent의 임의 TCP 연결을 허용하지 않습니다.
 
-Backend VM에는 별도 `sshd`가 필요합니다. Backend 프로세스가 SSH 서버를 구현하지 않습니다. `scripts/authorized-keys-command.mjs`는 DB에서 등록된 공개키를 찾고, 해당 Agent에 배정된 `gateway_port`만 허용하는 `authorized_keys` 한 줄을 출력합니다.
+Backend 프로세스가 SSH Tunnel Server를 직접 실행합니다. 시스템 `sshd`, OS Tunnel 사용자, `authorized_keys`, `AuthorizedKeysCommand`는 필요하지 않습니다.
 
 ```text
-FingerprintHash sha256
-
-Match User hibiscus-agent
-    AuthorizedKeysFile none
-    AuthorizedKeysCommand /opt/hibiscus/backend-v2/scripts/authorized-keys-command.mjs /var/lib/hibiscus/backend.db %f
-    AuthorizedKeysCommandUser hibiscus-key-reader
-    PasswordAuthentication no
-    KbdInteractiveAuthentication no
-    PubkeyAuthentication yes
-    AllowTcpForwarding remote
-    GatewayPorts no
-    PermitTTY no
-    X11Forwarding no
+Agent ssh2 Client
+  ↓ ED25519 공개키 인증
+Backend ssh2 Tunnel Server :2222
+  ↓ 허용된 127.0.0.1:<gateway_port>만 생성
+Backend Gateway
 ```
 
-명령 파일은 root 소유여야 하며 group과 other가 수정할 수 없어야 합니다. `hibiscus-key-reader`는 DB와 상위 폴더를 읽을 수 있어야 합니다. 설정 후 `sshd -t`로 검사하고 SSH 서버를 다시 불러옵니다. 운영 방화벽에서는 SSH 포트를 필요한 네트워크에만 엽니다.
+`SSH_HOST_KEY_FILE`이 없으면 Backend가 ED25519 Host Key를 생성합니다. 이 파일을 영구 볼륨이나 Secret에 보관해야 합니다. 파일이 바뀌면 Agent의 Host Key 검증이 실패합니다. `SSH_HOST`는 Agent가 접속할 외부 주소입니다. `SSH_BIND_HOST`는 Backend의 수신 주소입니다. 기본 SSH 포트는 `2222`입니다. 운영 방화벽에서는 이 포트를 Agent 네트워크에만 엽니다.
 
 ## Agent API 계약 v1
 
@@ -353,17 +348,17 @@ Match User hibiscus-agent
 
 ### 관리 API — 사용자 Access JWT
 
-| Method | 경로                       | 기능                                  |
-| ------ | -------------------------- | ------------------------------------- |
-| POST   | `/agents`                  | 등록·token 최초 발급                  |
-| GET    | `/agents`, `/agents/:id`   | Agent 조회                            |
-| POST   | `/agents/:id/token/rotate` | 새 token 발급, 이전 token 즉시 무효화 |
-| DELETE | `/agents/:id/token`        | token 폐기                            |
-| POST   | `/agents/:id/ssh/enrollment` | 새 1회용 SSH 등록 token 발급        |
-| GET    | `/agents/:id/status`       | 최근 상태 조회                        |
-| POST   | `/agents/:id/jobs`         | 작업 생성                             |
-| GET    | `/agents/:id/jobs`         | 작업 목록 조회                        |
-| GET    | `/agents/:id/jobs/:jobId`  | 작업 상태와 결과 조회                 |
+| Method | 경로                         | 기능                                  |
+| ------ | ---------------------------- | ------------------------------------- |
+| POST   | `/agents`                    | 등록·token 최초 발급                  |
+| GET    | `/agents`, `/agents/:id`     | Agent 조회                            |
+| POST   | `/agents/:id/token/rotate`   | 새 token 발급, 이전 token 즉시 무효화 |
+| DELETE | `/agents/:id/token`          | token 폐기                            |
+| POST   | `/agents/:id/ssh/enrollment` | 새 1회용 SSH 등록 token 발급          |
+| GET    | `/agents/:id/status`         | 최근 상태 조회                        |
+| POST   | `/agents/:id/jobs`           | 작업 생성                             |
+| GET    | `/agents/:id/jobs`           | 작업 목록 조회                        |
+| GET    | `/agents/:id/jobs/:jobId`    | 작업 상태와 결과 조회                 |
 
 token 원문은 등록·교체 응답에서 한 번만 제공합니다. DB에는 SHA-256 해시만 저장합니다. 폐기된 Agent는 token 교체로 다시 등록 상태가 됩니다. Job·결과·heartbeat 기록은 삭제하지 않습니다.
 

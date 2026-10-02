@@ -47,33 +47,33 @@ node dist/main.js
 
 ## 설정
 
-| 키                                |                    기본값 | 기능                                    |
-| --------------------------------- | ------------------------: | --------------------------------------- |
-| `BACKEND_API_URL`                 |                      필수 | Backend HTTP API 주소                   |
-| `AGENT_ID`                        |                      필수 | Agent 등록 응답의 `agent.id`            |
-| `AGENT_TOKEN`                     |                      필수 | Agent 등록 또는 token 교체 응답의 token |
-| `SSH_ENROLLMENT_TOKEN`            |                 최초 필수 | 1회용 SSH 공개키 등록 token             |
-| `COSIGN_PUBLIC_KEY`               |                      필수 | 이미지 서명 공개키 경로                 |
-| `AGENT_STATE_FILE`                | `./data/agent-state.json` | 컨테이너와 완료 Job 상태 파일           |
-| `AGENT_POLL_INTERVAL_MS`          |                    `2000` | Job 폴링 간격                           |
-| `AGENT_HEARTBEAT_INTERVAL_MS`     |                   `10000` | heartbeat 전송 간격                     |
-| `BACKEND_REQUEST_TIMEOUT_MS`      |                   `10000` | Backend API 요청 시간 초과              |
-| `COMMAND_TIMEOUT_MS`              |                  `100000` | Docker·cosign 명령 시간 초과            |
-| `DOCKER_STOP_TIMEOUT_SECONDS`     |                      `10` | 컨테이너 정지 대기 시간                 |
-| `COSIGN_ALLOW_INSECURE_REGISTRY`  |                   `false` | 로컬 개발용 HTTP Registry 허용          |
-| `COSIGN_INSECURE_IGNORE_TLOG`     |                   `false` | 로컬 테스트에서만 transparency log 생략 |
-| `SSH_HOST`                        |                 자동 설정 | Backend VM SSH 주소                     |
-| `SSH_PORT`                        |                      `22` | Backend VM SSH 포트                     |
-| `SSH_USER`                        |                 자동 설정 | Tunnel 전용 OS 사용자                   |
-| `SSH_IDENTITY_FILE`               | `./data/ssh/agent_ed25519` | Agent 전용 SSH 개인 키 경로           |
-| `SSH_HOST_KEY_SHA256`             |                 자동 설정 | 고정한 VM SSH host key 지문             |
-| `SSH_READY_TIMEOUT_MS`            |                   `10000` | SSH 연결 준비 시간 초과                 |
-| `SSH_FORWARD_POLL_INTERVAL_MS`    |                    `2000` | 전달 목록 확인 간격                     |
-| `SSH_SERVER_ALIVE_INTERVAL_SECONDS` |                    `15` | SSH keepalive 간격                      |
-| `SSH_SERVER_ALIVE_COUNT_MAX`      |                       `3` | 연결 종료 전 keepalive 실패 횟수        |
-| `SSH_SESSION_MAX_MS`              |                  `900000` | 공개키 재검사를 위한 최대 연결 시간     |
+| 키                                  |                     기본값 | 기능                                    |
+| ----------------------------------- | -------------------------: | --------------------------------------- |
+| `BACKEND_API_URL`                   |                       필수 | Backend HTTP API 주소                   |
+| `AGENT_ID`                          |                       필수 | Agent 등록 응답의 `agent.id`            |
+| `AGENT_TOKEN`                       |                       필수 | Agent 등록 또는 token 교체 응답의 token |
+| `SSH_ENROLLMENT_TOKEN`              |                  최초 필수 | 1회용 SSH 공개키 등록 token             |
+| `COSIGN_PUBLIC_KEY`                 |                       필수 | 이미지 서명 공개키 경로                 |
+| `AGENT_STATE_FILE`                  |  `./data/agent-state.json` | 컨테이너와 완료 Job 상태 파일           |
+| `AGENT_POLL_INTERVAL_MS`            |                     `2000` | Job 폴링 간격                           |
+| `AGENT_HEARTBEAT_INTERVAL_MS`       |                    `10000` | heartbeat 전송 간격                     |
+| `BACKEND_REQUEST_TIMEOUT_MS`        |                    `10000` | Backend API 요청 시간 초과              |
+| `COMMAND_TIMEOUT_MS`                |                   `100000` | Docker·cosign 명령 시간 초과            |
+| `DOCKER_STOP_TIMEOUT_SECONDS`       |                       `10` | 컨테이너 정지 대기 시간                 |
+| `COSIGN_ALLOW_INSECURE_REGISTRY`    |                    `false` | 로컬 개발용 HTTP Registry 허용          |
+| `COSIGN_INSECURE_IGNORE_TLOG`       |                    `false` | 로컬 테스트에서만 transparency log 생략 |
+| `SSH_HOST`                          |                  자동 설정 | Backend VM SSH 주소                     |
+| `SSH_PORT`                          |                     `2222` | Backend Tunnel Server 포트              |
+| `SSH_USER`                          |                  자동 설정 | Tunnel 인증 사용자 이름                 |
+| `SSH_IDENTITY_FILE`                 | `./data/ssh/agent_ed25519` | Agent 전용 SSH 개인 키 경로             |
+| `SSH_HOST_KEY_SHA256`               |                  자동 설정 | 고정한 VM SSH host key 지문             |
+| `SSH_READY_TIMEOUT_MS`              |                    `10000` | SSH 연결 준비 시간 초과                 |
+| `SSH_FORWARD_POLL_INTERVAL_MS`      |                     `2000` | 전달 목록 확인 간격                     |
+| `SSH_SERVER_ALIVE_INTERVAL_SECONDS` |                       `15` | SSH keepalive 간격                      |
+| `SSH_SERVER_ALIVE_COUNT_MAX`        |                        `3` | 연결 종료 전 keepalive 실패 횟수        |
+| `SSH_SESSION_MAX_MS`                |                   `900000` | 공개키 재검사를 위한 최대 연결 시간     |
 
-SSH Tunnel은 `ssh2` Node 모듈을 사용합니다. 시스템 `ssh` 명령과 `child_process`를 사용하지 않습니다. SSH 연결 하나가 여러 앱의 TCP 연결을 함께 처리합니다. 전달 목록이 바뀌거나 최대 연결 시간이 지나면 연결을 다시 구성합니다.
+SSH Tunnel의 Agent와 Backend는 모두 `ssh2` Node 모듈을 사용합니다. 시스템 `ssh`, 시스템 `sshd`, `child_process`를 사용하지 않습니다. SSH 연결 하나가 여러 앱의 TCP 연결을 함께 처리합니다. 전달 목록이 바뀌거나 최대 연결 시간이 지나면 연결을 다시 구성합니다.
 
 최초 실행 흐름:
 
