@@ -1,4 +1,4 @@
-import { Check, Clock, Cloud, FlaskConical, LoaderCircle, Lock, Minus, Rocket, Scale, Server, TriangleAlert, UserCheck, X, type LucideIcon } from 'lucide-react';
+import { Check, Clock, Cloud, FlaskConical, LoaderCircle, Lock, Minus, Rocket, Scale, Server, ShieldX, TriangleAlert, UserCheck, X, type LucideIcon } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import type { DataSource } from '../api/client';
 import type { Approval, PiiReport, SignLog, TestResult } from '../api/contracts';
@@ -17,6 +17,7 @@ import { summarizeDeployment, type DeploymentSummary, type ProofLink } from '../
 const PROGRESSING: DeploymentStatus[] = ['queued', 'running', 'awaiting_approval'];
 const STATUS_KEY: Record<DeploymentStatus, DictKey> = { queued: 'statusQueued', running: 'statusRunning', awaiting_approval: 'statusAwaiting', blocked: 'statusBlocked', failed: 'statusFailed', succeeded: 'statusSucceeded' };
 const STATUS_TONE: Record<DeploymentStatus, Tone> = { queued: 'info', running: 'info', awaiting_approval: 'warning', blocked: 'danger', failed: 'danger', succeeded: 'success' };
+const STATUS_ICON: Record<DeploymentStatus, LucideIcon> = { queued: Minus, running: LoaderCircle, awaiting_approval: Clock, blocked: ShieldX, failed: X, succeeded: Check };
 const DECISION_TONE: Record<Decision, Tone> = { allow: 'success', needs_approval: 'warning', block: 'danger' };
 const DECISION_LABEL: Record<Decision, string> = { allow: 'ALLOW', needs_approval: 'NEEDS_APPROVAL', block: 'BLOCK' };
 const STEP_DETAIL_KEY: Record<StageName, DictKey> = { test: 'testDetail', policy: 'policyDetail', sign: 'signDetail', deploy: 'deployDetail' };
@@ -91,7 +92,9 @@ export function DeploymentDetail({ id, source }: { id: string; source: DataSourc
         right={
           <div className="title-badges">
             {summary.decision && <Pill tone={DECISION_TONE[summary.decision]}>{DECISION_LABEL[summary.decision]}</Pill>}
-            <Pill tone={STATUS_TONE[d.status]}>{t(STATUS_KEY[d.status])}</Pill>
+            <Pill tone={STATUS_TONE[d.status]} icon={STATUS_ICON[d.status]} spin={d.status === 'running'}>
+              {t(STATUS_KEY[d.status])}
+            </Pill>
             {d.deploymentPerformed && <Pill tone="success">{t('deployed')}</Pill>}
             {progressing && (
               <span className="live">

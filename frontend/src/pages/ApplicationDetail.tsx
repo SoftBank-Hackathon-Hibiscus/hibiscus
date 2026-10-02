@@ -1,10 +1,10 @@
-import { ChevronRight, Cloud, Server, Shuffle } from 'lucide-react';
+import { ArrowRight, Check, ChevronRight, Clock, Cloud, LoaderCircle, Minus, Server, ShieldX, Shuffle, X, type LucideIcon } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { ApiError, type DataSource } from '../api/client';
 import { MockDataSource } from '../api/mock';
 import type { AgentStatusResponse, ApplicationAgentSummary, ApplicationView, Deployment, DeploymentStatus, PolicyResult, RouteSnapshot, RoutingTargetHealth, RoutingTargetView, TargetKind } from '../api/types';
 import { ErrorNotice, describeError } from '../components/ErrorNotice';
-import { Crumbs, Empty, Hash, Kv, PageTitle, Pill, type Tone } from '../components/ui';
+import { Crumbs, Empty, Hash, PageTitle, Pill, type Tone } from '../components/ui';
 import { usePolling } from '../hooks/usePolling';
 import { detectRouteChange, markOf, type RouteChange, type RouteMark } from '../lib/failover';
 import { fmtTime, relTime, targetLabel } from '../lib/format';
@@ -36,6 +36,8 @@ interface SeenChange {
 }
 
 const STATUS_TONE: Record<DeploymentStatus, Tone> = { queued: 'info', running: 'info', awaiting_approval: 'warning', blocked: 'danger', failed: 'danger', succeeded: 'success' };
+/** 색만으로 구분되지 않게 상태마다 다른 모양. 차단(방패)과 실패(X)는 같은 빨강이라 특히 중요. */
+const STATUS_ICON: Record<DeploymentStatus, LucideIcon> = { queued: Minus, running: LoaderCircle, awaiting_approval: Clock, blocked: ShieldX, failed: X, succeeded: Check };
 const STATUS_KEY: Record<DeploymentStatus, DictKey> = { queued: 'statusQueued', running: 'statusRunning', awaiting_approval: 'statusAwaiting', blocked: 'statusBlocked', failed: 'statusFailed', succeeded: 'statusSucceeded' };
 const HEALTH_KEY: Record<string, DictKey> = { healthy: 'healthy', unhealthy: 'unhealthy', unknown: 'unknown' };
 
@@ -126,7 +128,6 @@ export function ApplicationDetail({ id, source }: { id: string; source: DataSour
 
   return (
     <div className="page">
-      {latestEvent && <RouteBanner seen={latestEvent} count={events.length} />}
       {poll.error ? <ErrorNotice error={poll.error} /> : null}
       <PageTitle
         crumbs={<Crumbs items={[{ label: t('crumbApps'), href: hrefFor(APPLICATIONS_PATH) }, { label: a.name }]} />}
@@ -175,11 +176,13 @@ export function ApplicationDetail({ id, source }: { id: string; source: DataSour
         </div>
       )}
 
+      {latestEvent && <RouteBanner seen={latestEvent} deployments={snap.deployments} />}
+
       <TrafficCard snap={snap} degraded={degraded} lang={lang} />
 
       <div className="grid-2">
         <TargetsCard snap={snap} />
-        <AgentsCard rows={snap.agents} />
+        <AgentsCard rows={snap.agents} deployments={snap.deployments} activeDeploymentId={route?.target.deploymentId ?? null} />
       </div>
 
       <section className="card">
@@ -204,18 +207,25 @@ export function ApplicationDetail({ id, source }: { id: string; source: DataSour
   );
 }
 
-function RouteBanner({ seen, count }: { seen: SeenChange; count: number }) {
+function versionOf(deployments: Deployment[], deploymentId: string): string {
+  const found = deployments.find((d) => d.id === deploymentId);
+  return found ? `v${found.version}` : deploymentId.slice(0, 8);
+}
+
+/** 경로 전환 알림. 상태만 짧게: 어디서 어디로, 버전과 revision. 시각·횟수는 아래 "확인한 전환" 목록에만. */
+function RouteBanner({ seen, deployments }: { seen: SeenChange; deployments: Deployment[] }) {
   const { t } = useLang();
-  const { change, at } = seen;
+  const { change } = seen;
+  const leg = (m: RouteMark) => `${targetLabel(m.kind)} (${versionOf(deployments, m.deploymentId)}, rev ${m.revision})`;
   return (
-    <div className={`card banner banner-${change.failover ? 'warning' : 'info'}`} role="alert">
-      <Shuffle size={18} className="banner-mark" aria-hidden />
-      <div>
+    <div className={`card banner banner-${change.failover ? 'warning' : 'info'}`} role="status">
+      {change.failover ? <Shuffle size={18} className="banner-mark" aria-hidden /> : <ArrowRight size={18} className="banner-mark" aria-hidden />}
+      <div className="banner-text">
         <div className="banner-title">{change.failover ? t('failoverHappened') : t('routeChanged')}</div>
-        <div className="banner-body">
-          {t('bannerLine', { from: targetLabel(change.from.kind), to: targetLabel(change.to.kind), time: fmtTime(new Date(at).toISOString()), n: count })}
-          {change.failover && ` ${t('noFailback')}`}
+        <div className="banner-route">
+          {leg(change.from)} → {leg(change.to)}
         </div>
+        {change.failover && <div className="banner-body">{t('noFailback', { from: targetLabel(change.from.kind) })}</div>}
       </div>
     </div>
   );
@@ -314,7 +324,7 @@ function TrafficCard({ snap, degraded, lang }: { snap: Snapshot; degraded: boole
               ) : (
                 <Pill tone={failoverOn ? 'success' : 'muted'}>{failoverOn ? t('failoverOn') : t('failoverOff')}</Pill>
               )}
-              {standby && failoverOn && !standbyCanTakeOver && <span className="small muted">{t('manualAfterRecovery')}</span>}
+              {standby && failoverOn && !standbyCanTakeOver && <span className="small muted">{t('noFailbackShort')}</span>}
             </div>
           </div>
         </div>
@@ -368,7 +378,7 @@ function TargetsCard({ snap }: { snap: Snapshot }) {
   );
 }
 
-function AgentsCard({ rows }: { rows: AgentRow[] }) {
+function AgentsCard({ rows, deployments, activeDeploymentId }: { rows: AgentRow[]; deployments: Deployment[]; activeDeploymentId: string | null }) {
   const { t } = useLang();
   return (
     <section className="card">
@@ -378,22 +388,48 @@ function AgentsCard({ rows }: { rows: AgentRow[] }) {
         {rows.map(({ agent, status, error }) => {
           const s = status?.status ?? agent.status;
           const agentTone: Tone = s === 'online' ? 'success' : s === 'offline' || s === 'revoked' ? 'danger' : 'muted';
+          const serving = status?.serving ?? null;
           return (
             <li key={agent.id} className="agent-row">
-              <div className="row">
-                <Server size={16} className="kind-icon" aria-hidden />
-                <strong>{agent.name}</strong>
-                <Pill tone={agentTone}>{s === 'online' ? t('agentOnline') : s === 'offline' ? t('agentOffline') : s}</Pill>
-                {!status && <span className="small muted">DB</span>}
+              <div className="row-between">
+                <span className="row row-tight">
+                  <Server size={16} className="kind-icon" aria-hidden />
+                  <strong>{agent.name}</strong>
+                  {!status && <span className="small muted">DB</span>}
+                </span>
+                <Pill tone={agentTone} icon={s === 'online' ? Check : s === 'offline' ? X : Minus}>
+                  {s === 'online' ? t('agentOnline') : s === 'offline' ? t('agentOffline') : s}
+                </Pill>
               </div>
               {error ? <ErrorNotice error={error} /> : null}
-              <Kv
-                columns={2}
-                items={[
-                  [t('lastSeen'), status?.last_seen_at ? `${relTime(status.last_seen_at)} (${fmtTime(status.last_seen_at)})` : agent.lastSeenAt ? relTime(agent.lastSeenAt) : t('none')],
-                  [t('serving'), status?.serving ? <Hash value={status.serving.container} length={26} /> : <span className="muted">{t('none')}</span>],
-                ]}
-              />
+              <dl className="fields-v">
+                <div className="field-v">
+                  <dt>{t('lastSeen')}</dt>
+                  <dd>{status?.last_seen_at ? `${relTime(status.last_seen_at)} (${fmtTime(status.last_seen_at)})` : agent.lastSeenAt ? relTime(agent.lastSeenAt) : t('none')}</dd>
+                </div>
+                <div className="field-v">
+                  <dt>{t('serving')}</dt>
+                  <dd>
+                    {serving ? (
+                      <span className="row row-tight">
+                        <a href={hrefFor(deploymentPath(serving.run_id))}>{versionOf(deployments, serving.run_id)}</a>
+                        <Hash value={serving.digest} length={12} />
+                        {activeDeploymentId === serving.run_id && <span className="tag">{t('currentRouteVersion')}</span>}
+                      </span>
+                    ) : (
+                      <span className="muted">{t('none')}</span>
+                    )}
+                  </dd>
+                </div>
+                {serving && (
+                  <div className="field-v">
+                    <dt>{t('containerLabel')}</dt>
+                    <dd>
+                      <Hash value={serving.container} length={32} />
+                    </dd>
+                  </div>
+                )}
+              </dl>
             </li>
           );
         })}
@@ -411,7 +447,9 @@ function DeploymentTimeline({ deployments, activeDeploymentId }: { deployments: 
         <li key={d.id}>
           <a className="history-item" href={hrefFor(deploymentPath(d.id))}>
             <span className="history-version">v{d.version}</span>
-            <Pill tone={STATUS_TONE[d.status]}>{t(STATUS_KEY[d.status])}</Pill>
+            <Pill tone={STATUS_TONE[d.status]} icon={STATUS_ICON[d.status]} spin={d.status === 'running'}>
+              {t(STATUS_KEY[d.status])}
+            </Pill>
             {d.decision && <Pill tone={d.decision === 'allow' ? 'success' : d.decision === 'block' ? 'danger' : 'warning'}>{d.decision === 'allow' ? 'ALLOW' : d.decision === 'block' ? 'BLOCK' : 'NEEDS_APPROVAL'}</Pill>}
             {!d.deploymentPerformed && d.status === 'succeeded' && <span className="small muted">{t('notDeployed')}</span>}
             <span className="history-meta">

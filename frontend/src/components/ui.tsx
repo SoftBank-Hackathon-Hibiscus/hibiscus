@@ -7,10 +7,10 @@ import { prettyJson } from '../lib/format';
 export type { Tone };
 
 /** 작은 알약 배지. 상태를 나타내는 유일한 색 요소로 쓴다. */
-export function Pill({ tone, children, title, icon: Icon }: { tone: Tone; children: ReactNode; title?: string; icon?: LucideIcon }) {
+export function Pill({ tone, children, title, icon: Icon, spin = false }: { tone: Tone; children: ReactNode; title?: string; icon?: LucideIcon; spin?: boolean }) {
   return (
     <span className={`pill pill-${tone}`} title={title}>
-      {Icon ? <Icon size={13} aria-hidden /> : <span className="pill-dot" aria-hidden />}
+      {Icon ? <Icon size={13} className={spin ? 'spin' : undefined} aria-hidden /> : <span className="pill-dot" aria-hidden />}
       {children}
     </span>
   );
