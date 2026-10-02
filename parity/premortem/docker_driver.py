@@ -64,18 +64,21 @@ class DockerDriver:
         return self._run(["image", "inspect", "--format", "{{.Os}}/{{.Architecture}}", image_id]).stdout.strip()
 
     # 컨테이너 -----------------------------------------------------------
-    def create(self, image_id: str, run_id: str, condition: str, container_port: int, sequence: int) -> str:
+    def create(self, image_id: str, run_id: str, condition: str, container_port: int, sequence: int,
+               host_port: Optional[int] = None) -> str:
         if not _IMAGE_ID_RE.fullmatch(image_id):
             raise PremortemError("IMAGE_IDENTITY_MISMATCH", "컨테이너는 고정한 로컬 이미지 ID로만 만든다")
         name = f"premortem-{run_id}-{condition}-{sequence}"
         if not _NAME_RE.fullmatch(name):
             raise PremortemError("INPUT_INVALID", f"컨테이너 이름 형식이 아님: {name}")
+        if host_port is not None and (type(host_port) is not int or not 1 <= host_port <= 65535):
+            raise PremortemError('INPUT_INVALID', '호스트 포트는 1~65535 정수여야 함')
         args = [
             "create", "--name", name,
             "--label", f"{OWNER_LABEL_KEY}={OWNER_LABEL_VALUE}",
             "--label", f"{RUN_LABEL_KEY}={run_id}",
             "--label", f"{CONDITION_LABEL_KEY}={condition}",
-            "--publish", f"127.0.0.1::{int(container_port)}",
+            "--publish", f"127.0.0.1:{host_port or ''}:{int(container_port)}",
             "--memory", "256m", "--pids-limit", "128", "--cpus", "1",
             "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
             image_id,
