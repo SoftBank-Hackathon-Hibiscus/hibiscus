@@ -40,12 +40,16 @@ npm run sign -- --plan plan.json --requester <요청자> [--approval approval.js
   --image-repo <저장소> --key ~/hibiscus-secrets/cosign.key \
   --out sign_result.json --log decisions.jsonl
 
+# Rekor 장애 시: Rekor에 안 올리고 서명
+npm run sign -- ... --key ~/hibiscus-secrets/cosign.key --no-tlog
+
 # cosign 없이 연결만 확인 (signature_ref가 dry-run:...)
 npm run sign -- --plan plan.json --requester <요청자> --image-repo <저장소> --dry-run
 ```
 
 - `--image-repo`: 태그 없는 저장소 주소. 없으면 `IMAGE_REPO` 환경변수 (deploy coordinator와 같은 이름)
 - `--key`: 없으면 `SIGNER_COSIGN_KEY` 환경변수. 비밀번호는 `COSIGN_PASSWORD` 환경변수로만
+- `--no-tlog`: 없으면 `SIGNER_NO_TLOG=1` 환경변수. backend는 CLI 인자 안 바꾸고 환경변수만 켜면 됨
 - 종료 코드: 0 서명함 / 1 서명 거절 / 2 실행 오류
 
 ## 배포 쪽 서명 확인
@@ -55,6 +59,7 @@ cosign verify --key signer/keys/cosign.pub -a plan_hash=<sign_result.plan_hash> 
 ```
 
 - 서명에 run_id, plan_hash, source_revision 주석이 붙어 있어서 "이 plan으로 서명된 이미지"인지까지 확인 가능
+- `--no-tlog`로 서명한 이미지는 위 명령에 `--insecure-ignore-tlog=true`를 붙여야 통과 (안 붙이면 실패)
 - signature_ref가 `dry-run:`으로 시작하면 실제 서명이 아니라서 배포하면 안 됨
 
 ## 형식

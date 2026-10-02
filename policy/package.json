@@ -14,6 +14,7 @@
     "contracts": "tsx scripts/contracts.ts",
     "validate": "tsx src/validate.ts",
     "stage": "tsx src/stage.ts",
+    "adapt": "tsx src/adapters/cli.ts",
     "migration": "tsx src/migration/cli.ts",
     "explain": "tsx src/explain.ts"
   },

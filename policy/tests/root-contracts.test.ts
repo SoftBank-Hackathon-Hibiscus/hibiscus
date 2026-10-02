@@ -14,7 +14,7 @@ const ROOT_CONTRACTS = join(POLICY_ROOT, "..", "contracts");
 const POLICY_CONTRACTS = join(POLICY_ROOT, "contracts");
 
 /** 루트 contracts/ 에 공개한 policy 소유 스키마 */
-const PUBLISHED = ["Plan", "RollbackRequest", "RollbackPlan", "DecisionLog"] as const;
+const PUBLISHED = ["TestResult", "Plan", "RollbackRequest", "RollbackPlan", "DecisionLog"] as const;
 
 /** 줄바꿈만 다른 것은 같은 내용으로 본다 (core.autocrlf=true 체크아웃에서 CRLF 로 바뀔 수 있다) */
 const normalizeEol = (text: string) => text.replace(/\r\n/g, "\n");
