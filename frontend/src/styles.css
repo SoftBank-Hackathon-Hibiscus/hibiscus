@@ -1,9 +1,9 @@
 /* Hibiscus 데모 콘솔.
-   Demo Launcher(html[data-surface=brand])는 사진 배경 + 유리 카드로 브랜드/스토리를,
-   관리 화면(data-surface=console)은 중립적인 밝은 배경 + 흰 카드로 정보 읽기를 우선한다.
-   상태색(초록/주황/빨강/파랑)은 알약 배지와 얇은 틴트에만 쓴다. */
+   모든 화면이 같은 중립 배경 + 흰 카드. 정체성은 로고, 절제된 초록 액센트, 타이포그래피로만 낸다.
+   상태색(초록/주황/빨강/파랑)은 작은 알약 배지, 점, 글자색, 얇은 테두리에만 쓰고 카드 면 전체를 칠하지 않는다.
+   색을 빼고 흑백으로 봐도 굵기·간격·묶음만으로 위계가 읽혀야 한다. */
 :root {
-  --bg: #f3f6f5;
+  --bg: #f4f5f5;
   --surface: #ffffff;
   --line: rgba(47, 62, 70, 0.1);
   --line-strong: rgba(47, 62, 70, 0.2);
@@ -22,7 +22,7 @@
   --info: #3d6a9e;
   --info-soft: rgba(167, 199, 231, 0.38);
   --muted-soft: rgba(47, 62, 70, 0.07);
-  --shadow: 0 1px 2px rgba(47, 62, 70, 0.04), 0 4px 14px rgba(47, 62, 70, 0.05);
+  --shadow: 0 1px 2px rgba(47, 62, 70, 0.04);
   --sans: 'Pretendard Variable', Pretendard, 'Noto Sans KR', 'Noto Sans JP', 'Apple SD Gothic Neo', 'Segoe UI', system-ui, sans-serif;
   --mono: 'JetBrains Mono', 'Cascadia Code', Consolas, 'SF Mono', Menlo, monospace;
   --radius: 12px;
@@ -46,29 +46,6 @@ body {
 body {
   min-height: 100vh;
   background: var(--bg);
-}
-/* 브랜드 화면(런처)만 사진 배경. 콘솔 화면은 밝은 중립 배경 */
-html[data-surface='brand'] body::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  z-index: -2;
-  pointer-events: none;
-  background-image: url('/background.webp'), linear-gradient(180deg, #f6f8f7 0%, #eef3f2 100%);
-  background-size: cover, auto;
-  background-position: center center, center;
-  background-repeat: no-repeat;
-}
-html[data-surface='brand'] body::after {
-  content: '';
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  background: rgba(255, 255, 255, 0.14);
-}
-html[data-surface='console'] body {
-  background: radial-gradient(900px 500px at 10% -10%, rgba(94, 139, 126, 0.08), rgba(94, 139, 126, 0) 70%), var(--bg);
 }
 html[lang='ko'] body {
   word-break: keep-all;
@@ -150,36 +127,13 @@ code {
   }
 }
 
-/* ---- cards: 콘솔은 흰 카드, 브랜드 화면은 유리 ---- */
+/* ---- cards: 모두 같은 흰 카드 ---- */
 .card {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   padding: var(--card-pad);
-}
-html[data-surface='brand'] .card,
-html[data-surface='brand'] .topbar {
-  background: rgba(255, 255, 255, 0.5);
-  border-color: rgba(255, 255, 255, 0.78);
-  box-shadow: 0 18px 50px rgba(47, 62, 70, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.9);
-  -webkit-backdrop-filter: blur(20px) saturate(160%);
-  backdrop-filter: blur(20px) saturate(160%);
-}
-.tint-danger {
-  background: linear-gradient(rgba(232, 174, 183, 0.14), rgba(232, 174, 183, 0.14)), var(--surface);
-}
-.tint-success {
-  background: linear-gradient(rgba(94, 139, 126, 0.08), rgba(94, 139, 126, 0.08)), var(--surface);
-}
-.tint-warning {
-  background: linear-gradient(rgba(214, 183, 131, 0.16), rgba(214, 183, 131, 0.16)), var(--surface);
-}
-.tint-info {
-  background: linear-gradient(rgba(167, 199, 231, 0.14), rgba(167, 199, 231, 0.14)), var(--surface);
-}
-.tint-muted {
-  background: var(--surface);
 }
 .card-collapsed {
   padding: 4px 20px;
@@ -212,12 +166,6 @@ html[data-surface='brand'] .topbar {
   position: sticky;
   top: 0;
   z-index: 5;
-}
-html[data-surface='brand'] .topbar {
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.78);
-  margin: 10px 20px 0;
-  top: 10px;
 }
 .topbar-left,
 .topbar-right {
@@ -396,57 +344,58 @@ main {
 .headline-danger .headline-dot {
   background: #d98a99;
 }
-/* 배포 상세의 결론 카드 */
+/* 배포 상세의 결론 카드: 흰 카드 + 왼쪽 얇은 상태 테두리 + 작은 표시 */
 .headline-card {
   display: flex;
   align-items: center;
   gap: 12px;
   padding: 14px 18px;
-  border-radius: var(--radius);
-  border: 1px solid var(--line);
-  background: var(--surface);
-  box-shadow: var(--shadow);
+  border-left: 3px solid var(--ink-3);
 }
 .headline-icon {
   flex: none;
-  width: 28px;
-  height: 28px;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   font-weight: 800;
-  font-size: 15px;
-  color: #fff;
-  background: var(--ink-3);
+  font-size: 12px;
+  color: var(--ink-3);
+  background: var(--muted-soft);
 }
 .headline-text {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 700;
 }
 .headline-success {
-  background: linear-gradient(rgba(94, 139, 126, 0.1), rgba(94, 139, 126, 0.1)), var(--surface);
+  border-left-color: var(--accent);
 }
 .headline-success .headline-icon {
-  background: var(--accent);
+  color: var(--success);
+  background: var(--success-soft);
 }
 .headline-warning {
-  background: linear-gradient(rgba(214, 183, 131, 0.2), rgba(214, 183, 131, 0.2)), var(--surface);
+  border-left-color: #c9a46b;
 }
 .headline-warning .headline-icon {
-  background: #c9a46b;
+  color: var(--warning);
+  background: var(--warning-soft);
 }
 .headline-danger {
-  background: linear-gradient(rgba(232, 174, 183, 0.22), rgba(232, 174, 183, 0.22)), var(--surface);
+  border-left-color: #d98a99;
 }
 .headline-danger .headline-icon {
-  background: #d98a99;
-}
-.headline-danger .headline-text {
   color: var(--danger);
+  background: var(--danger-soft);
+}
+.headline-info {
+  border-left-color: #a7c7e7;
 }
 .headline-info .headline-icon {
-  background: #a7c7e7;
+  color: var(--info);
+  background: var(--info-soft);
 }
 .mock-row {
   display: flex;
@@ -514,38 +463,6 @@ main {
   border-radius: 4px;
   background: var(--accent-soft);
   color: var(--accent-ink);
-}
-.tile {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 10px;
-  flex: none;
-  background: var(--accent-soft);
-  color: var(--accent-ink);
-}
-.tile svg {
-  stroke-width: 1.75;
-}
-.tile-success {
-  color: var(--success);
-  background: var(--success-soft);
-}
-.tile-warning {
-  color: var(--warning);
-  background: var(--warning-soft);
-}
-.tile-danger {
-  color: var(--danger);
-  background: var(--danger-soft);
-}
-.tile-info {
-  color: var(--info);
-  background: var(--info-soft);
-}
-.tile-muted {
-  color: var(--ink-3);
-  background: var(--muted-soft);
 }
 .hash {
   display: inline-flex;
@@ -657,26 +574,18 @@ main {
   color: var(--ink-2);
 }
 .banner {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  padding: 14px 18px;
-  border-radius: var(--radius);
-  background: var(--surface);
-  border: 1px solid var(--line);
-  box-shadow: var(--shadow);
+  padding: 12px 18px;
+  border-left: 3px solid var(--line-strong);
 }
 .banner-warning {
-  background: linear-gradient(rgba(214, 183, 131, 0.26), rgba(214, 183, 131, 0.26)), var(--surface);
-  border-left: 4px solid #c9a46b;
+  border-left-color: #c9a46b;
 }
 .banner-info {
-  background: linear-gradient(rgba(167, 199, 231, 0.2), rgba(167, 199, 231, 0.2)), var(--surface);
-  border-left: 4px solid #a7c7e7;
+  border-left-color: #a7c7e7;
 }
 .banner-title {
-  font-size: 16px;
-  font-weight: 800;
+  font-size: 15px;
+  font-weight: 700;
 }
 .banner-body {
   color: var(--ink-2);
@@ -1016,16 +925,18 @@ main {
   color: var(--ink-2);
 }
 
-/* ---- launcher (브랜드 화면) ---- */
+/* ---- launcher ---- */
 .launcher {
   max-width: 1080px;
-  padding-top: 8px;
-}
-.launcher h1 {
-  font-size: 30px;
 }
 .launcher .page-sub {
-  font-size: 15px;
+  font-size: 14.5px;
+}
+.launch-index {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
 }
 .launch-grid {
   display: grid;
@@ -1038,19 +949,17 @@ main {
   gap: 6px;
   text-decoration: none;
   color: var(--ink);
-  min-height: 150px;
+  min-height: 136px;
   padding: 18px 20px;
-  transition: transform 0.18s, background 0.18s;
+  transition: border-color 0.15s;
 }
 .launch-card:hover,
 .launch-card:focus-visible {
-  transform: translateY(-2px);
-  background: rgba(255, 255, 255, 0.68);
+  border-color: var(--accent);
 }
 .launch-title {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
-  margin-top: 4px;
 }
 .launch-line {
   color: var(--ink-2);
@@ -1060,14 +969,7 @@ main {
   margin-top: auto;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding-top: 6px;
-}
-.launch-arrow {
-  color: var(--ink-3);
-}
-.launch-card:hover .launch-arrow {
-  color: var(--accent-ink);
+  padding-top: 8px;
 }
 
 /* ---- deployment: stepper ---- */
@@ -1136,15 +1038,14 @@ main {
 }
 .decision-row {
   display: grid;
-  grid-template-columns: auto 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr;
   gap: 14px;
   align-items: start;
 }
-.decision-big {
-  font-size: 24px;
+.decision-value {
+  font-size: 15px;
   font-weight: 800;
-  letter-spacing: 0.01em;
-  line-height: 1.1;
+  letter-spacing: 0.02em;
 }
 .requires {
   display: grid;
@@ -1331,9 +1232,12 @@ main {
   min-width: 0;
 }
 .traffic-kind {
-  font-size: 24px;
+  font-size: 18px;
   font-weight: 800;
-  line-height: 1.1;
+  line-height: 1.2;
+}
+.traffic-degraded {
+  border-color: #c9a46b;
 }
 .traffic-detail {
   overflow-wrap: anywhere;
@@ -1371,7 +1275,6 @@ main {
 }
 .target-row-active.tone-danger {
   border-color: #d98a99;
-  background: linear-gradient(rgba(232, 174, 183, 0.14), rgba(232, 174, 183, 0.14)), var(--surface);
 }
 .target-row-main {
   flex: 1;
@@ -1406,22 +1309,30 @@ main {
 }
 .history-item {
   display: grid;
-  grid-template-columns: 52px 1fr auto;
+  grid-template-columns: 48px 1fr auto 16px;
   gap: 12px;
   align-items: center;
-  padding: 8px 0;
+  padding: 9px 6px;
   border-top: 1px solid var(--line);
-}
-.history-item:first-child {
-  border-top: 0;
-}
-.history-version {
-  font-weight: 700;
+  border-radius: var(--radius-sm);
   text-decoration: none;
   color: var(--ink);
 }
-.history-version:hover {
-  text-decoration: underline;
+.history li:first-child .history-item {
+  border-top: 0;
+}
+.history-item:hover {
+  background: var(--bg);
+}
+.history-version {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.history-arrow {
+  color: var(--ink-3);
+}
+.history-item:hover .history-arrow {
+  color: var(--accent-ink);
 }
 .history-meta {
   display: flex;
@@ -1611,10 +1522,6 @@ main {
   .topbar {
     padding: 8px 14px;
   }
-  html[data-surface='brand'] .topbar {
-    margin: 8px 10px 0;
-    border-radius: 16px;
-  }
   .launch-grid,
   .kv-2,
   .kv-3,
@@ -1632,10 +1539,14 @@ main {
     font-size: 11.5px;
   }
   .history-item {
-    grid-template-columns: 44px 1fr;
+    grid-template-columns: 40px 1fr 16px;
   }
   .history-time {
     grid-column: 2;
+  }
+  .history-arrow {
+    grid-column: 3;
+    grid-row: 1;
   }
   h1 {
     font-size: 22px;
@@ -1644,6 +1555,6 @@ main {
     font-size: 16px;
   }
   .traffic-kind {
-    font-size: 20px;
+    font-size: 17px;
   }
 }

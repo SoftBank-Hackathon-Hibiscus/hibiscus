@@ -1,9 +1,9 @@
-import { ArrowRight, Boxes } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import type { DataSource } from '../api/client';
 import { ApiError } from '../api/client';
 import type { ApplicationView, RouteSnapshot } from '../api/types';
 import { ErrorNotice } from '../components/ErrorNotice';
-import { Empty, IconTile, PageTitle, Pill } from '../components/ui';
+import { Empty, PageTitle, Pill } from '../components/ui';
 import { usePolling } from '../hooks/usePolling';
 import { relTime, targetLabel } from '../lib/format';
 import { useLang } from '../lib/i18n';
@@ -64,7 +64,6 @@ export function ApplicationList({ source }: { source: DataSource }) {
             {rows.map(({ view, route, routeError }) => (
               <li key={view.application.id}>
                 <a className="app-row" href={hrefFor(applicationPath(view.application.id))}>
-                  <IconTile icon={Boxes} tone="accent" size={32} />
                   <span className="app-row-main">
                     <span className="app-row-name">{view.application.name}</span>
                     <span className="small muted mono">{view.application.publicHost ?? view.application.slug}</span>
@@ -82,7 +81,7 @@ export function ApplicationList({ source }: { source: DataSource }) {
                     ) : (
                       <Pill tone="muted">{t('noRouteShort')}</Pill>
                     )}
-                    <ArrowRight size={16} className="app-row-arrow" aria-hidden />
+                    <ChevronRight size={16} className="app-row-arrow" aria-hidden />
                   </span>
                 </a>
               </li>

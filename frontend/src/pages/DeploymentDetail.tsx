@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { DataSource } from '../api/client';
-import type { Approval, PiiReport, Plan, SignLog, TestResult } from '../api/contracts';
-import type { ApplicationView, Decision, DeploymentStatus, DeploymentView, StageExecution, StageName } from '../api/types';
+import type { Approval, PiiReport, SignLog, TestResult } from '../api/contracts';
+import type { ApplicationView, Decision, DeploymentStatus, DeploymentView, StageName } from '../api/types';
 import { ErrorNotice } from '../components/ErrorNotice';
 import { Modal } from '../components/Modal';
-import { Collapsible, DemoBadge, Empty, Hash, JsonBlock, Kv, MoreToggle, PageTitle, Pill, RawToggle, type Tone } from '../components/ui';
+import { Collapsible, DemoBadge, Empty, Kv, PageTitle, Pill, type Tone } from '../components/ui';
 import { usePolling } from '../hooks/usePolling';
-import { STAGE_ORDER, artifactsOf, findArtifact, latestStages, parseJsonArtifact } from '../lib/artifacts';
-import { compactJson, fmtTime, relTime, targetLabel } from '../lib/format';
-import { pickLang, useLang, type DictKey } from '../lib/i18n';
+import { findArtifact, latestStages, parseJsonArtifact } from '../lib/artifacts';
+import { fmtTime, relTime, targetLabel } from '../lib/format';
+import { useLang, type DictKey } from '../lib/i18n';
 import { Markdown, prepareExplain } from '../lib/markdown';
 import { applicationPath, hrefFor } from '../lib/router';
 import { summarizeDeployment, type DeploymentSummary, type ProofLink } from '../lib/summary';
@@ -26,6 +26,10 @@ function conditionName(t: (key: DictKey) => string, name: string): string {
   return name === 'none' ? t('conditionNone') : name === 'restart' ? t('conditionRestart') : name === 'replace' ? t('conditionReplace') : name;
 }
 
+/**
+ * 배포 상세. 기본 UI 는 자연어 결론·판단·고칠 것·증명 체인까지만 보여 준다.
+ * digest/plan_hash/rule id/artifact 원본은 데이터 계층(lib/summary, lib/artifacts)에 남아 있지만 화면에는 내지 않는다.
+ */
 export function DeploymentDetail({ id, source }: { id: string; source: DataSource }) {
   const { t, lang } = useLang();
   const [progressing, setProgressing] = useState(false);
@@ -80,7 +84,7 @@ export function DeploymentDetail({ id, source }: { id: string; source: DataSourc
 
       <Stepper view={view} summary={summary} />
 
-      <section className={`headline-card headline-${summary.tone}`}>
+      <section className={`card headline-card headline-${summary.tone}`}>
         <span className="headline-icon" aria-hidden>{TONE_ICON[summary.tone]}</span>
         <p className="headline-text">{summary.conclusion}</p>
       </section>
@@ -90,7 +94,7 @@ export function DeploymentDetail({ id, source }: { id: string; source: DataSourc
           <h2 className="card-title">{t(STEP_DETAIL_KEY.test)}</h2>
           <TestDetail view={view} summary={summary} />
         </section>
-        <section className={`card ${summary.decision ? `tint-${DECISION_TONE[summary.decision]}` : ''}`}>
+        <section className="card">
           <h2 className="card-title">{t(STEP_DETAIL_KEY.policy)}</h2>
           <PolicyDetail view={view} summary={summary} source={source} onChanged={poll.refresh} appName={appName} />
         </section>
@@ -118,7 +122,7 @@ export function DeploymentDetail({ id, source }: { id: string; source: DataSourc
         </section>
         <section className="card">
           <h2 className="card-title">{t(STEP_DETAIL_KEY.deploy)}</h2>
-          <DeployDetail view={view} summary={summary} />
+          <DeployDetail summary={summary} />
         </section>
       </div>
 
@@ -132,33 +136,6 @@ export function DeploymentDetail({ id, source }: { id: string; source: DataSourc
             <ProofRow key={link.id} link={link} />
           ))}
         </ul>
-      </section>
-
-      <section className="card card-collapsed">
-        <Collapsible title={t('techDetails')}>
-          <div className="stack">
-            <div>
-              <div className="field-label">{t('identifiers')}</div>
-              <Kv
-                columns={3}
-                items={[
-                  [t('runId'), <Hash value={d.id} length={24} />],
-                  [t('commit'), <Hash value={d.sourceRevision} length={12} />],
-                  [t('digest'), <Hash value={d.imageDigest} length={20} />],
-                  [t('trigger'), d.trigger === 'webhook' ? t('webhook') : t('manual')],
-                  [t('execMode'), <span className="mono">{d.executionMode}</span>],
-                  [t('requester'), <span className="mono">{d.requester}</span>],
-                  [t('approver'), d.approver ? <span className="mono">{d.approver}</span> : <span className="muted">{t('none')}</span>],
-                  [t('createdAt'), fmtTime(d.createdAt)],
-                  [t('updatedAt'), fmtTime(d.updatedAt)],
-                ]}
-              />
-            </div>
-            <PolicyTech view={view} summary={summary} />
-            <AuditSection view={view} />
-            <ArtifactsSection view={view} />
-          </div>
-        </Collapsible>
       </section>
     </div>
   );
@@ -265,7 +242,6 @@ const PROOF_STATE: Record<ProofLink['state'], { tone: Tone; key: DictKey }> = {
 
 function ProofRow({ link }: { link: ProofLink }) {
   const { t } = useLang();
-  const [open, setOpen] = useState(false);
   const state = PROOF_STATE[link.state];
   return (
     <li className="proof-row">
@@ -276,19 +252,7 @@ function ProofRow({ link }: { link: ProofLink }) {
           <span className="proof-detail">{link.detail}</span>
         </div>
         <Pill tone={state.tone}>{t(state.key)}</Pill>
-        <button type="button" className="link-btn" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
-          {open ? t('hideDetails') : t('techDetails')}
-        </button>
       </div>
-      {open && (
-        <div className="proof-legs">
-          {link.legs.map((leg) => (
-            <span key={leg.label} className="proof-leg">
-              <span className="muted">{leg.label}</span> {leg.value ? leg.value.length > 24 ? <Hash value={leg.value} length={12} /> : <span className="mono">{leg.value}</span> : <span className="muted">{t('none')}</span>}
-            </span>
-          ))}
-        </div>
-      )}
     </li>
   );
 }
@@ -315,7 +279,7 @@ function PolicyDetail({ view, summary, source, onChanged, appName }: { view: Dep
       <div className="decision-row">
         <div>
           <div className="field-label">{t('decision')}</div>
-          <div className={`decision-big tone-${decision ? DECISION_TONE[decision] : 'muted'}`}>{decision ? DECISION_LABEL[decision] : t('none')}</div>
+          <div className={`decision-value tone-${decision ? DECISION_TONE[decision] : 'muted'}`}>{decision ? DECISION_LABEL[decision] : t('none')}</div>
         </div>
         <div>
           <div className="field-label">{t('targets')}</div>
@@ -364,19 +328,13 @@ function PolicyDetail({ view, summary, source, onChanged, appName }: { view: Dep
         </div>
       )}
 
-      <div className="row">
-        {!skeleton && explain && (
+      {!skeleton && explain && (
+        <div className="row">
           <button type="button" className="btn btn-primary btn-small" onClick={() => setExplainOpen(true)}>
             {t('explainOpen')}
           </button>
-        )}
-        <MoreToggle>
-          <div className="stack">
-            {summary.requires.length > 0 && <Kv columns={1} items={summary.requires.map((r) => [r.title, <span className="mono small">{r.id} ({r.ruleId})</span>])} />}
-            {stage && <StageRaw stage={stage} />}
-          </div>
-        </MoreToggle>
-      </div>
+        </div>
+      )}
 
       {explainOpen && explain && <ExplainModal source={explain.content} title={`${appName} v${d.version}`} onClose={() => setExplainOpen(false)} lang={lang} setLang={setLang} hasKo={Boolean(explainKo)} hasJa={Boolean(explainJa)} />}
     </div>
@@ -385,6 +343,7 @@ function PolicyDetail({ view, summary, source, onChanged, appName }: { view: Dep
 
 function ExplainModal({ source, title, onClose, lang, setLang, hasKo, hasJa }: { source: string; title: string; onClose: () => void; lang: 'ko' | 'ja'; setLang: (l: 'ko' | 'ja') => void; hasKo: boolean; hasJa: boolean }) {
   const { t } = useLang();
+  // 본문만 보여 준다. run_id/rule id 가 담긴 기술 꼬리말은 prepareExplain 이 분리하며 기본 UI 에서는 내지 않는다.
   const prepared = useMemo(() => prepareExplain(source), [source]);
   return (
     <Modal
@@ -403,52 +362,8 @@ function ExplainModal({ source, title, onClose, lang, setLang, hasKo, hasJa }: {
     >
       <div lang={lang} className="explain-body">
         <Markdown source={prepared.body} />
-        {prepared.technical && (
-          <RawToggle label={t('techDetails')}>
-            <Markdown source={prepared.technical} />
-          </RawToggle>
-        )}
       </div>
     </Modal>
-  );
-}
-
-function PolicyTech({ view, summary }: { view: DeploymentView; summary: DeploymentSummary }) {
-  const { t, lang } = useLang();
-  const plan = summary.parsed.plan;
-  const planHash = view.policyResult?.planHash ?? plan?.plan_hash ?? null;
-  return (
-    <div>
-      <div className="field-label">{t('policyTech')}</div>
-      <Kv columns={1} items={[['plan_hash', <Hash value={planHash} length={20} />]]} />
-      {plan && <RulesView plan={plan} lang={lang} />}
-    </div>
-  );
-}
-
-function RulesView({ plan, lang }: { plan: Plan; lang: 'ko' | 'ja' }) {
-  const { t } = useLang();
-  const matched = plan.rules.filter((r) => r.result !== 'not_matched');
-  const notMatched = plan.rules.filter((r) => r.result === 'not_matched');
-  return (
-    <div className="stack-sm">
-      <ul className="rules">
-        {matched.map((r) => (
-          <li key={r.id} className="rule">
-            <span className="mono muted rule-id">{r.id}</span>
-            <span>
-              {pickLang(lang, r.reason, r.reason_i18n) ?? <span className="muted">{t('none')}</span>}
-              {r.result === 'matched_after_block' && <span className="small muted"> (matched_after_block)</span>}
-            </span>
-          </li>
-        ))}
-      </ul>
-      {notMatched.length > 0 && (
-        <div className="small muted">
-          not_matched: <span className="mono">{notMatched.map((r) => r.id).join(', ')}</span>
-        </div>
-      )}
-    </div>
   );
 }
 
@@ -504,17 +419,8 @@ function TestDetail({ view, summary }: { view: DeploymentView; summary: Deployme
   const step = summary.steps.find((s) => s.name === 'test');
   if (!stage) return <Empty>{step?.result ?? t('resultPending')}</Empty>;
   if (!result) {
-    return (
-      <div className="stack">
-        {parsed && !parsed.ok ? <ErrorNotice error={new Error(parsed.error)} /> : <Empty>{t('noTestResult')}</Empty>}
-        {parsed && !parsed.ok && (
-          <MoreToggle>
-            <JsonBlock raw={parsed.raw} />
-          </MoreToggle>
-        )}
-        {stage && <StageRaw stage={stage} />}
-      </div>
-    );
+    // validationError(run_id/digest 불일치) 는 parseJsonArtifact 가 ok:false 로 돌려 주고, 여기서 사람이 읽을 오류로만 보여 준다.
+    return parsed && !parsed.ok ? <ErrorNotice error={new Error(parsed.error)} /> : <Empty>{t('noTestResult')}</Empty>;
   }
   const conditions = result.facts?.conditions;
   return (
@@ -562,29 +468,6 @@ function TestDetail({ view, summary }: { view: DeploymentView; summary: Deployme
           })}
         </div>
       )}
-      <MoreToggle>
-        <div className="stack">
-          <Kv
-            columns={3}
-            items={[
-              ['db', <span className="mono">{result.facts?.db ?? '-'}</span>],
-              ['writes_local_file', result.facts?.writes_local_file?.length ? <span className="mono">{result.facts.writes_local_file.join(', ')}</span> : <span className="muted">-</span>],
-              result.facts?.migration ? ['migration.destructive', <span className="mono">{String(result.facts.migration.destructive)}</span>] : null,
-              ['match', <span className="mono">{result.match.matched}/{result.match.total}</span>],
-              ['run_id', <Hash value={result.run_id} length={20} />],
-              ['digest', <Hash value={result.digest} length={16} />],
-            ]}
-          />
-          {result.failures && result.failures.length > 0 && (
-            <ul className="plain mono small">
-              {result.failures.map((f, i) => (
-                <li key={i}>{compactJson(f)}</li>
-              ))}
-            </ul>
-          )}
-          <StageRaw stage={stage} />
-        </div>
-      </MoreToggle>
     </div>
   );
 }
@@ -599,14 +482,7 @@ function SignDetail({ view, summary }: { view: DeploymentView; summary: Deployme
   const lastLog = signLogs[signLogs.length - 1];
   const step = summary.steps.find((s) => s.name === 'sign');
   if (!stage) return <Empty>{step?.result ?? t('resultPending')}</Empty>;
-  if (!sign && !lastLog) {
-    return (
-      <div className="stack">
-        <Empty>{t('noSign')}</Empty>
-        <StageRaw stage={stage} />
-      </div>
-    );
-  }
+  if (!sign && !lastLog) return <Empty>{t('noSign')}</Empty>;
   const dryRun = sign?.signature_ref.startsWith('dry-run:') ?? false;
   const refused = lastLog?.result === 'refused';
   return (
@@ -623,33 +499,14 @@ function SignDetail({ view, summary }: { view: DeploymentView; summary: Deployme
           sign ? [t('signedTargets'), sign.targets.map(targetLabel).join(' + ')] : null,
         ]}
       />
-      {sign && (
-        <MoreToggle>
-          <div className="stack">
-            <Kv
-              columns={2}
-              items={[
-                ['signature_ref', <Hash value={sign.signature_ref} length={40} />],
-                ['plan_hash', <Hash value={sign.plan_hash} length={20} />],
-                ['digest', <Hash value={sign.digest} length={20} />],
-                ['requester', <span className="mono">{sign.requester}</span>],
-                ['failover_allowed', <span className="mono">{String(sign.failover_allowed)}</span>],
-                refused && lastLog?.reason ? ['reason', <span className="mono">{lastLog.reason}</span>] : null,
-              ]}
-            />
-            <StageRaw stage={stage} />
-          </div>
-        </MoreToggle>
-      )}
     </div>
   );
 }
 
 // ---------------------------------------------------------------- deploy
 
-function DeployDetail({ view, summary }: { view: DeploymentView; summary: DeploymentSummary }) {
+function DeployDetail({ summary }: { summary: DeploymentSummary }) {
   const { t } = useLang();
-  const stage = latestStages(view.stages).deploy;
   const result = summary.parsed.deployResult;
   const step = summary.steps.find((s) => s.name === 'deploy');
   const r = result?.routing;
@@ -671,169 +528,6 @@ function DeployDetail({ view, summary }: { view: DeploymentView; summary: Deploy
           ]}
         />
       )}
-      {(result || stage) && (
-        <MoreToggle>
-          <div className="stack">
-            {result && (
-              <Kv
-                columns={3}
-                items={[
-                  ['decision', <span className="mono">{result.decision}</span>],
-                  ['routing.result', <span className="mono">{result.routing.result}</span>],
-                  ['image', result.image ? <Hash value={result.image} length={28} /> : <span className="muted">-</span>],
-                  ['signature', result.signature ? <span className="mono">verified{result.signature.tlog ? `, tlog ${result.signature.tlog}` : ''}</span> : <span className="mono">none</span>],
-                  ['started_at', fmtTime(result.started_at)],
-                  ['finished_at', fmtTime(result.finished_at)],
-                  r?.target_id ? ['routing.target_id', <Hash value={r.target_id} length={20} />] : null,
-                  r?.error ? ['routing.error', <span className="mono small">{r.error}</span>] : null,
-                ]}
-              />
-            )}
-            {result && (
-              <table className="table small">
-                <thead>
-                  <tr>
-                    <th>target</th>
-                    <th>phase</th>
-                    <th>result</th>
-                    <th>detail</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {result.targets.map((s, i) => (
-                    <tr key={i}>
-                      <td className="mono">{s.target}</td>
-                      <td className="mono">{s.phase}</td>
-                      <td className="mono">{s.result}</td>
-                      <td className="small step-detail">
-                        {s.revision && <Hash value={s.revision} length={24} />}
-                        {s.container && <Hash value={s.container} length={24} />}
-                        {s.serving && <Hash value={s.serving} length={20} />}
-                        {s.previous && <span className="muted">prev <Hash value={s.previous} length={20} /></span>}
-                        {s.candidate_url && <Hash value={s.candidate_url} length={30} />}
-                        {s.reason && <span>{s.reason}</span>}
-                        {s.error && <span className="tone-danger">{s.error}</span>}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-            {result && result.checks.length > 0 && (
-              <table className="table small">
-                <tbody>
-                  {result.checks.map((c, i) => (
-                    <tr key={i}>
-                      <td className="mono">{c.target}</td>
-                      <td className="mono">{c.pass ? 'pass' : 'fail'}</td>
-                      <td className="mono">{c.checker}</td>
-                      <td>{c.url ? <Hash value={c.url} length={30} /> : <span className="muted">-</span>}</td>
-                      <td className="mono small">{compactJson(c.checks)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-            {stage?.error && <div className="mono small">{stage.error}</div>}
-            {stage && <StageRaw stage={stage} />}
-          </div>
-        </MoreToggle>
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------- shared bits
-
-function StageRaw({ stage }: { stage: StageExecution }) {
-  const { t } = useLang();
-  if (stage.summary === null || stage.summary === undefined) return null;
-  return (
-    <RawToggle label={t('stageSummary')}>
-      <pre className="code">{compactJson(stage.summary)}</pre>
-    </RawToggle>
-  );
-}
-
-function AuditSection({ view }: { view: DeploymentView }) {
-  const { t } = useLang();
-  return (
-    <div>
-      <div className="field-label">
-        {t('auditLog')} <span className="muted">{view.auditLogs.length}</span>
-      </div>
-      {view.auditLogs.length === 0 ? (
-        <Empty>{t('none')}</Empty>
-      ) : (
-        <table className="table small">
-          <thead>
-            <tr>
-              <th>kind</th>
-              <th>{t('time')}</th>
-              <th>{t('content')}</th>
-              <th>plan_hash</th>
-            </tr>
-          </thead>
-          <tbody>
-            {view.auditLogs.map((log) => {
-              const p = log.payload as Record<string, unknown>;
-              const str = (key: string): string | null => (typeof p[key] === 'string' ? (p[key] as string) : null);
-              const list = (key: string): string[] | null => (Array.isArray(p[key]) ? (p[key] as unknown[]).map(String) : null);
-              return (
-                <tr key={log.id}>
-                  <td className="mono">{log.kind}</td>
-                  <td>{fmtTime(str('time') ?? log.createdAt)}</td>
-                  <td className="mono small">
-                    {log.kind === 'sign' ? `${str('result') ?? '-'}${str('reason') ? ` (${str('reason')})` : ''}, approver ${str('approver') ?? '-'}` : `${str('decision') ?? '-'}${list('rule_ids') ? ` [${list('rule_ids')!.join(', ')}]` : ''}`}
-                  </td>
-                  <td>
-                    <Hash value={str('plan_hash')} length={16} />
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      )}
-    </div>
-  );
-}
-
-function ArtifactsSection({ view }: { view: DeploymentView }) {
-  const { t } = useLang();
-  const latest = useMemo(() => latestStages(view.stages), [view.stages]);
-  const grouped = STAGE_ORDER.map((name) => ({ name, items: artifactsOf(view, latest[name]) })).filter((g) => g.items.length > 0);
-  return (
-    <div>
-      <div className="field-label">
-        {t('artifacts')} <span className="muted">{view.artifacts.length}</span>
-      </div>
-      {view.artifacts.length === 0 && <Empty>{t('none')}</Empty>}
-      {grouped.map((g) => (
-        <div key={g.name} className="artifact-group">
-          <div className="small muted">{t(STEP_DETAIL_KEY[g.name])}</div>
-          {g.items.map((a) => {
-            const parsed = parseJsonArtifact(a);
-            return (
-              <Collapsible
-                key={a.id}
-                title={<span className="mono">{a.name}</span>}
-                summary={
-                  <>
-                    <span className="mono small muted">{a.relativePath}</span>
-                    {a.validationError && <Pill tone="danger">{a.validationError}</Pill>}
-                  </>
-                }
-              >
-                {parsed?.ok ? <JsonBlock value={parsed.value} /> : <pre className={a.mediaType === 'text/plain' ? 'prose' : 'code'}>{a.content}</pre>}
-                <div className="small muted">
-                  sha256 <Hash value={a.contentHash} length={16} /> {fmtTime(a.createdAt)}
-                </div>
-              </Collapsible>
-            );
-          })}
-        </div>
-      ))}
     </div>
   );
 }

@@ -35,12 +35,6 @@ function Shell() {
     document.documentElement.lang = lang;
   }, [lang]);
 
-  // Demo Launcher 만 브랜드 배경(사진 + 유리). 관리 화면(목록·상세·연결)은 중립적인 콘솔 배경.
-  const surface = !isReal && route.page === 'none' ? 'brand' : 'console';
-  useEffect(() => {
-    document.documentElement.dataset.surface = surface;
-  }, [surface]);
-
   return (
     <div className="app">
       <nav className="topbar">

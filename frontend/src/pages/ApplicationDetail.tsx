@@ -1,10 +1,10 @@
-import { Cloud, GitBranch, Server, Shuffle } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { ApiError, type DataSource } from '../api/client';
 import { MockDataSource } from '../api/mock';
 import type { AgentStatusResponse, ApplicationAgentSummary, ApplicationView, Deployment, DeploymentStatus, PolicyResult, RouteSnapshot, RoutingTargetHealth, RoutingTargetView, TargetKind } from '../api/types';
 import { ErrorNotice, describeError } from '../components/ErrorNotice';
-import { Empty, Hash, IconTile, Kv, MoreToggle, PageTitle, Pill, type Tone } from '../components/ui';
+import { Empty, Hash, Kv, PageTitle, Pill, type Tone } from '../components/ui';
 import { usePolling } from '../hooks/usePolling';
 import { detectRouteChange, markOf, type RouteChange, type RouteMark } from '../lib/failover';
 import { fmtTime, relTime, targetLabel } from '../lib/format';
@@ -207,8 +207,7 @@ function RouteBanner({ seen, count }: { seen: SeenChange; count: number }) {
   const { t } = useLang();
   const { change, at } = seen;
   return (
-    <div className={`banner banner-${change.failover ? 'warning' : 'info'}`} role="alert">
-      <IconTile icon={Shuffle} tone={change.failover ? 'warning' : 'info'} size={36} />
+    <div className={`card banner banner-${change.failover ? 'warning' : 'info'}`} role="alert">
       <div>
         <div className="banner-title">{change.failover ? t('failoverHappened') : t('routeChanged')}</div>
         <div className="banner-body">
@@ -241,10 +240,8 @@ function TrafficCard({ snap, degraded, lang }: { snap: Snapshot; degraded: boole
   const policy = snap.routePolicy;
   const failoverOn = policy ? policy.failoverAllowed : null;
   const standbyCanTakeOver = Boolean(standby && standby.target.kind === 'cloud_run' && failoverOn);
-  const Icon = route?.target.kind === 'onprem' ? Server : Cloud;
-
   return (
-    <section className={`card traffic ${degraded ? 'tint-warning' : ''}`}>
+    <section className={`card traffic ${degraded ? 'traffic-degraded' : ''}`}>
       <div className="card-head">
         <h2 className="card-title">{t('currentTraffic')}</h2>
         <span className="small muted">
@@ -256,7 +253,6 @@ function TrafficCard({ snap, degraded, lang }: { snap: Snapshot; degraded: boole
       ) : (
         <div className="traffic-grid">
           <div className="traffic-main">
-            <IconTile icon={Icon} tone={curTone === 'muted' ? 'accent' : curTone} size={44} />
             <div className="traffic-text">
               <div className="traffic-kind">{targetLabel(route.target.kind)}</div>
               <div className="row">
@@ -333,19 +329,6 @@ function TargetsCard({ snap }: { snap: Snapshot }) {
     const version = primary ? snap.deployments.find((d) => d.id === primary.target.deploymentId)?.version : undefined;
     return { kind, primary, isActive: Boolean(active), version, others: primary ? ofKind.filter((x) => x.target.id !== primary.target.id) : [] };
   });
-  const techItems = snap.targets.map((x) => {
-    const st = effectiveStatus(x.health);
-    return [
-      `${targetLabel(x.target.kind)} · ${x.target.id.slice(0, 12)}`,
-      <span className="mono small">
-        deployment {x.target.deploymentId.slice(0, 14)}
-        {x.target.kind === 'onprem' ? ` · local ${x.target.localPort ?? '-'} · gateway ${x.target.gatewayPort ?? '-'}` : ` · ${x.target.url ?? '-'}`}
-        {` · enabled ${String(x.target.enabled)}`}
-        {x.health ? ` · ${x.health.status}${st.expired ? ' (expired)' : ''} · ${relTime(x.health.observedAt)}` : ' · health none'}
-        {x.health?.reason ? ` · ${x.health.reason}` : ''}
-      </span>,
-    ] as [string, React.ReactNode];
-  });
   return (
     <section className="card">
       <h2 className="card-title">{t('targetsStatus')}</h2>
@@ -353,10 +336,8 @@ function TargetsCard({ snap }: { snap: Snapshot }) {
         {rows.map(({ kind, primary, isActive, version }) => {
           const st = effectiveStatus(primary?.health ?? null);
           const tone = primary ? healthTone(st.status) : 'muted';
-          const Icon = kind === 'onprem' ? Server : Cloud;
           return (
             <li key={kind} className={`target-row ${isActive ? `target-row-active tone-${tone}` : ''}`}>
-              <IconTile icon={Icon} tone={primary ? (tone === 'muted' ? 'accent' : tone) : 'muted'} size={30} />
               <div className="target-row-main">
                 <div className="row">
                   <strong>{targetLabel(kind)}</strong>
@@ -376,11 +357,6 @@ function TargetsCard({ snap }: { snap: Snapshot }) {
           );
         })}
       </ul>
-      {snap.targets.length > 0 && (
-        <MoreToggle>
-          <Kv columns={1} items={techItems} />
-        </MoreToggle>
-      )}
     </section>
   );
 }
@@ -424,19 +400,20 @@ function DeploymentTimeline({ deployments, activeDeploymentId }: { deployments: 
   return (
     <ol className="history">
       {deployments.map((d) => (
-        <li key={d.id} className={`history-item ${d.id === activeDeploymentId ? 'history-active' : ''}`}>
-          <a className="history-version" href={hrefFor(deploymentPath(d.id))}>
-            v{d.version}
+        <li key={d.id}>
+          <a className={`history-item ${d.id === activeDeploymentId ? 'history-active' : ''}`} href={hrefFor(deploymentPath(d.id))}>
+            <span className="history-version">v{d.version}</span>
+            <span className="history-meta">
+              <Pill tone={STATUS_TONE[d.status]}>{t(STATUS_KEY[d.status])}</Pill>
+              {d.decision && <Pill tone={d.decision === 'allow' ? 'success' : d.decision === 'block' ? 'danger' : 'warning'}>{d.decision === 'allow' ? 'ALLOW' : d.decision === 'block' ? 'BLOCK' : 'NEEDS_APPROVAL'}</Pill>}
+              {d.id === activeDeploymentId && <span className="tag">{t('servingNow')}</span>}
+              {!d.deploymentPerformed && d.status === 'succeeded' && <span className="small muted">{t('notDeployed')}</span>}
+            </span>
+            <span className="history-time small muted">
+              <span className="mono">{d.sourceRevision.slice(0, 7)}</span> {fmtTime(d.createdAt)}
+            </span>
+            <ChevronRight size={16} className="history-arrow" aria-hidden />
           </a>
-          <span className="history-meta">
-            <Pill tone={STATUS_TONE[d.status]}>{t(STATUS_KEY[d.status])}</Pill>
-            {d.decision && <Pill tone={d.decision === 'allow' ? 'success' : d.decision === 'block' ? 'danger' : 'warning'}>{d.decision === 'allow' ? 'ALLOW' : d.decision === 'block' ? 'BLOCK' : 'NEEDS_APPROVAL'}</Pill>}
-            {d.id === activeDeploymentId && <Pill tone="success">{t('servingNow')}</Pill>}
-            {!d.deploymentPerformed && d.status === 'succeeded' && <span className="small muted">{t('notDeployed')}</span>}
-          </span>
-          <span className="history-time small muted">
-            <GitBranch size={12} className="inline-icon" aria-hidden /> <Hash value={d.sourceRevision} length={7} /> {fmtTime(d.createdAt)}
-          </span>
         </li>
       ))}
     </ol>
