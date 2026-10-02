@@ -1,0 +1,49 @@
+import { Injectable } from '@nestjs/common';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import type {
+  StageContext,
+  StageOutcome,
+  StageRunner,
+} from '../types/deployment.type.js';
+
+@Injectable()
+export class TestStage implements StageRunner {
+  readonly name = 'test' as const;
+
+  async run(context: StageContext): Promise<StageOutcome> {
+    const { application, deployment, paths } = context;
+    const templatePath = resolve(
+      process.cwd(),
+      'fixtures/test-templates',
+      `${application.testTemplate}.json`,
+    );
+    try {
+      const template = JSON.parse(readFileSync(templatePath, 'utf8')) as object;
+      const result = {
+        ...template,
+        run_id: deployment.id,
+        app: application.name,
+        digest: deployment.imageDigest,
+        source_revision: deployment.sourceRevision,
+      };
+      const output = resolve(paths.test, 'test_result.json');
+      writeFileSync(output, `${JSON.stringify(result, null, 2)}\n`, 'utf8');
+      return {
+        status: 'succeeded',
+        exitCode: 0,
+        artifacts: { test_result: paths.relative(output) },
+        summary: { template: application.testTemplate, stub: true },
+      };
+    } catch (error) {
+      return {
+        status: 'failed',
+        artifacts: {},
+        error: 'Failed to generate test result',
+        summary: {
+          details: error instanceof Error ? error.message : String(error),
+        },
+      };
+    }
+  }
+}

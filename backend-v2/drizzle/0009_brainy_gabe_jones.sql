@@ -1,0 +1,1 @@
+ALTER TABLE `routing_target_health` ADD `failure_kind` text;
