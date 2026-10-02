@@ -393,7 +393,11 @@ describe('deployment API (e2e)', () => {
       const response = await request(app.getHttpServer())
         .get('/auth/github/callback')
         .set('Cookie', cookie)
-        .query({ code: 'test-code', state: url.searchParams.get('state') })
+        .query({
+          code: 'test-code',
+          state: url.searchParams.get('state'),
+          iss: 'https://github.com/login/oauth',
+        })
         .expect(expectedStatus);
       const exchange: RequestInit = fetchMock.mock.calls[0]![1];
       expect((exchange.body as URLSearchParams).get('client_id')).toBe(
