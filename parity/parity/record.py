@@ -118,9 +118,9 @@ class Recorder:
     """기록 파일에 한 줄씩 추가한다. 여러 스레드에서 불러도 번호가 꼬이지 않게 잠근다."""
 
     def __init__(self, out_path):
-        self._file = open(out_path, "w", encoding="utf-8")
         self._lock = threading.Lock()
         self.count = 0
+        self._file = open(out_path, "w", encoding="utf-8")
 
     def write(self, request, response, elapsed_ms):
         with self._lock:
@@ -178,10 +178,42 @@ def make_handler(target, recorder, ssl_context=None):
 def start_proxy(listen_host, listen_port, target, out_path, ssl_context=None):
     """프록시를 백그라운드 스레드로 띄운다. (server, recorder) 를 돌려준다."""
     split_target(target)  # URL 형식 검사
-    recorder = Recorder(out_path)
-    server = ThreadingHTTPServer((listen_host, listen_port), make_handler(target, recorder, ssl_context))
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    return server, recorder
+    ready = threading.Event()
+    aborted = threading.Event()
+    holder = [None]
+
+    class PendingRecorder:
+        def write(self, *args):
+            return holder[0].write(*args)
+
+    # 포트나 스레드 준비에 실패해도 기존 기록을 비우지 않는다.
+    server = ThreadingHTTPServer((listen_host, listen_port),
+                                 make_handler(target, PendingRecorder(), ssl_context))
+
+    def serve_when_ready():
+        ready.wait()
+        if not aborted.is_set() and holder[0] is not None:
+            server.serve_forever()
+
+    worker = None
+    started = False
+    try:
+        worker = threading.Thread(target=serve_when_ready, daemon=True)
+        worker.start()
+        started = True
+        holder[0] = Recorder(out_path)
+    except BaseException:
+        aborted.set()
+        ready.set()
+        if started:
+            worker.join()
+        if holder[0] is not None:
+            holder[0].close()
+        # serve_forever가 시작되지 않았으므로 shutdown()은 호출하지 않는다.
+        server.server_close()
+        raise
+    ready.set()
+    return server, holder[0]
 
 
 def record(target, out_path, listen_host, listen_port, command=None, ssl_context=None):
