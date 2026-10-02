@@ -24,7 +24,11 @@ export function Connect({ source, connection, onTokenChange, onRecheck }: { sour
     let cancelled = false;
     source
       .listApplications()
-      .then((list) => !cancelled && setApps(list))
+      .then((list) => {
+        if (cancelled) return;
+        setApps(list);
+        setAppsError(null);
+      })
       .catch((error: unknown) => !cancelled && setAppsError(error));
     return () => {
       cancelled = true;
