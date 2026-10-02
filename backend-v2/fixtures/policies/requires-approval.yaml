@@ -1,0 +1,13 @@
+version: 1
+known_targets: [onprem, cloud_run]
+rules:
+  - id: integration_approval
+    if: { path: test.passed, eq: true }
+    then:
+      decision: needs_approval
+      requires: [approval]
+    reason:
+      ko: "DB 복원과 승인 계약을 확인하는 테스트 정책"
+default:
+  targets: [onprem, cloud_run]
+  failover_allowed: true

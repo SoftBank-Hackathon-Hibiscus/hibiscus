@@ -1,0 +1,1 @@
+ALTER TABLE `applications` ADD `container_port` integer DEFAULT 8080 NOT NULL;
