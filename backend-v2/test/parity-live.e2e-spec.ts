@@ -44,6 +44,8 @@ describe.skipIf(!liveFile)('real parity through the Backend worker', () => {
       GITHUB_APP_CLIENT_SECRET: 'local-only',
       ALLOWED_GITHUB_IDS: '424242',
       HEALTH_MONITOR_ENABLED: 'false',
+      SSH_SERVER_ENABLED: 'false',
+      SSH_HOST: '127.0.0.1',
     });
     delete process.env.ANTHROPIC_API_KEY;
     const { AppModule } = await import('../src/app.module.js');
