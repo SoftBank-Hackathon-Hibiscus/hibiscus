@@ -59,6 +59,14 @@ flowchart LR
 | `pii.pii[].kind` | R3, R4 | reason |
 | `pii.pii[].table` | R3 | reason |
 | `pii.run_id` | R2 | 조건, reason |
+| `test.facts.conditions` | R1, R1b, R1c | 조건 |
+| `test.facts.conditions[].failed` | R1, R1b, R1c | 조건 |
+| `test.facts.conditions[].matched` | R1b, R1c | reason |
+| `test.facts.conditions[].mismatches` | R1c | 조건 |
+| `test.facts.conditions[].mismatches[].related_fact` | R1c | 조건 |
+| `test.facts.conditions[].mismatches[].related_kind` | R1c | 조건 |
+| `test.facts.conditions[].name` | R1, R1b, R1c | 조건 |
+| `test.facts.conditions[].total` | R1b, R1c | reason |
 | `test.facts.db` | R5 | 조건, reason |
 | `test.facts.migration.destructive` | R7 | 조건 |
 | `test.facts.migration.findings` | R7 | 조건 |
@@ -100,6 +108,7 @@ flowchart LR
    - `failover_allowed` (plan, rollback_plan): `onprem` 과 `cloud_run` 이 모두 targets 에 있을 때만 true 가 될 수 있다. 배포 파트는 이 값이 false 면 온프레 장애 시 Cloud Run 으로 넘기지 않는다.
 5. **targets 의 값은 policy.yaml 의 `known_targets`(현재 `onprem`, `cloud_run`) 안에서만 나온다.** 배포 파트가 새 대상을 지원하면 `known_targets` 에 먼저 추가해야 한다.
    - **`test_result.facts` 는 정책이 읽는 키만 타입이 정해져 있다** (`db`: `sqlite` | `postgres` | `mysql` | `none` 소문자, `writes_local_file`: string[], `migration`: 파괴적 마이그레이션 판정 `{ destructive, backward_compatible, findings }`). 대문자 `"SQLite"` 나 숫자는 형식 오류다. 그 밖의 키(예: `framework`)는 자유롭게 넣을 수 있고 그대로 보존된다. 정책이 새 키를 읽어야 하면 스키마에 먼저 추가한다 ("정책이 읽는 필드" 표 참고).
+   - **`facts.conditions` 와 `facts.storage` 는 parity 변환기(`src/adapters/parity.ts`)가 넣는 조건별 재생 결과와 저장 사실이다.** `conditions` 가 있는 입력에서는 `passed` 는 테스트 파트 원본의 종합값을 보존하는 필드이고 정책 판단(R1, R1b, R1c)은 조건별 사실을 읽는다. `conditions` 가 없는 구형 입력에서만 R1 이 `passed` 를 fallback 으로 본다. 없는 값은 null 대신 키를 생략한다.
    - **`facts.migration` 은 테스트 파트가 넣어도 되고 비워 둬도 된다.** 비워 두면 보안 단계 실행기(`src/stage.ts`)가 앱 폴더의 `migrations/**/*.sql` 과 `prisma/migrations/*/migration.sql` 을 읽어 판정해 채운다 (`--since <이름>` 으로 이미 적용된 마이그레이션은 건너뛴다). 넣어 주면 그 값을 존중한다. 단독 실행은 `npx tsx src/migration/cli.ts --src <앱> --out migration.json`. `destructive: true` 면 R7 이 차단하고 해결 조건 `two_phase_migration` 을 낸다.
 6. **decisions.jsonl 은 추가만 한다.** 기존 줄을 고치거나 지우지 않는다. 시간(`time`)은 CLI 가 붙이므로 같은 입력으로 다시 돌리면 `plan_hash` 는 같고 `time` 만 다르다.
 7. **파일 형식을 바꾸고 싶으면 `src/schema.ts` 를 고치고 `npm run contracts` 로 이 문서를 다시 만든다.** 손으로 고친 문서는 다음 생성 때 사라진다.
@@ -120,13 +129,13 @@ flowchart LR
 | `app` | string | 필수 | 앱 이름 |
 | `digest` | string | 필수 | 컨테이너 이미지 지문. 'sha256:' + 소문자 hex 64자. 테스트한 이미지 = 결정한 이미지 = 서명·배포할 이미지 |
 | `source_revision` | union | 선택 | 테스트한 소스의 커밋 SHA (선택). 소문자 hex 7~40자. "unknown" 은 없는 것으로 취급한다 |
-| `passed` | boolean | 필수 | 재생 테스트 통과 여부. false 면 정책 엔진이 차단한다 |
-| `match` | object | 필수 | 재생 결과 요약 |
+| `passed` | boolean | 필수 | 재생 테스트 통과 여부 (테스트 파트 원본의 종합값). facts.conditions 가 없으면 R1 이 이 값으로 차단하고, 있으면 조건별 사실로 판단한다 |
+| `match` | object | 필수 | 재생 결과 요약. facts.conditions 가 있으면 기준 조건 none 의 결과 (조건별 수치는 facts.conditions 에) |
 | `match.total` | integer | 필수 | 재생한 요청 수 |
 | `match.matched` | integer | 필수 | 응답이 일치한 요청 수 |
 | `failures` | any[] | 선택 (기본값 `[]`) | 실패한 요청 목록. 형식은 테스트 파트가 정한다 (정책 엔진은 내용을 보지 않음) |
-| `facts` | object | 선택 (기본값 `{}`) | 테스트 중 관찰한 사실. 정의된 키(db, writes_local_file, migration)는 타입이 고정되고, 그 밖의 키는 자유 |
-| `facts.db` | "sqlite" \| "postgres" \| "mysql" \| "none" | 선택 | 앱이 쓰는 DB. 소문자만. R5 가 읽는다 |
+| `facts` | object | 선택 (기본값 `{}`) | 테스트 중 관찰한 사실. 정의된 키(db, writes_local_file, migration, conditions, storage)는 타입이 고정되고, 그 밖의 키는 자유 |
+| `facts.db` | "sqlite" \| "postgres" \| "mysql" \| "none" | 선택 | 앱이 쓰는 DB. 소문자만. R5 가 읽는다. 관찰하지 못했으면 키를 생략한다 (none 은 'DB 없음' 을 확인했을 때만) |
 | `facts.writes_local_file` | string[] | 선택 | 앱이 쓰는 로컬 파일 경로 목록. R6 가 읽는다 |
 | `facts.migration` | object | 선택 | 파괴적 DB 마이그레이션 판정. 실행기(src/stage.ts)가 facts.migration 이 없으면 채운다 |
 | `facts.migration.destructive` | boolean | 필수 | 파괴적 변경이 하나라도 있는지. R7 이 읽는다 |
@@ -135,6 +144,21 @@ flowchart LR
 | `facts.migration.findings[].kind` | "drop_table" \| "drop_column" \| "rename_table" \| "rename_column" \| "alter_column_type" \| "add_not_null_without_default" \| "set_not_null" \| "truncate" | 필수 | 파괴적 변경의 종류 |
 | `facts.migration.findings[].statement` | string | 필수 | 해당 SQL 문장 (한 줄로 줄임) |
 | `facts.migration.findings[].evidence` | string | 필수 | 위치 '파일:줄' |
+| `facts.conditions` | object[] | 선택 | 조건별 재생 결과 (none / restart / replace 정확히 한 번씩). 있으면 R1 / R1b / R1c 가 이것으로 판단하고 passed 는 원본 종합값 보존용이다. 없으면 R1 이 passed 를 본다 |
+| `facts.conditions[].name` | "none" \| "restart" \| "replace" | 필수 | 조건 이름. none(기준선) / restart(재시작) / replace(컨테이너 교체) |
+| `facts.conditions[].total` | integer | 필수 | 이 조건에서 재생한 요청 수 (1 이상. 요청 0건은 판정이 아니다) |
+| `facts.conditions[].matched` | integer | 필수 | 응답이 일치한 요청 수 (total 이하) |
+| `facts.conditions[].failed` | boolean | 필수 | 이 조건에서 어긋난 요청이 하나라도 있는지. matched < total 과 같아야 한다. R1 / R1b / R1c 가 읽는다 |
+| `facts.conditions[].mismatches` | object[] | 필수 | 어긋난 요청 목록 (total - matched 개). 없으면 빈 배열 |
+| `facts.conditions[].mismatches[].index` | integer | 필수 | 기록 파일의 요청 번호 (1부터) |
+| `facts.conditions[].mismatches[].request` | string | 필수 | 요청 한 줄 (예: "GET /posts") |
+| `facts.conditions[].mismatches[].related_fact` | string | 선택 | 관련 있어 보이는 저장 사실의 path (테스트 파트의 힌트. 원인 증명이 아님). 없으면 키를 생략한다 |
+| `facts.conditions[].mismatches[].related_storage` | string | 선택 | related_fact 가 가리키는 사실의 storage (예: container_layer). related_fact 가 없으면 생략. 있으면 facts.storage 에 같은 path·kind·storage 항목이 있어야 한다 |
+| `facts.conditions[].mismatches[].related_kind` | string | 선택 | related_fact 가 가리키는 사실의 kind (sqlite, local_upload, local_file). R1c 가 읽는다. 없으면 생략. 있으면 facts.storage 에 같은 path·kind·storage 항목이 있어야 하고, sqlite 면 facts.db 가 sqlite, local_upload / local_file 이면 facts.writes_local_file 에 그 path 가 있어야 한다 |
+| `facts.storage` | object[] | 선택 | 컨테이너 안에 남은 상태 목록 (테스트 파트 facts[] 원본의 kind, path, storage). 정책 판단에는 conditions[].mismatches[].related_kind 를 쓰고, 이 목록은 related_* 의 근거(같은 path·kind·storage 항목이 있어야 한다)와 설명용 |
+| `facts.storage[].kind` | string | 필수 | sqlite(파일 헤더로 판별) / local_upload(업로드 폴더) / local_file(그 밖의 파일) |
+| `facts.storage[].path` | string | 필수 | 컨테이너 안의 경로 |
+| `facts.storage[].storage` | string | 필수 | 저장 위치. container_layer = 재시작으로는 남지만 컨테이너를 새로 만들면 사라진다 |
 | `facts.*` | any | 선택 | 그 밖의 키는 자유. 그대로 보존되지만 정책은 읽지 않는다 |
 
 ### 예시 (fixtures/03-pii-confident/test_result.json)
@@ -248,6 +272,14 @@ flowchart LR
       "result": "not_matched"
     },
     {
+      "id": "R1b",
+      "result": "not_matched"
+    },
+    {
+      "id": "R1c",
+      "result": "not_matched"
+    },
+    {
       "id": "R2",
       "result": "not_matched"
     },
@@ -276,7 +308,7 @@ flowchart LR
       "result": "not_matched"
     }
   ],
-  "plan_hash": "efa6986646276ed21827282465b20b7b7609a4b2e9884adb9b4227e55b6ec6de"
+  "plan_hash": "e85e5fd18c6609aceb5ea9b1a5b504a6cbf35f6ac0567e5df7b1e76e65e2ab52"
 }
 ```
 
@@ -473,6 +505,6 @@ flowchart LR
   "rule_ids": [
     "R4"
   ],
-  "plan_hash": "efa6986646276ed21827282465b20b7b7609a4b2e9884adb9b4227e55b6ec6de"
+  "plan_hash": "e85e5fd18c6609aceb5ea9b1a5b504a6cbf35f6ac0567e5df7b1e76e65e2ab52"
 }
 ```
