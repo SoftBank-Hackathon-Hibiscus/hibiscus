@@ -3,6 +3,7 @@ import { readToken } from './token';
 import type {
   AgentStatusResponse,
   ApplicationView,
+  CurrentUser,
   Deployment,
   DeploymentView,
   RouteSnapshot,
@@ -41,6 +42,18 @@ async function request<T>(method: 'GET' | 'POST', path: string, body?: unknown):
 /** Vite 프록시를 통해 같은 origin 으로 backend-v2 를 호출한다. */
 export class RealDataSource implements DataSource {
   readonly kind = 'real' as const;
+
+  healthz() {
+    return request<{ ok: boolean }>('GET', '/healthz');
+  }
+
+  me() {
+    return request<CurrentUser>('GET', '/users/me');
+  }
+
+  listApplications() {
+    return request<ApplicationView[]>('GET', '/applications');
+  }
 
   getApplication(applicationId: string) {
     return request<ApplicationView>('GET', `/applications/${encodeURIComponent(applicationId)}`);

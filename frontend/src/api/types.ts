@@ -25,6 +25,17 @@ export type HealthStatus = 'healthy' | 'unhealthy' | 'unknown';
 export type FailureKind = 'application' | 'network';
 export type AgentStatus = 'registered' | 'online' | 'offline' | 'revoked';
 
+/** GET /users/me */
+export interface CurrentUser {
+  id: string;
+  githubId: number;
+  login: string;
+  name: string | null;
+  avatarUrl: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Application {
   id: string;
   name: string;

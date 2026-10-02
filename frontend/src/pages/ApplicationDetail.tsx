@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError, type DataSource } from '../api/client';
 import type { AgentStatusResponse, ApplicationAgentSummary, ApplicationView, Deployment, DeploymentStatus, PolicyResult, RouteSnapshot, RoutingTargetView, TargetKind } from '../api/types';
 import { ErrorNotice, describeError } from '../components/ErrorNotice';
-import { Badge, Empty, Hash, Kv, Notice, type Tone } from '../components/ui';
+import { Badge, Collapsible, Empty, Hash, Kv, type Tone } from '../components/ui';
 import { usePolling } from '../hooks/usePolling';
 import { fmtTime, relTime, targetLabel } from '../lib/format';
 import { deploymentPath, hrefFor } from '../lib/router';
@@ -28,7 +28,7 @@ interface Snapshot {
   fetchedAt: number;
 }
 
-interface FailoverEvent {
+interface RouteChange {
   at: number;
   fromKind: TargetKind | null;
   toKind: TargetKind;
@@ -44,6 +44,7 @@ const STATUS_TONE: Record<DeploymentStatus, Tone> = {
   failed: 'danger',
   succeeded: 'success',
 };
+const TONE_ICON: Record<Tone, string> = { success: '✓', warning: '!', danger: '✕', info: '…', muted: '–' };
 
 export function ApplicationDetail({ id, source }: { id: string; source: DataSource }) {
   const policyCache = useRef(new Map<string, PolicyResult | null>());
@@ -92,7 +93,7 @@ export function ApplicationDetail({ id, source }: { id: string; source: DataSour
     [id, source],
   );
 
-  const [events, setEvents] = useState<FailoverEvent[]>([]);
+  const [events, setEvents] = useState<RouteChange[]>([]);
   const previousRoute = useRef<RouteSnapshot | null | undefined>(undefined);
   useEffect(() => {
     if (!poll.data) return;
@@ -117,32 +118,34 @@ export function ApplicationDetail({ id, source }: { id: string; source: DataSour
   }, [poll.data]);
 
   const snap = poll.data;
-  if (poll.loading && !snap) return <Empty>애플리케이션 정보를 불러오는 중…</Empty>;
+  if (poll.loading && !snap) return <Empty>애플리케이션 정보를 불러오는 중</Empty>;
   if (!snap) return <ErrorNotice error={poll.error ?? new Error('데이터 없음')} />;
 
   const mockCaption = source instanceof MockDataSource ? source.frameCaption() : null;
   const latestEvent = events[events.length - 1];
+  const failedOver = Boolean(latestEvent && latestEvent.fromKind === 'onprem' && latestEvent.toKind === 'cloud_run');
 
   return (
     <div className="page">
+      {latestEvent && <RouteBanner event={latestEvent} count={events.length} />}
       {poll.error ? <ErrorNotice error={poll.error} /> : null}
       <Header snap={snap} lastUpdated={poll.lastUpdated} />
       {mockCaption && <div className="mock-caption">mock 진행: {mockCaption}</div>}
-      {latestEvent && <FailoverBanner event={latestEvent} count={events.length} />}
-      <RouteSummary snap={snap} />
+      <TrafficHeadline snap={snap} failedOver={failedOver} />
       <TargetCards snap={snap} />
       <AgentsSection rows={snap.agents} />
       <DeploymentsSection deployments={snap.deployments} activeDeploymentId={snap.route?.target.deploymentId ?? null} />
       {events.length > 1 && (
         <section className="card">
-          <h2 className="h2">route 변경 (이 화면에서 관측)</h2>
-          <ul className="plain">
-            {events.map((e) => (
-              <li key={e.at}>
-                {fmtTime(new Date(e.at).toISOString())} · {e.fromKind ? targetLabel(e.fromKind) : '없음'} → {targetLabel(e.toKind)} (rev {e.fromRevision ?? '—'} → {e.toRevision})
-              </li>
-            ))}
-          </ul>
+          <Collapsible title="이 화면에서 관측한 route 변경" summary={<span className="chip">{events.length}회</span>}>
+            <ul className="plain">
+              {events.map((e) => (
+                <li key={e.at}>
+                  {fmtTime(new Date(e.at).toISOString())}: {e.fromKind ? targetLabel(e.fromKind) : '없음'}에서 {targetLabel(e.toKind)}으로 (rev {e.fromRevision ?? '없음'}에서 {e.toRevision})
+                </li>
+              ))}
+            </ul>
+          </Collapsible>
         </section>
       )}
     </div>
@@ -159,68 +162,76 @@ function Header({ snap, lastUpdated }: { snap: Snapshot; lastUpdated: number | n
       </div>
       <div className="title-row">
         <h1>
-          {a.name} <span className="muted mono small">{a.slug}</span>
+          {a.name} {a.publicHost && <span className="muted mono small">{a.publicHost}</span>}
         </h1>
         <div className="title-badges">
-          {a.publicHost && <span className="chip mono">{a.publicHost}</span>}
-          <span className="chip">
-            health {h.enabled ? `${h.method} ${h.path} · ${h.intervalSeconds}초 · 실패 ${h.failureThreshold}회` : '꺼짐'}
-          </span>
-          <span className="live">5초마다 갱신{lastUpdated ? ` · ${relTime(new Date(lastUpdated).toISOString())}` : ''}</span>
+          <span className="chip">{h.enabled ? `health ${h.method} ${h.path}, ${h.intervalSeconds}초마다, ${h.failureThreshold}회 실패면 전환` : 'health 검사 꺼짐'}</span>
+          <span className="live">5초마다 갱신{lastUpdated ? `, ${relTime(new Date(lastUpdated).toISOString())}` : ''}</span>
         </div>
       </div>
     </header>
   );
 }
 
-function FailoverBanner({ event, count }: { event: FailoverEvent; count: number }) {
+function RouteBanner({ event, count }: { event: RouteChange; count: number }) {
   const isFailover = event.fromKind === 'onprem' && event.toKind === 'cloud_run';
-  const title = isFailover
-    ? `failover 발생 (rev ${event.fromRevision ?? '—'} → ${event.toRevision})`
-    : `route 변경 (rev ${event.fromRevision ?? '—'} → ${event.toRevision})`;
   return (
-    <Notice tone={isFailover ? 'warning' : 'info'} title={title}>
-      {event.fromKind ? targetLabel(event.fromKind) : '없음'} → <strong>{targetLabel(event.toKind)}</strong> · {fmtTime(new Date(event.at).toISOString())}
-      {isFailover && ' · 자동 failback 은 없음. 온프레 복구 뒤 수동 route 변경 필요'}
-      {count > 1 && ` · 총 ${count}회 변경`}
-    </Notice>
+    <div className={`banner banner-${isFailover ? 'warning' : 'info'}`} role="alert">
+      <span className="banner-icon" aria-hidden>{isFailover ? '!' : '…'}</span>
+      <div>
+        <div className="banner-title">{isFailover ? `failover 발생 (rev ${event.fromRevision ?? '없음'} → ${event.toRevision})` : `route 변경 (rev ${event.fromRevision ?? '없음'} → ${event.toRevision})`}</div>
+        <div className="banner-body">
+          {event.fromKind ? targetLabel(event.fromKind) : '없음'}에서 <strong>{targetLabel(event.toKind)}</strong>으로, {fmtTime(new Date(event.at).toISOString())}
+          {isFailover && '. 자동 failback은 없습니다. 온프레가 복구되면 수동으로 route를 바꿉니다.'}
+          {count > 1 && ` 총 ${count}회 변경.`}
+        </div>
+      </div>
+    </div>
   );
 }
 
-function RouteSummary({ snap }: { snap: Snapshot }) {
+function TrafficHeadline({ snap, failedOver }: { snap: Snapshot; failedOver: boolean }) {
   const route = snap.route;
   const policy = snap.routePolicy;
   const version = route ? snap.deployments.find((d) => d.id === route.target.deploymentId)?.version : undefined;
+  const onpremUnhealthy = snap.targets.some((t) => t.target.kind === 'onprem' && t.health?.status === 'unhealthy');
+  let sentence: string;
+  let tone: Tone;
+  if (!route) {
+    sentence = '아직 트래픽을 받는 곳이 없습니다';
+    tone = 'muted';
+  } else if (route.target.kind === 'cloud_run' && (failedOver || onpremUnhealthy)) {
+    sentence = '온프레 장애로 Cloud Run에서 처리 중';
+    tone = 'warning';
+  } else {
+    sentence = `지금 트래픽은 ${targetLabel(route.target.kind)}에서 처리 중`;
+    tone = 'success';
+  }
   return (
-    <section className="card route-summary">
-      <div className="route-main">
-        <span className="route-label">현재 트래픽</span>
-        {route ? (
-          <span className={`route-value route-${route.target.kind}`}>{targetLabel(route.target.kind)}</span>
-        ) : (
-          <span className="route-value route-none">경로 없음</span>
-        )}
+    <section className={`result result-${tone} traffic`}>
+      <div className="result-conclusion">
+        <span className="result-icon" aria-hidden>{TONE_ICON[tone]}</span>
+        <h2 className="conclusion">{sentence}</h2>
       </div>
-      <Kv
-        columns={3}
-        items={[
-          ['route revision', route ? <strong>{route.revision}</strong> : <span className="muted">—</span>],
-          ['서빙 배포', route ? <span>{version !== undefined ? `v${version} ` : ''}<Hash value={route.target.deploymentId} length={16} /></span> : <span className="muted">—</span>],
-          [
-            'failover 허용 (정책)',
-            !route ? (
-              <span className="muted">—</span>
-            ) : snap.routePolicyError ? (
-              <span className="small muted">조회 실패: {describeError(snap.routePolicyError).title}</span>
-            ) : policy ? (
-              policy.failoverAllowed ? <Badge tone="success">허용</Badge> : <Badge tone="muted">불가</Badge>
-            ) : (
-              <span className="muted">정책 결과 없음</span>
-            ),
-          ],
-        ]}
-      />
-      {!route && <div className="small muted">첫 route 전환(PATCH /applications/:id/routing) 전이라 GET routing 이 404</div>}
+      <div className="identity-line">
+        <span>route revision {route ? <strong>{route.revision}</strong> : <span className="muted">없음</span>}</span>
+        <span>
+          서빙 배포 {route ? <>{version !== undefined ? `v${version} ` : ''}<Hash value={route.target.deploymentId} length={14} /></> : <span className="muted">없음</span>}
+        </span>
+        <span>
+          failover 정책{' '}
+          {!route ? (
+            <span className="muted">없음</span>
+          ) : snap.routePolicyError ? (
+            <span className="muted">조회 실패: {describeError(snap.routePolicyError).title}</span>
+          ) : policy ? (
+            policy.failoverAllowed ? <Badge tone="success">허용</Badge> : <Badge tone="muted">불가</Badge>
+          ) : (
+            <span className="muted">정책 결과 없음</span>
+          )}
+        </span>
+      </div>
+      {!route && <p className="muted">첫 route 전환(PATCH /applications/:id/routing) 전이라 GET routing 이 404 입니다.</p>}
     </section>
   );
 }
@@ -241,7 +252,7 @@ function healthTone(status: string | undefined): Tone {
   if (status === 'unhealthy') return 'danger';
   return 'muted';
 }
-const HEALTH_LABEL: Record<string, string> = { healthy: 'healthy', unhealthy: 'unhealthy', unknown: 'unknown' };
+const HEALTH_LABEL: Record<string, string> = { healthy: '정상', unhealthy: '응답 없음', unknown: '확인 중' };
 
 function TargetCard({ kind, snap }: { kind: TargetKind; snap: Snapshot }) {
   const route = snap.route;
@@ -268,26 +279,24 @@ function TargetCard({ kind, snap }: { kind: TargetKind; snap: Snapshot }) {
 
   return (
     <div className={`target-card target-${kind} ${isActive ? 'target-active' : ''} ${primary ? '' : 'target-missing'} tone-${tone}`}>
+      {isActive && <div className="target-ribbon">지금 여기로</div>}
       <div className="target-head">
         <h2>{targetLabel(kind)}</h2>
-        {isActive && <span className="pill pill-active">ACTIVE · 트래픽 받는 중</span>}
-        {isStandby && <span className="pill pill-standby">STANDBY{snap.routePolicy ? (snap.routePolicy.failoverAllowed ? ' · failover 대상' : ' · failover 불가') : ''}</span>}
+        {isStandby && <span className="pill pill-standby">대기 중{snap.routePolicy ? (snap.routePolicy.failoverAllowed ? ', failover 대상' : ', failover 불가') : ''}</span>}
         {!primary && <span className="pill pill-muted">등록 안 됨</span>}
-        {isFormerPrimary && <span className="pill pill-muted">대기 · 복구 뒤 수동 전환</span>}
+        {isFormerPrimary && <span className="pill pill-muted">복구 뒤 수동 전환</span>}
         {primary && !isActive && !isStandby && !isFormerPrimary && <span className="pill pill-muted">{primary.target.enabled ? '대기' : '비활성'}</span>}
       </div>
       {!primary ? (
-        <Empty>{targetLabel(kind)} target 이 등록되지 않음</Empty>
+        <Empty>{targetLabel(kind)} target이 등록되지 않았습니다.</Empty>
       ) : (
         <>
           <div className="health-row">
-            <Badge tone={tone}>{displayStatus ? HEALTH_LABEL[displayStatus] : 'health 없음'}</Badge>
-            {health?.failureKind && displayStatus !== 'healthy' && <span className="chip chip-danger mono">{health.failureKind}</span>}
-            {health && (
-              <span className="small muted">
-                연속 {displayStatus === 'healthy' ? `성공 ${health.consecutiveSuccesses}` : `실패 ${health.consecutiveFailures}`}
-              </span>
-            )}
+            <span className={`health health-${tone}`}>
+              <span aria-hidden>{TONE_ICON[tone]}</span> {displayStatus ? HEALTH_LABEL[displayStatus] : 'health 없음'}
+            </span>
+            {health?.failureKind && displayStatus !== 'healthy' && <span className="chip chip-danger">{health.failureKind === 'network' ? '네트워크 오류' : '앱 오류'}</span>}
+            {health && <span className="muted">연속 {displayStatus === 'healthy' ? `성공 ${health.consecutiveSuccesses}` : `실패 ${health.consecutiveFailures}`}</span>}
             {expired && <span className="chip chip-muted">관측 만료</span>}
           </div>
           {health?.reason && displayStatus !== 'healthy' && <div className="mono small health-reason">{health.reason}</div>}
@@ -296,16 +305,16 @@ function TargetCard({ kind, snap }: { kind: TargetKind; snap: Snapshot }) {
             items={[
               ['배포', <span>{version !== undefined ? `v${version} ` : ''}<Hash value={primary.target.deploymentId} length={14} /></span>],
               ['target', <Hash value={primary.target.id} length={14} />],
-              kind === 'onprem' ? ['에이전트', <span className="mono">{agentName ?? primary.target.agentId ?? '—'}</span>] : null,
-              kind === 'onprem' ? ['포트', <span className="mono">local {primary.target.localPort ?? '—'} → gateway {primary.target.gatewayPort ?? '—'}</span>] : null,
-              kind === 'cloud_run' ? ['URL', primary.target.url ? <a className="mono small" href={primary.target.url} target="_blank" rel="noreferrer">{primary.target.url}</a> : '—'] : null,
-              ['enabled', primary.target.enabled ? <Badge tone="success">예</Badge> : <Badge tone="muted">아니오</Badge>],
-              ['마지막 관측', health ? `${relTime(health.observedAt)} (${fmtTime(health.observedAt)})` : '—'],
+              kind === 'onprem' ? ['에이전트', <span className="mono">{agentName ?? primary.target.agentId ?? '없음'}</span>] : null,
+              kind === 'onprem' ? ['포트', <span className="mono">local {primary.target.localPort ?? '없음'}, gateway {primary.target.gatewayPort ?? '없음'}</span>] : null,
+              kind === 'cloud_run' ? ['URL', primary.target.url ? <Hash value={primary.target.url} length={34} /> : '없음'] : null,
+              ['enabled', primary.target.enabled ? '예' : '아니오'],
+              ['마지막 관측', health ? `${relTime(health.observedAt)} (${fmtTime(health.observedAt)})` : '없음'],
             ]}
           />
           {others.length > 0 && (
             <div className="small muted">
-              같은 종류 target {others.length}개 더: {others.map((t) => `${t.target.id.slice(0, 10)}… (${t.health?.status ?? 'health 없음'})`).join(', ')}
+              같은 종류 target {others.length}개 더: {others.map((t) => `${t.target.id.slice(0, 10)} (${t.health?.status ?? 'health 없음'})`).join(', ')}
             </div>
           )}
         </>
@@ -317,8 +326,8 @@ function TargetCard({ kind, snap }: { kind: TargetKind; snap: Snapshot }) {
 function AgentsSection({ rows }: { rows: AgentRow[] }) {
   return (
     <section className="card">
-      <h2 className="h2">On-Prem 에이전트</h2>
-      {rows.length === 0 && <Empty>이 애플리케이션에 할당된 에이전트가 없음. 상태 조회 생략</Empty>}
+      <h3>On-Prem 에이전트</h3>
+      {rows.length === 0 && <Empty>이 애플리케이션에 할당된 에이전트가 없어 상태 조회를 건너뜁니다.</Empty>}
       <div className="agents">
         {rows.map(({ agent, status, error }) => {
           const s = status?.status ?? agent.status;
@@ -334,13 +343,11 @@ function AgentsSection({ rows }: { rows: AgentRow[] }) {
               <Kv
                 columns={2}
                 items={[
-                  ['마지막 접속', status?.last_seen_at ? `${relTime(status.last_seen_at)} (${fmtTime(status.last_seen_at)})` : agent.lastSeenAt ? relTime(agent.lastSeenAt) : '—'],
-                  ['heartbeat', status?.updated_at ? relTime(status.updated_at) : '—'],
-                  ['서빙 중', status?.serving ? <span className="mono small">{status.serving.container}</span> : <span className="muted">없음</span>],
-                  status?.serving ? ['서빙 run_id', <Hash value={status.serving.run_id} length={16} />] : null,
+                  ['마지막 접속', status?.last_seen_at ? `${relTime(status.last_seen_at)} (${fmtTime(status.last_seen_at)})` : agent.lastSeenAt ? relTime(agent.lastSeenAt) : '없음'],
+                  ['heartbeat', status?.updated_at ? relTime(status.updated_at) : '없음'],
+                  ['서빙 중', status?.serving ? <Hash value={status.serving.container} length={28} /> : <span className="muted">없음</span>],
                   status?.serving ? ['서빙 digest', <Hash value={status.serving.digest} />] : null,
-                  ['public_url', status?.public_url ? <span className="mono small">{status.public_url}</span> : '—'],
-                  ['agent id', <Hash value={agent.id} length={14} />],
+                  ['public_url', status?.public_url ? <Hash value={status.public_url} length={28} /> : '없음'],
                 ]}
               />
             </div>
@@ -354,7 +361,7 @@ function AgentsSection({ rows }: { rows: AgentRow[] }) {
 function DeploymentsSection({ deployments, activeDeploymentId }: { deployments: Deployment[]; activeDeploymentId: string | null }) {
   return (
     <section className="card">
-      <h2 className="h2">배포 목록</h2>
+      <h3>배포 목록</h3>
       {deployments.length === 0 ? (
         <Empty>배포 없음</Empty>
       ) : (
@@ -380,7 +387,7 @@ function DeploymentsSection({ deployments, activeDeploymentId }: { deployments: 
                 <td>
                   <Badge tone={STATUS_TONE[d.status]}>{d.status}</Badge>
                 </td>
-                <td className="mono">{d.decision ?? '—'}</td>
+                <td className="mono">{d.decision ?? '없음'}</td>
                 <td>{d.deploymentPerformed ? <Badge tone="success">배포됨</Badge> : <span className="muted small">배포 안 됨</span>}</td>
                 <td>
                   <Hash value={d.sourceRevision} length={7} />

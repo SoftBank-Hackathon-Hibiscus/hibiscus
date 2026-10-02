@@ -65,14 +65,14 @@ export function deriveDeployDisplay(stage: StageExecution | undefined, result: D
       if (failedChecks.length) details.push(`검사 실패: ${failedChecks.join(', ')}`);
       if (failedCandidates.length) details.push(`후보 기동 실패: ${failedCandidates.join(', ')}`);
       if (result.error) details.push(result.error);
-      details.push('후보는 폐기되고 기존 버전이 그대로 서비스 중');
-      return { tone: 'warning', title: '보류: 기존 서비스 유지', details, decisionLabel, routingLabel, routingTone };
+      details.push('후보는 폐기되고 기존 서비스는 계속 동작 중');
+      return { tone: 'warning', title: '안전하게 보류됨. 새 버전의 후보 검사가 실패해 트래픽을 전환하지 않았습니다', details, decisionLabel, routingLabel, routingTone };
     }
     case 'rolled_back': {
       const rollback = result.targets.find((t) => t.phase === 'rollback' && t.result === 'ok');
       if (rollback?.previous) details.push(`Cloud Run 을 ${rollback.previous} 로 되돌림`);
       if (result.error) details.push(result.error);
-      return { tone: 'danger', title: '전환 중 실패, 이전 버전으로 복구', details, decisionLabel, routingLabel, routingTone };
+      return { tone: 'warning', title: '이전 버전으로 복구됨', details, decisionLabel, routingLabel, routingTone };
     }
     case 'error': {
       if (result.error) details.push(result.error);

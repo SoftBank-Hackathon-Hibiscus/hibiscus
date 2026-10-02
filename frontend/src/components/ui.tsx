@@ -98,3 +98,36 @@ export function Bilingual({ ko, ja }: { ko: ReactNode; ja?: string | null }) {
 export function Empty({ children }: { children: ReactNode }) {
   return <div className="empty">{children}</div>;
 }
+
+/** 원본 JSON 등 소음이 되는 내용을 기본 숨김으로 둔다. */
+export function RawToggle({ label = '원본 보기', children }: { label?: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="raw-toggle">
+      <button type="button" className="link-btn" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+        {open ? '원본 닫기' : label}
+      </button>
+      {open && <div className="raw-body">{children}</div>}
+    </div>
+  );
+}
+
+export function Tabs<T extends string>({ tabs, value, onChange }: { tabs: Array<{ id: T; label: string }>; value: T; onChange: (id: T) => void }) {
+  return (
+    <div className="tabs" role="tablist">
+      {tabs.map((tab) => (
+        <button key={tab.id} type="button" role="tab" aria-selected={tab.id === value} className={`tab ${tab.id === value ? 'tab-active' : ''}`} onClick={() => onChange(tab.id)}>
+          {tab.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export function DemoBadge() {
+  return (
+    <span className="demo-badge" title="실제 백엔드가 아니라 mock 데이터입니다">
+      DEMO DATA
+    </span>
+  );
+}

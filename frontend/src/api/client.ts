@@ -1,6 +1,7 @@
 import type {
   AgentStatusResponse,
   ApplicationView,
+  CurrentUser,
   Deployment,
   DeploymentView,
   RouteSnapshot,
@@ -28,6 +29,11 @@ export class ApiError extends Error {
 /** 화면이 보는 유일한 데이터 입구. mock/real 구현이 같은 타입을 돌려준다. */
 export interface DataSource {
   readonly kind: 'mock' | 'real';
+  /** GET /healthz (인증 없음). 연결 확인용 */
+  healthz(): Promise<{ ok: boolean }>;
+  /** GET /users/me. 토큰 확인용 */
+  me(): Promise<CurrentUser>;
+  listApplications(): Promise<ApplicationView[]>;
   getApplication(applicationId: string): Promise<ApplicationView>;
   listDeployments(applicationId: string): Promise<Deployment[]>;
   getDeployment(deploymentId: string): Promise<DeploymentView>;

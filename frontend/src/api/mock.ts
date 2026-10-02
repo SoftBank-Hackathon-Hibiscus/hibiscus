@@ -2,6 +2,7 @@ import { ApiError, type DataSource } from './client';
 import type {
   AgentStatusResponse,
   ApplicationView,
+  CurrentUser,
   Deployment,
   DeploymentView,
   RouteSnapshot,
@@ -30,6 +31,19 @@ export class MockDataSource implements DataSource {
 
   frameCaption(): string {
     return this.frame().caption;
+  }
+
+  async healthz() {
+    return delay({ ok: true });
+  }
+
+  async me(): Promise<CurrentUser> {
+    const now = new Date().toISOString();
+    return delay({ id: 'u-demo', githubId: 0, login: 'demo', name: 'Demo', avatarUrl: null, createdAt: now, updatedAt: now });
+  }
+
+  async listApplications(): Promise<ApplicationView[]> {
+    return delay([this.scenario.application]);
   }
 
   async getApplication(applicationId: string): Promise<ApplicationView> {
