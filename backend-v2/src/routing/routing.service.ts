@@ -4,11 +4,13 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
 import { AgentService } from '../agent/agent.service.js';
 import { ApplicationRepository } from '../application/application.repository.js';
 import { DeploymentRepository } from '../deployment/deployment.repository.js';
 import type { RoutingTargetHealth } from '../database/schema.js';
+import type { BackendConfig } from '../config/configs/backend.config.js';
 import type {
   CreateRoutingTargetDto,
   UpdateApplicationRouteDto,
@@ -27,6 +29,7 @@ export class RoutingService {
     private readonly applications: ApplicationRepository,
     private readonly deployments: DeploymentRepository,
     private readonly agents: AgentService,
+    private readonly config: ConfigService<BackendConfig, true>,
   ) {}
 
   createTarget(applicationId: string, input: CreateRoutingTargetDto) {
@@ -39,6 +42,7 @@ export class RoutingService {
 
     let agentId: string | null = null;
     let localPort: number | null = null;
+    let gatewayPort: number | null = null;
     let url: string | null = null;
     if (input.kind === 'onprem') {
       if (!input.agent_id || input.local_port === undefined) {
@@ -55,6 +59,14 @@ export class RoutingService {
       }
       agentId = input.agent_id;
       localPort = input.local_port;
+      gatewayPort =
+        this.repository.allocateGatewayPort(
+          this.config.get('backend.sshForwardPortMin', { infer: true }),
+          this.config.get('backend.sshForwardPortMax', { infer: true }),
+        ) ?? null;
+      if (gatewayPort === null) {
+        throw new ConflictException('No SSH forward port is available');
+      }
     } else {
       if (!input.url) {
         throw new BadRequestException('Cloud Run target requires url');
@@ -86,6 +98,7 @@ export class RoutingService {
       kind: input.kind,
       agentId,
       localPort,
+      gatewayPort,
       url,
       enabled: input.enabled,
       createdAt: now,

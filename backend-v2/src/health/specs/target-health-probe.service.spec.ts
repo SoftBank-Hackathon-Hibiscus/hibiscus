@@ -3,7 +3,7 @@ import type {
   HealthCheckConfig,
   RoutingTarget,
 } from '../../database/schema.js';
-import type { TunnelService } from '../../tunnel/tunnel.service.js';
+import type { SshTunnelService } from '../../ssh-tunnel/ssh-tunnel.service.js';
 import { TargetHealthProbeService } from '../target-health-probe.service.js';
 
 describe('TargetHealthProbeService', () => {
@@ -39,7 +39,7 @@ describe('TargetHealthProbeService', () => {
 });
 
 function service(): TargetHealthProbeService {
-  return new TargetHealthProbeService({} as TunnelService);
+  return new TargetHealthProbeService({} as SshTunnelService);
 }
 
 function target(): RoutingTarget {
@@ -51,6 +51,7 @@ function target(): RoutingTarget {
     kind: 'cloud_run',
     agentId: null,
     localPort: null,
+    gatewayPort: null,
     url: 'https://example.run.app',
     enabled: true,
     createdAt: now,

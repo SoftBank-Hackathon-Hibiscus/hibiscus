@@ -5,6 +5,7 @@ import {
   agents,
   applicationAgents,
   agentHeartbeats,
+  routingTargets,
   type AgentHeartbeat,
   type Agent,
   type ApplicationAgent,
@@ -98,5 +99,20 @@ export class AgentRepository {
       .values(link)
       .onConflictDoNothing()
       .run();
+  }
+
+  listForwards(agentId: string) {
+    return this.database.db
+      .select()
+      .from(routingTargets)
+      .where(
+        and(
+          eq(routingTargets.agentId, agentId),
+          eq(routingTargets.kind, 'onprem'),
+          eq(routingTargets.enabled, true),
+        ),
+      )
+      .orderBy(asc(routingTargets.createdAt))
+      .all();
   }
 }

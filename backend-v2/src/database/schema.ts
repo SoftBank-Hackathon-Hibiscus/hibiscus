@@ -260,6 +260,7 @@ export const routingTargets = sqliteTable(
     kind: text('kind', { enum: ['onprem', 'cloud_run'] }).notNull(),
     agentId: text('agent_id').references(() => agents.id),
     localPort: integer('local_port'),
+    gatewayPort: integer('gateway_port'),
     url: text('url'),
     enabled: integer('enabled', { mode: 'boolean' }).notNull(),
     createdAt: text('created_at').notNull(),
@@ -272,6 +273,7 @@ export const routingTargets = sqliteTable(
       table.kind,
       table.agentId,
     ),
+    uniqueIndex('routing_targets_gateway_port_unique').on(table.gatewayPort),
   ],
 );
 

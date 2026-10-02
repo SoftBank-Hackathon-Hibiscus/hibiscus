@@ -71,6 +71,13 @@
       "when": 1790918113296,
       "tag": "0009_brainy_gabe_jones",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1790922812852,
+      "tag": "0010_chilly_patch",
+      "breakpoints": true
     }
   ]
 }

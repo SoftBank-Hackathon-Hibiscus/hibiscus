@@ -112,6 +112,14 @@ export class AgentService {
     };
   }
 
+  forwards(agentId: string) {
+    return this.repository.listForwards(agentId).map((target) => ({
+      target_id: target.id,
+      gateway_port: target.gatewayPort!,
+      local_port: target.localPort!,
+    }));
+  }
+
   assign(applicationId: string, agentId: string) {
     if (!this.applications.find(applicationId)) {
       throw new NotFoundException('Application not found');

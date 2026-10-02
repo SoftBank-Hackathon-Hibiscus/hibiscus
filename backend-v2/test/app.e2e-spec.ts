@@ -31,10 +31,8 @@ import { DatabaseService } from '../src/database/database.service.js';
 import { AgentRepository } from '../src/agent/agent.repository.js';
 import { agentJobs, agents } from '../src/database/schema.js';
 import { eq } from 'drizzle-orm';
-import WebSocket, { createWebSocketStream, type RawData } from 'ws';
-import { Agent, createServer, request as httpRequest } from 'node:http';
-import { connect, type Socket } from 'node:net';
-import { TunnelService } from '../src/tunnel/tunnel.service.js';
+import { createServer } from 'node:http';
+import { connect, createServer as createTcpServer } from 'node:net';
 import { RoutingService } from '../src/routing/routing.service.js';
 import { FailoverService } from '../src/health/failover.service.js';
 
@@ -1205,7 +1203,7 @@ describe('deployment API (e2e)', () => {
       });
   });
 
-  it('opens an authenticated tunnel and carries an HTTP request to an on-prem port', async () => {
+  it('uses an SSH reverse forward to carry Gateway requests to an on-prem port', async () => {
     const localServer = createServer((incoming, outgoing) => {
       let body = '';
       incoming.setEncoding('utf8');
@@ -1235,6 +1233,17 @@ describe('deployment API (e2e)', () => {
         local_port: localAddress.port,
       })
       .expect(201);
+    expect(target.body.gatewayPort).toBeGreaterThanOrEqual(20_000);
+    const forwards = await agentApi(context.token)
+      .get('/agent/v1/forwards')
+      .expect(200);
+    expect(forwards.body).toEqual([
+      {
+        target_id: target.body.id,
+        gateway_port: target.body.gatewayPort,
+        local_port: localAddress.port,
+      },
+    ]);
     await api()
       .patch(`/applications/${context.applicationId}/routing`)
       .send({
@@ -1243,37 +1252,13 @@ describe('deployment API (e2e)', () => {
         reason: 'Gateway E2E target',
       })
       .expect(200);
-    const backendAddress = app.getHttpServer().address();
-    if (!backendAddress || typeof backendAddress === 'string') {
-      throw new Error('Backend test server did not start');
-    }
-    const tunnelUrl = `ws://127.0.0.1:${backendAddress.port}`;
-    const control = new WebSocket(`${tunnelUrl}/agent/v1/tunnel/control`, {
-      headers: { Authorization: `Bearer ${context.token}` },
+    const sshForward = createTcpServer((gatewaySocket) => {
+      const localSocket = connect(localAddress.port, '127.0.0.1');
+      gatewaySocket.pipe(localSocket).pipe(gatewaySocket);
     });
-    const ready = await waitForWebSocketMessage(control);
-    expect(ready).toMatchObject({ type: 'ready', protocol_version: 1 });
-
-    const dataSockets: WebSocket[] = [];
-    control.on('message', (raw) => {
-      const message = JSON.parse(webSocketText(raw)) as {
-        type: string;
-        session_id: string;
-        channel_id: string;
-        local_port: number;
-      };
-      if (message.type !== 'open') return;
-      const data = new WebSocket(
-        `${tunnelUrl}/agent/v1/tunnel/data?session_id=${message.session_id}&channel_id=${message.channel_id}`,
-        { headers: { Authorization: `Bearer ${context.token}` } },
-      );
-      dataSockets.push(data);
-      data.once('open', () => {
-        const tunnel = createWebSocketStream(data, { allowHalfOpen: false });
-        const local = connect(message.local_port, '127.0.0.1');
-        tunnel.pipe(local).pipe(tunnel);
-      });
-    });
+    await new Promise<void>((resolve) =>
+      sshForward.listen(target.body.gatewayPort, '127.0.0.1', resolve),
+    );
 
     try {
       await request(app.getHttpServer())
@@ -1288,66 +1273,22 @@ describe('deployment API (e2e)', () => {
         .get('/_gateway/tunnel-http/dev-path')
         .expect(200)
         .expect('GET /dev-path ');
-
-      const stream = await app.get(TunnelService).openTarget(target.body.id);
-      const tunnelAgent = new Agent({ keepAlive: false });
-      tunnelAgent.createConnection = () => stream as Socket;
-      const response = await new Promise<{
-        status: number | undefined;
-        header: string | string[] | undefined;
-        body: string;
-      }>((resolve, reject) => {
-        const outgoing = httpRequest(
-          {
-            method: 'POST',
-            host: 'onprem.internal',
-            path: '/echo?value=1',
-            headers: { 'content-length': '5' },
-            agent: tunnelAgent,
-          },
-          (incoming) => {
-            let body = '';
-            incoming.setEncoding('utf8');
-            incoming.on('data', (chunk: string) => {
-              body += chunk;
-            });
-            incoming.on('end', () =>
-              resolve({
-                status: incoming.statusCode,
-                header: incoming.headers['x-hibiscus-tunnel'],
-                body,
-              }),
-            );
-          },
-        );
-        outgoing.once('error', reject);
-        outgoing.end('hello');
-      });
-      expect(response).toEqual({
-        status: 200,
-        header: 'ok',
-        body: 'POST /echo?value=1 hello',
-      });
       await api()
         .get(`/agents/${context.agentId}/tunnel`)
         .expect(200)
-        .expect((result) => expect(result.body.connected).toBe(true));
-
-      const closed = new Promise<void>((resolve) =>
-        control.once('close', () => resolve()),
-      );
-      await request(app.getHttpServer())
-        .delete(`/agents/${context.agentId}/token`)
-        .set('Authorization', `Bearer ${defaultToken}`)
-        .expect(200);
-      await closed;
+        .expect((result) => {
+          expect(result.body.connected).toBe(true);
+          expect(result.body.active_forwards).toBe(1);
+        });
+      await new Promise<void>((resolve) => sshForward.close(() => resolve()));
       await api()
         .get(`/agents/${context.agentId}/tunnel`)
         .expect(200)
         .expect((result) => expect(result.body.connected).toBe(false));
     } finally {
-      control.terminate();
-      for (const data of dataSockets) data.terminate();
+      if (sshForward.listening) {
+        await new Promise<void>((resolve) => sshForward.close(() => resolve()));
+      }
       await new Promise<void>((resolve) => localServer.close(() => resolve()));
     }
   });
@@ -1799,21 +1740,6 @@ describe('deployment API (e2e)', () => {
       imageRepo: application.application.imageRepo as string,
       planHash: view.policyResult.planHash as string,
     };
-  }
-
-  function waitForWebSocketMessage(socket: WebSocket) {
-    return new Promise<Record<string, unknown>>((resolve, reject) => {
-      socket.once('message', (data) => {
-        resolve(JSON.parse(webSocketText(data)) as Record<string, unknown>);
-      });
-      socket.once('error', reject);
-    });
-  }
-
-  function webSocketText(data: RawData): string {
-    if (Buffer.isBuffer(data)) return data.toString('utf8');
-    if (data instanceof ArrayBuffer) return Buffer.from(data).toString('utf8');
-    return Buffer.concat(data).toString('utf8');
   }
 
   function jobInput(

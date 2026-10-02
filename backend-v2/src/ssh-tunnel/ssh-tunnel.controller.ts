@@ -1,12 +1,12 @@
 import { Controller, Get, Param } from '@nestjs/common';
 import { AgentService } from '../agent/agent.service.js';
 import { AgentIdParamDto } from '../agent/dto/agent-heartbeat.dto.js';
-import { TunnelService } from './tunnel.service.js';
+import { SshTunnelService } from './ssh-tunnel.service.js';
 
 @Controller('agents/:id/tunnel')
-export class TunnelController {
+export class SshTunnelController {
   constructor(
-    private readonly tunnel: TunnelService,
+    private readonly tunnel: SshTunnelService,
     private readonly agents: AgentService,
   ) {}
 
