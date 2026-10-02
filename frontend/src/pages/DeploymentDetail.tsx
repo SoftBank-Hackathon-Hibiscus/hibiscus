@@ -1,29 +1,21 @@
 import { FlaskConical, PenLine, Rocket, Scale, type LucideIcon } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import type { DataSource } from '../api/client';
-import type { Approval, DeployResult, PiiReport, Plan, PlanRequire, SignLog, TestResult } from '../api/contracts';
+import type { Approval, PiiReport, Plan, SignLog, TestResult } from '../api/contracts';
 import type { ApplicationView, Decision, DeploymentStatus, DeploymentView, StageExecution, StageName } from '../api/types';
 import { ErrorNotice } from '../components/ErrorNotice';
 import { Modal } from '../components/Modal';
-import { Collapsible, DemoBadge, Empty, Hash, IconTile, JsonBlock, Kv, MoreToggle, Notice, PageTitle, Pill, RawToggle, type Tone } from '../components/ui';
-import { Markdown } from '../lib/markdown';
+import { Collapsible, DemoBadge, Empty, Hash, IconTile, JsonBlock, Kv, MoreToggle, PageTitle, Pill, RawToggle, type Tone } from '../components/ui';
 import { usePolling } from '../hooks/usePolling';
 import { STAGE_ORDER, artifactsOf, findArtifact, latestStages, parseJsonArtifact } from '../lib/artifacts';
-import { deriveDeployDisplay } from '../lib/deployState';
 import { compactJson, fmtTime, relTime, targetLabel } from '../lib/format';
 import { pickLang, useLang, type DictKey } from '../lib/i18n';
+import { Markdown, prepareExplain } from '../lib/markdown';
 import { applicationPath, hrefFor } from '../lib/router';
 import { summarizeDeployment, type DeploymentSummary, type ProofLink, type StepSummary } from '../lib/summary';
 
 const PROGRESSING: DeploymentStatus[] = ['queued', 'running', 'awaiting_approval'];
-const STATUS_KEY: Record<DeploymentStatus, DictKey> = {
-  queued: 'statusQueued',
-  running: 'statusRunning',
-  awaiting_approval: 'statusAwaiting',
-  blocked: 'statusBlocked',
-  failed: 'statusFailed',
-  succeeded: 'statusSucceeded',
-};
+const STATUS_KEY: Record<DeploymentStatus, DictKey> = { queued: 'statusQueued', running: 'statusRunning', awaiting_approval: 'statusAwaiting', blocked: 'statusBlocked', failed: 'statusFailed', succeeded: 'statusSucceeded' };
 const STATUS_TONE: Record<DeploymentStatus, Tone> = { queued: 'info', running: 'info', awaiting_approval: 'warning', blocked: 'danger', failed: 'danger', succeeded: 'success' };
 const DECISION_TONE: Record<Decision, Tone> = { allow: 'success', needs_approval: 'warning', block: 'danger' };
 const DECISION_LABEL: Record<Decision, string> = { allow: 'ALLOW', needs_approval: 'NEEDS_APPROVAL', block: 'BLOCK' };
@@ -58,6 +50,7 @@ export function DeploymentDetail({ id, source }: { id: string; source: DataSourc
   if (poll.loading && !view) return <Empty>{t('loading')}</Empty>;
   if (!view || !summary) return <ErrorNotice error={poll.error ?? new Error('no data')} />;
   const d = view.deployment;
+  const appName = app?.application.name ?? d.applicationId;
 
   return (
     <div className="page">
@@ -65,7 +58,7 @@ export function DeploymentDetail({ id, source }: { id: string; source: DataSourc
       <PageTitle
         title={
           <>
-            <a className="crumb-link" href={hrefFor(applicationPath(d.applicationId))}>{app?.application.name ?? d.applicationId}</a> <span className="muted">v{d.version}</span>
+            <a className="crumb-link" href={hrefFor(applicationPath(d.applicationId))}>{appName}</a> <span className="muted">v{d.version}</span>
           </>
         }
         sub={
@@ -95,10 +88,10 @@ export function DeploymentDetail({ id, source }: { id: string; source: DataSourc
           ))}
         </aside>
         <div className="detail-col">
-          <section className="card detail-card">
+          <section className={`card detail-card tint-${summary.steps.find((s) => s.name === current)?.tone ?? 'muted'}`}>
             <h2 className="card-title">{t(STEP_DETAIL_KEY[current])}</h2>
             {current === 'test' && <TestDetail view={view} summary={summary} />}
-            {current === 'policy' && <PolicyDetail view={view} summary={summary} source={source} onChanged={poll.refresh} appName={app?.application.name ?? d.applicationId} />}
+            {current === 'policy' && <PolicyDetail view={view} summary={summary} source={source} onChanged={poll.refresh} appName={appName} />}
             {current === 'sign' && <SignDetail view={view} summary={summary} />}
             {current === 'deploy' && <DeployDetail view={view} summary={summary} />}
           </section>
@@ -107,7 +100,7 @@ export function DeploymentDetail({ id, source }: { id: string; source: DataSourc
               <h2 className="card-title">{t('proofChain')}</h2>
               {source.kind === 'mock' && <DemoBadge small />}
             </div>
-            <ul className="proof-list">
+            <ul className="proof-list frost">
               {summary.proof.map((link) => (
                 <ProofRow key={link.id} link={link} />
               ))}
@@ -117,24 +110,30 @@ export function DeploymentDetail({ id, source }: { id: string; source: DataSourc
       </div>
 
       <section className="card card-collapsed">
-        <Collapsible title={t('identifiers')}>
-          <Kv
-            columns={3}
-            items={[
-              [t('runId'), <Hash value={d.id} length={24} />],
-              [t('commit'), <Hash value={d.sourceRevision} length={7} />],
-              [t('digest'), <Hash value={d.imageDigest} length={16} />],
-              [t('trigger'), d.trigger === 'webhook' ? t('webhook') : t('manual')],
-              [t('execMode'), <span className="mono">{d.executionMode}</span>],
-              [t('requester'), <span className="mono">{d.requester}</span>],
-              [t('approver'), d.approver ? <span className="mono">{d.approver}</span> : <span className="muted">{t('none')}</span>],
-              [t('createdAt'), fmtTime(d.createdAt)],
-              [t('updatedAt'), fmtTime(d.updatedAt)],
-            ]}
-          />
+        <Collapsible title={t('techDetails')}>
+          <div className="stack">
+            <div>
+              <div className="field-label">{t('identifiers')}</div>
+              <Kv
+                columns={3}
+                items={[
+                  [t('runId'), <Hash value={d.id} length={24} />],
+                  [t('commit'), <Hash value={d.sourceRevision} length={12} />],
+                  [t('digest'), <Hash value={d.imageDigest} length={20} />],
+                  [t('trigger'), d.trigger === 'webhook' ? t('webhook') : t('manual')],
+                  [t('execMode'), <span className="mono">{d.executionMode}</span>],
+                  [t('requester'), <span className="mono">{d.requester}</span>],
+                  [t('approver'), d.approver ? <span className="mono">{d.approver}</span> : <span className="muted">{t('none')}</span>],
+                  [t('createdAt'), fmtTime(d.createdAt)],
+                  [t('updatedAt'), fmtTime(d.updatedAt)],
+                ]}
+              />
+            </div>
+            <PolicyTech view={view} summary={summary} />
+            <AuditSection view={view} />
+            <ArtifactsSection view={view} />
+          </div>
         </Collapsible>
-        <AuditSection view={view} />
-        <ArtifactsSection view={view} />
       </section>
     </div>
   );
@@ -145,16 +144,13 @@ export function DeploymentDetail({ id, source }: { id: string; source: DataSourc
 function StepCard({ step, selected, onSelect }: { step: StepSummary; selected: boolean; onSelect: () => void }) {
   const Icon = STEP_ICON[step.name];
   return (
-    <button type="button" className={`card step-card ${selected ? 'step-selected' : ''}`} onClick={onSelect} aria-pressed={selected}>
-      <IconTile icon={Icon} tone={step.tone === 'muted' ? 'accent' : step.tone} size={38} />
+    <button type="button" className={`card step-card tint-${step.tone} ${selected ? 'step-selected' : ''}`} onClick={onSelect} aria-pressed={selected}>
+      <IconTile icon={Icon} tone={step.tone === 'muted' ? 'accent' : step.tone} size={40} />
       <span className="step-text">
         <span className="step-name">{step.label}</span>
-        <span className="step-meta">
-          <strong className={`tone-${step.tone}`}>{step.result}</strong>
-          {step.duration && <span className="muted"> {step.duration}</span>}
-        </span>
+        <span className={`step-result tone-${step.tone}`}>{step.result}</span>
+        {step.duration && <span className="step-duration">{step.duration}</span>}
       </span>
-      <Pill tone={step.tone}>{step.result}</Pill>
     </button>
   );
 }
@@ -166,6 +162,7 @@ const PROOF_STATE: Record<ProofLink['state'], { tone: Tone; key: DictKey }> = {
   mismatch: { tone: 'danger', key: 'proofMismatch' },
   pending: { tone: 'muted', key: 'proofPending' },
   unverified: { tone: 'muted', key: 'proofUnverified' },
+  na: { tone: 'muted', key: 'proofNa' },
 };
 
 function ProofRow({ link }: { link: ProofLink }) {
@@ -174,22 +171,24 @@ function ProofRow({ link }: { link: ProofLink }) {
   const state = PROOF_STATE[link.state];
   return (
     <li className="proof-row">
-      <button type="button" className="proof-btn" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+      <div className="proof-line">
         <span className={`proof-mark proof-mark-${state.tone}`} aria-hidden>{state.tone === 'success' ? '✓' : state.tone === 'danger' ? '✕' : '–'}</span>
-        <span className="proof-title">{link.title}</span>
+        <div className="proof-text">
+          <span className="proof-title">{link.title}</span>
+          <span className="proof-detail">{link.detail}</span>
+        </div>
         <Pill tone={state.tone}>{t(state.key)}</Pill>
+      </div>
+      <button type="button" className="link-btn proof-more" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+        {open ? t('hideDetails') : t('techDetails')}
       </button>
       {open && (
-        <div className="proof-body">
-          <p className="small muted">{link.detail}</p>
-          <div className="proof-legs">
-            {link.legs.map((leg) => (
-              <span key={leg.label} className="proof-leg">
-                <span className="muted">{leg.label}</span>{' '}
-                {leg.value ? leg.value.length > 24 ? <Hash value={leg.value} length={10} /> : <span className="mono">{leg.value}</span> : <span className="muted">{t('none')}</span>}
-              </span>
-            ))}
-          </div>
+        <div className="proof-legs">
+          {link.legs.map((leg) => (
+            <span key={leg.label} className="proof-leg">
+              <span className="muted">{leg.label}</span> {leg.value ? leg.value.length > 24 ? <Hash value={leg.value} length={12} /> : <span className="mono">{leg.value}</span> : <span className="muted">{t('none')}</span>}
+            </span>
+          ))}
         </div>
       )}
     </li>
@@ -202,19 +201,16 @@ function PolicyDetail({ view, summary, source, onChanged, appName }: { view: Dep
   const { t, lang, setLang } = useLang();
   const d = view.deployment;
   const skeleton = d.executionMode === 'skeleton';
-  const latest = latestStages(view.stages);
-  const stage = latest.policy;
-  const plan = summary.parsed.plan;
+  const stage = latestStages(view.stages).policy;
   const pii = parseJsonArtifact<PiiReport>(findArtifact(view, 'pii', stage));
   const explainKo = findArtifact(view, 'explain.ko', stage);
   const explainJa = findArtifact(view, 'explain.ja', stage);
   const explain = (lang === 'ja' ? explainJa : explainKo) ?? explainKo ?? explainJa;
   const [explainOpen, setExplainOpen] = useState(false);
-  const planHash = view.policyResult?.planHash ?? plan?.plan_hash ?? null;
   const decision = summary.decision;
   const needsApproval = d.decision === 'needs_approval' || d.status === 'awaiting_approval';
 
-  if (!decision && !stage) return <Empty>{t('pending')}</Empty>;
+  if (!decision && !stage) return <Empty>{t('resultPending')}</Empty>;
 
   return (
     <div className="stack">
@@ -228,24 +224,65 @@ function PolicyDetail({ view, summary, source, onChanged, appName }: { view: Dep
           <div className="field-value">{summary.targets.length ? summary.targets.map(targetLabel).join(' + ') : <span className="muted">{t('none')}</span>}</div>
         </div>
         <div>
-          <div className="field-label">{t('failover')}</div>
-          <div className="field-value">{summary.failoverAllowed === null ? <span className="muted">{t('none')}</span> : summary.failoverAllowed ? t('allow') : t('denied')}</div>
+          <div className="field-label">{t('failoverLabel')}</div>
+          <div className="field-value">
+            {summary.failoverAllowed === null ? <span className="muted">{t('none')}</span> : summary.failoverAllowed ? t('failoverOn') : t('failoverOff')}
+            {summary.failoverWhy && <span className="small muted"> ({summary.failoverWhy})</span>}
+          </div>
         </div>
       </div>
+
+      {summary.reasons.length > 0 && (
+        <div>
+          <div className="field-label">{t('whyTitle')}</div>
+          <ul className="reasons">
+            {summary.reasons.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {needsApproval && <ApprovalCard view={view} source={source} onChanged={onChanged} />}
 
       {summary.requires.length > 0 ? (
         <div>
           <div className="field-label">{t('requires')}</div>
-          <div className="requires">
+          <div className="requires frost">
             {summary.requires.map((r) => (
-              <RequireCard key={`${r.id}-${r.rule_id}`} require={r} />
+              <div key={`${r.id}-${r.ruleId}`} className="require">
+                <div className="require-title">{r.title}</div>
+                {r.why && <div className="require-why">{r.why}</div>}
+                <div className="require-unlock">
+                  {r.unlocks.length ? `${t('fixUnlocks')}: ${r.unlocks.map(targetLabel).join(', ')}` : t('fixUnlocksNone')}
+                </div>
+              </div>
             ))}
           </div>
         </div>
       ) : (
         decision === 'allow' && <p className="muted">{t('nothingToFix')}</p>
+      )}
+
+      {skeleton && <p className="muted">{t('stubPolicy')}</p>}
+
+      {!skeleton && pii?.ok && pii.value.pii && pii.value.pii.length > 0 && (
+        <div>
+          <div className="field-label">{t('piiTitle')}</div>
+          <table className="table small frost">
+            <tbody>
+              {pii.value.pii.map((p, i) => (
+                <tr key={i}>
+                  <td className="mono">
+                    {p.table}.{p.column}
+                  </td>
+                  <td>{p.confident ? <Pill tone="danger">{t('piiConfident')}</Pill> : <Pill tone="warning">{t('piiReview')}</Pill>}</td>
+                  <td className="small muted">{p.evidence}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
       <div className="row">
@@ -254,109 +291,86 @@ function PolicyDetail({ view, summary, source, onChanged, appName }: { view: Dep
             {t('explainOpen')}
           </button>
         )}
+        <MoreToggle>
+          <div className="stack">
+            {summary.requires.length > 0 && (
+              <Kv columns={1} items={summary.requires.map((r) => [r.title, <span className="mono small">{r.id} ({r.ruleId})</span>])} />
+            )}
+            {stage && <StageRaw stage={stage} />}
+          </div>
+        </MoreToggle>
       </div>
+
       {explainOpen && explain && (
-        <Modal
-          title={
-            <>
-              {appName} v{d.version} <span className="muted">· {t('policyDecision')}</span>
-            </>
-          }
-          onClose={() => setExplainOpen(false)}
-          toolbar={
-            (explainKo || explainJa) && (
-              <div className="lang-switch" role="group" aria-label="language">
-                <button type="button" className={lang === 'ko' ? 'lang-on' : ''} onClick={() => setLang('ko')} disabled={!explainKo}>KO</button>
-                <button type="button" className={lang === 'ja' ? 'lang-on' : ''} onClick={() => setLang('ja')} disabled={!explainJa}>JA</button>
-              </div>
-            )
-          }
-        >
-          <div lang={lang}>
-            <Markdown source={explain.content} />
-          </div>
-        </Modal>
+        <ExplainModal source={explain.content} title={`${appName} v${d.version}`} onClose={() => setExplainOpen(false)} lang={lang} setLang={setLang} hasKo={Boolean(explainKo)} hasJa={Boolean(explainJa)} />
       )}
-      <MoreToggle>
-        <div className="stack">
-          {skeleton && <p className="muted">{t('stubPolicy')}</p>}
-          {!skeleton && plan && <RulesView plan={plan} />}
-          {!skeleton && pii?.ok && (
-            <div>
-              <div className="field-label">
-                {t('pii')} <span className="muted">{pii.value.pii?.length ?? 0}</span>
-              </div>
-              {pii.value.pii && pii.value.pii.length > 0 ? (
-                <table className="table small">
-                  <tbody>
-                    {pii.value.pii.map((p, i) => (
-                      <tr key={i}>
-                        <td className="mono">
-                          {p.table}.{p.column}
-                        </td>
-                        <td className="mono">{p.kind}</td>
-                        <td>{p.confident ? <Pill tone="danger">confident</Pill> : <Pill tone="warning">review</Pill>}</td>
-                        <td className="small muted">{p.evidence}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              ) : (
-                <span className="muted">{t('piiNone')}</span>
-              )}
-            </div>
-          )}
-          <div className="small muted">
-            {t('planHash')} <Hash value={planHash} />
-          </div>
-          {stage && <StageRaw stage={stage} />}
-        </div>
-      </MoreToggle>
     </div>
   );
 }
 
-function RequireCard({ require: r }: { require: PlanRequire }) {
-  const { t, lang } = useLang();
-  const hint = pickLang(lang, r.hint, r.hint_i18n);
+function ExplainModal({ source, title, onClose, lang, setLang, hasKo, hasJa }: { source: string; title: string; onClose: () => void; lang: 'ko' | 'ja'; setLang: (l: 'ko' | 'ja') => void; hasKo: boolean; hasJa: boolean }) {
+  const { t } = useLang();
+  const prepared = useMemo(() => prepareExplain(source), [source]);
   return (
-    <div className="require">
-      <div className="require-hint">{hint ?? <span className="mono">{r.id}</span>}</div>
-      <div className="require-meta">
-        <span className="mono muted">{r.id}</span>
-        <span className="mono muted">{r.rule_id}</span>
-        {r.allowed_targets?.length ? (
-          <span className="muted">
-            {t('allowedAfterFix')}: {r.allowed_targets.map(targetLabel).join(', ')}
-          </span>
-        ) : null}
+    <Modal
+      title={
+        <>
+          {title} <span className="muted">· {t('policyDecision')}</span>
+        </>
+      }
+      onClose={onClose}
+      toolbar={
+        <div className="lang-switch" role="group" aria-label="language">
+          <button type="button" className={lang === 'ko' ? 'lang-on' : ''} onClick={() => setLang('ko')} disabled={!hasKo}>KO</button>
+          <button type="button" className={lang === 'ja' ? 'lang-on' : ''} onClick={() => setLang('ja')} disabled={!hasJa}>JA</button>
+        </div>
+      }
+    >
+      <div lang={lang} className="frost explain-body">
+        <Markdown source={prepared.body} />
+        {prepared.technical && (
+          <RawToggle label={t('techDetails')}>
+            <Markdown source={prepared.technical} />
+          </RawToggle>
+        )}
       </div>
+    </Modal>
+  );
+}
+
+function PolicyTech({ view, summary }: { view: DeploymentView; summary: DeploymentSummary }) {
+  const { t, lang } = useLang();
+  const plan = summary.parsed.plan;
+  const planHash = view.policyResult?.planHash ?? plan?.plan_hash ?? null;
+  return (
+    <div>
+      <div className="field-label">{t('policyTech')}</div>
+      <Kv columns={1} items={[['plan_hash', <Hash value={planHash} length={20} />]]} />
+      {plan && <RulesView plan={plan} lang={lang} />}
     </div>
   );
 }
 
-function RulesView({ plan }: { plan: Plan }) {
-  const { t, lang } = useLang();
+function RulesView({ plan, lang }: { plan: Plan; lang: 'ko' | 'ja' }) {
+  const { t } = useLang();
   const matched = plan.rules.filter((r) => r.result !== 'not_matched');
   const notMatched = plan.rules.filter((r) => r.result === 'not_matched');
   return (
-    <div>
-      <div className="field-label">{t('matchedRules')}</div>
-      {matched.length === 0 && <div className="small muted">{t('none')}</div>}
+    <div className="stack-sm">
       <ul className="rules">
         {matched.map((r) => (
           <li key={r.id} className="rule">
             <span className="mono muted rule-id">{r.id}</span>
             <span>
               {pickLang(lang, r.reason, r.reason_i18n) ?? <span className="muted">{t('none')}</span>}
-              {r.result === 'matched_after_block' && <span className="small muted"> ({t('afterBlock')})</span>}
+              {r.result === 'matched_after_block' && <span className="small muted"> (matched_after_block)</span>}
             </span>
           </li>
         ))}
       </ul>
       {notMatched.length > 0 && (
         <div className="small muted">
-          {t('passedRules')} {notMatched.length}: <span className="mono">{notMatched.map((r) => r.id).join(', ')}</span>
+          not_matched: <span className="mono">{notMatched.map((r) => r.id).join(', ')}</span>
         </div>
       )}
     </div>
@@ -383,20 +397,13 @@ function ApprovalCard({ view, source, onChanged }: { view: DeploymentView; sourc
     }
   };
   return (
-    <div className="approval">
+    <div className="approval frost">
       <div className="approval-head">
-        <strong>{t('humanApproval')}</strong>
+        <strong>{t('approvalTitle')}</strong>
         {awaiting ? <Pill tone="warning">{t('awaitingApproval')}</Pill> : d.approver ? <Pill tone="success">{t('approved')}</Pill> : <Pill tone="muted">{t('none')}</Pill>}
       </div>
       <div className="row">
-        <Kv
-          columns={2}
-          items={[
-            [t('requester'), <span className="mono">{d.requester}</span>],
-            [t('approver'), d.approver ? <span className="mono">{d.approver}</span> : <span className="muted">{t('none')}</span>],
-            approval?.ok ? [t('approvedAt'), fmtTime(approval.value.approved_at)] : null,
-          ]}
-        />
+        <Kv columns={2} items={[[t('approver'), d.approver ? <span className="mono">{d.approver}</span> : <span className="muted">{t('none')}</span>], approval?.ok ? [t('approvedAt'), fmtTime(approval.value.approved_at)] : null]} />
         {awaiting && (
           <div className="approval-actions">
             <button type="button" className="btn btn-primary" disabled={busy} onClick={approve}>
@@ -419,41 +426,43 @@ function TestDetail({ view, summary }: { view: DeploymentView; summary: Deployme
   const parsed = parseJsonArtifact<TestResult>(findArtifact(view, 'test_result', stage));
   const result = summary.parsed.test;
   const stub = (stage?.summary as { stub?: boolean } | null)?.stub === true;
-  if (!stage) return <Empty>{t('notRun')}</Empty>;
+  const step = summary.steps.find((s) => s.name === 'test');
+  if (!stage) return <Empty>{step?.result ?? t('resultPending')}</Empty>;
   if (!result) {
     return (
       <div className="stack">
-        {parsed && !parsed.ok ? (
-          <>
-            <Notice tone="warning">{parsed.error}</Notice>
+        <Empty>{t('noTestResult')}</Empty>
+        {parsed && !parsed.ok && (
+          <MoreToggle>
             <JsonBlock raw={parsed.raw} />
-          </>
-        ) : (
-          <Empty>{t('noTestResult')}</Empty>
+          </MoreToggle>
         )}
-        <StageRaw stage={stage} />
+        {stage && <StageRaw stage={stage} />}
       </div>
     );
   }
   const conditions = result.facts?.conditions;
-  const facts = result.facts ?? {};
+  const conditionName = (name: string) => (name === 'none' ? t('conditionNone') : name === 'restart' ? t('conditionRestart') : name === 'replace' ? t('conditionReplace') : name);
+  const testReasons = summary.reasons.filter((r) => !r.startsWith('SQLite') && true);
   return (
     <div className="stack">
       <div className="row">
-        <Pill tone={result.passed ? 'success' : 'danger'}>{result.passed ? t('testPassed') : t('testFailed')}</Pill>
-        <span className="field-value">
-          <strong>{result.match.matched}</strong> / {result.match.total} {t('requestsMatched')}
-          {conditions ? <span className="muted"> ({t('baselineNone')})</span> : null}
-        </span>
+        <Pill tone={result.passed ? 'success' : 'danger'}>{step?.result}</Pill>
+        {!conditions && (
+          <span className="field-value">
+            {result.match.matched} / {result.match.total} {t('requestsMatched')}
+          </span>
+        )}
       </div>
+      {stub && <p className="muted">{t('stubTest')}</p>}
       {conditions && conditions.length > 0 && (
         <div className="conditions">
           {conditions.map((c) => {
             const pct = c.total ? Math.round((c.matched / c.total) * 100) : 0;
             return (
-              <div key={c.name} className="condition">
+              <div key={c.name} className="condition frost">
                 <div className="condition-head">
-                  <span className="mono">{c.name}</span>
+                  <span>{conditionName(c.name)}</span>
                   <span>
                     <strong>{c.matched}</strong>/{c.total}
                   </span>
@@ -464,21 +473,11 @@ function TestDetail({ view, summary }: { view: DeploymentView; summary: Deployme
                 {c.mismatches.length > 0 && (
                   <Collapsible title={<span className="small">{t('mismatches')} {c.mismatches.length}</span>}>
                     <table className="table small">
-                      <thead>
-                        <tr>
-                          <th>{t('mismatchIndex')}</th>
-                          <th>{t('request')}</th>
-                          <th>{t('relatedFact')}</th>
-                          <th>{t('kind')}</th>
-                        </tr>
-                      </thead>
                       <tbody>
                         {c.mismatches.map((m) => (
                           <tr key={m.index}>
-                            <td className="mono">{m.index}</td>
                             <td className="mono">{m.request}</td>
-                            <td className="mono">{m.related_fact ?? <span className="muted">{t('none')}</span>}</td>
-                            <td className="mono">{m.related_kind ?? <span className="muted">{t('unknownCause')}</span>}</td>
+                            <td className="small muted">{m.related_kind ? `${t('relatedFact')}: ${m.related_kind}` : t('unknownCause')}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -490,27 +489,33 @@ function TestDetail({ view, summary }: { view: DeploymentView; summary: Deployme
           })}
         </div>
       )}
+      {testReasons.length > 0 && (
+        <ul className="reasons">
+          {summary.reasons.map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ul>
+      )}
       <MoreToggle>
         <div className="stack">
-          {stub && <p className="muted">{t('stubTest')}</p>}
-          {result.failures && result.failures.length > 0 && (
-            <div>
-              <div className="field-label">failures {result.failures.length}</div>
-              <ul className="plain mono small">
-                {result.failures.map((f, i) => (
-                  <li key={i}>{compactJson(f)}</li>
-                ))}
-              </ul>
-            </div>
-          )}
           <Kv
             columns={3}
             items={[
-              [t('db'), <span className="mono">{facts.db ?? t('none')}</span>],
-              [t('localFiles'), facts.writes_local_file?.length ? <span className="mono">{facts.writes_local_file.join(', ')}</span> : <span className="muted">{t('none')}</span>],
-              facts.migration ? [t('migration'), facts.migration.destructive ? <Pill tone="danger">{t('destructive')}</Pill> : <Pill tone="success">{t('safe')}</Pill>] : null,
+              ['db', <span className="mono">{result.facts?.db ?? '-'}</span>],
+              ['writes_local_file', result.facts?.writes_local_file?.length ? <span className="mono">{result.facts.writes_local_file.join(', ')}</span> : <span className="muted">-</span>],
+              result.facts?.migration ? ['migration.destructive', <span className="mono">{String(result.facts.migration.destructive)}</span>] : null,
+              ['match', <span className="mono">{result.match.matched}/{result.match.total}</span>],
+              ['run_id', <Hash value={result.run_id} length={20} />],
+              ['digest', <Hash value={result.digest} length={16} />],
             ]}
           />
+          {result.failures && result.failures.length > 0 && (
+            <ul className="plain mono small">
+              {result.failures.map((f, i) => (
+                <li key={i}>{compactJson(f)}</li>
+              ))}
+            </ul>
+          )}
           <StageRaw stage={stage} />
         </div>
       </MoreToggle>
@@ -526,11 +531,12 @@ function SignDetail({ view, summary }: { view: DeploymentView; summary: Deployme
   const sign = summary.parsed.sign;
   const signLogs = view.auditLogs.filter((l) => l.kind === 'sign').map((l) => l.payload as unknown as SignLog);
   const lastLog = signLogs[signLogs.length - 1];
-  if (!stage) return <Empty>{t('notRun')}</Empty>;
+  const step = summary.steps.find((s) => s.name === 'sign');
+  if (!stage) return <Empty>{step?.result ?? t('resultPending')}</Empty>;
   if (!sign && !lastLog) {
     return (
       <div className="stack">
-        {stage.error ? <Notice tone="danger">{stage.error}</Notice> : <Empty>{t('noSign')}</Empty>}
+        <Empty>{t('noSign')}</Empty>
         <StageRaw stage={stage} />
       </div>
     );
@@ -539,33 +545,30 @@ function SignDetail({ view, summary }: { view: DeploymentView; summary: Deployme
   const refused = lastLog?.result === 'refused';
   return (
     <div className="stack">
-      <div className="decision-row">
-        <div>
-          <div className="field-label">{t('result')}</div>
-          <div className={`decision-big tone-${refused ? 'danger' : dryRun ? 'muted' : 'success'}`}>{refused ? t('signatureRefused') : dryRun ? t('dryRun') : t('signed')}</div>
-          {refused && lastLog?.reason && <span className="mono small muted">{lastLog.reason}</span>}
-        </div>
-        <div>
-          <div className="field-label">{t('approver')}</div>
-          <div className="field-value mono">{sign?.approver ?? lastLog?.approver ?? t('none')}</div>
-        </div>
-        <div>
-          <div className="field-label">{t('signedAt')}</div>
-          <div className="field-value">{fmtTime(sign?.signed_at ?? lastLog?.time)}</div>
-        </div>
+      <div className="row">
+        <Pill tone={refused ? 'danger' : dryRun ? 'muted' : 'success'}>{step?.result}</Pill>
       </div>
+      <p>{refused ? t('signLineRefused') : dryRun ? t('signLineDry') : t('signLineOk')}</p>
+      <Kv
+        columns={3}
+        items={[
+          [t('signedBy'), <span className="mono">{sign?.approver ?? lastLog?.approver ?? t('none')}</span>],
+          [t('signedAt'), fmtTime(sign?.signed_at ?? lastLog?.time)],
+          sign ? [t('signedTargets'), sign.targets.map(targetLabel).join(' + ')] : null,
+        ]}
+      />
       {sign && (
         <MoreToggle>
           <div className="stack">
             <Kv
               columns={2}
               items={[
-                ['signature_ref', <Hash value={sign.signature_ref} length={36} />],
-                [t('requester'), <span className="mono">{sign.requester}</span>],
-                [t('signedTargets'), sign.targets.map(targetLabel).join(' + ')],
-                [t('failover'), sign.failover_allowed ? t('allow') : t('denied')],
-                ['plan_hash', <Hash value={sign.plan_hash} />],
-                ['digest', <Hash value={sign.digest} />],
+                ['signature_ref', <Hash value={sign.signature_ref} length={40} />],
+                ['plan_hash', <Hash value={sign.plan_hash} length={20} />],
+                ['digest', <Hash value={sign.digest} length={20} />],
+                ['requester', <span className="mono">{sign.requester}</span>],
+                ['failover_allowed', <span className="mono">{String(sign.failover_allowed)}</span>],
+                refused && lastLog?.reason ? ['reason', <span className="mono">{lastLog.reason}</span>] : null,
               ]}
             />
             <StageRaw stage={stage} />
@@ -579,128 +582,96 @@ function SignDetail({ view, summary }: { view: DeploymentView; summary: Deployme
 // ---------------------------------------------------------------- deploy
 
 function DeployDetail({ view, summary }: { view: DeploymentView; summary: DeploymentSummary }) {
-  const { t, lang } = useLang();
+  const { t } = useLang();
   const stage = latestStages(view.stages).deploy;
   const result = summary.parsed.deployResult;
-  const display = deriveDeployDisplay(stage, result);
+  const step = summary.steps.find((s) => s.name === 'deploy');
   const r = result?.routing;
   return (
     <div className="stack">
-      <Notice tone={display.tone} title={lang === 'ko' ? display.title : summary.conclusion}>
-        {lang === 'ko' && display.details.length > 0 && (
-          <ul className="plain">
-            {display.details.map((line) => (
-              <li key={line}>{line}</li>
-            ))}
-          </ul>
-        )}
-      </Notice>
-      {result && (
-        <div className="decision-row">
-          <div>
-            <div className="field-label">decision</div>
-            <div className="field-value">
-              <Pill tone={result.decision === 'activated' ? 'success' : result.decision === 'error' ? 'danger' : 'warning'}>{result.decision}</Pill>
-            </div>
-          </div>
-          <div>
-            <div className="field-label">{t('routing')}</div>
-            <div className="field-value">
-              <Pill tone={r?.result === 'ok' ? 'success' : r?.result === 'error' ? 'danger' : 'muted'}>{r?.result ?? t('none')}</Pill>
-              {r?.kind && (
-                <span>
-                  {' '}
-                  {targetLabel(r.kind)}
-                  {r.revision !== undefined ? `, rev ${r.revision}` : ''}
-                </span>
-              )}
-            </div>
-          </div>
-          <div>
-            <div className="field-label">{t('standby')}</div>
-            <div className="field-value">{r?.standby_target_id ? (r.standby_enabled ? t('active') : t('inactive')) : <span className="muted">{t('none')}</span>}</div>
-          </div>
-        </div>
+      <div className="row">{step && <Pill tone={step.tone}>{step.result}</Pill>}</div>
+      <ul className="reasons">
+        {summary.deployLines.map((line) => (
+          <li key={line}>{line}</li>
+        ))}
+      </ul>
+      {result && r?.result === 'ok' && (
+        <Kv
+          columns={3}
+          items={[
+            [t('routeTarget'), targetLabel(r.kind)],
+            [t('switchCount'), r.revision ?? t('none')],
+            r.standby_target_id ? [targetLabel(r.kind === 'onprem' ? 'cloud_run' : 'onprem'), r.standby_enabled ? t('standbyReady') : t('standbyOff')] : null,
+          ]}
+        />
       )}
-      {result && (
+      {(result || stage) && (
         <MoreToggle>
-          <DeployResultView result={result} />
-          {stage && <StageRaw stage={stage} />}
+          <div className="stack">
+            {result && (
+              <Kv
+                columns={3}
+                items={[
+                  ['decision', <span className="mono">{result.decision}</span>],
+                  ['routing.result', <span className="mono">{result.routing.result}</span>],
+                  ['image', result.image ? <Hash value={result.image} length={28} /> : <span className="muted">-</span>],
+                  ['signature', result.signature ? <span className="mono">verified{result.signature.tlog ? `, tlog ${result.signature.tlog}` : ''}</span> : <span className="mono">none</span>],
+                  ['started_at', fmtTime(result.started_at)],
+                  ['finished_at', fmtTime(result.finished_at)],
+                  r?.target_id ? ['routing.target_id', <Hash value={r.target_id} length={20} />] : null,
+                  r?.error ? ['routing.error', <span className="mono small">{r.error}</span>] : null,
+                ]}
+              />
+            )}
+            {result && (
+              <table className="table small">
+                <thead>
+                  <tr>
+                    <th>target</th>
+                    <th>phase</th>
+                    <th>result</th>
+                    <th>detail</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.targets.map((s, i) => (
+                    <tr key={i}>
+                      <td className="mono">{s.target}</td>
+                      <td className="mono">{s.phase}</td>
+                      <td className="mono">{s.result}</td>
+                      <td className="small step-detail">
+                        {s.revision && <Hash value={s.revision} length={24} />}
+                        {s.container && <Hash value={s.container} length={24} />}
+                        {s.serving && <Hash value={s.serving} length={20} />}
+                        {s.previous && <span className="muted">prev <Hash value={s.previous} length={20} /></span>}
+                        {s.candidate_url && <Hash value={s.candidate_url} length={30} />}
+                        {s.reason && <span>{s.reason}</span>}
+                        {s.error && <span className="tone-danger">{s.error}</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            {result && result.checks.length > 0 && (
+              <table className="table small">
+                <tbody>
+                  {result.checks.map((c, i) => (
+                    <tr key={i}>
+                      <td className="mono">{c.target}</td>
+                      <td className="mono">{c.pass ? 'pass' : 'fail'}</td>
+                      <td className="mono">{c.checker}</td>
+                      <td>{c.url ? <Hash value={c.url} length={30} /> : <span className="muted">-</span>}</td>
+                      <td className="mono small">{compactJson(c.checks)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            {stage?.error && <div className="mono small">{stage.error}</div>}
+            {stage && <StageRaw stage={stage} />}
+          </div>
         </MoreToggle>
-      )}
-      {!result && stage && <StageRaw stage={stage} />}
-    </div>
-  );
-}
-
-function DeployResultView({ result }: { result: DeployResult }) {
-  const { t } = useLang();
-  const r = result.routing;
-  return (
-    <div className="stack">
-      <Kv
-        columns={3}
-        items={[
-          [t('image'), result.image ? <Hash value={result.image} length={28} /> : <span className="muted">{t('none')}</span>],
-          [t('plannedTargets'), result.targets_planned.map(targetLabel).join(' + ')],
-          [t('signatureCheck'), result.signature ? `${t('verified')}${result.signature.tlog ? `, tlog ${result.signature.tlog}` : ''}` : <Pill tone="danger">{t('unverified')}</Pill>],
-          [t('startedAt'), fmtTime(result.started_at)],
-          [t('finishedAt'), fmtTime(result.finished_at)],
-          r.error ? [t('error'), <span className="mono small">{r.error}</span>] : null,
-        ]}
-      />
-      <div>
-        <div className="field-label">{t('stepResults')}</div>
-        <table className="table small">
-          <thead>
-            <tr>
-              <th>{t('target')}</th>
-              <th>{t('phase')}</th>
-              <th>{t('result')}</th>
-              <th>{t('detail')}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {result.targets.map((step, i) => (
-              <tr key={i}>
-                <td>{targetLabel(step.target)}</td>
-                <td className="mono">{step.phase}</td>
-                <td>
-                  <Pill tone={step.result === 'ok' ? 'success' : step.result === 'error' ? 'danger' : 'muted'}>{step.result}</Pill>
-                </td>
-                <td className="small step-detail">
-                  {step.revision && <Hash value={step.revision} length={24} />}
-                  {step.container && <Hash value={step.container} length={24} />}
-                  {step.serving && <Hash value={step.serving} length={20} />}
-                  {step.previous && <span className="muted">prev <Hash value={step.previous} length={20} /></span>}
-                  {step.candidate_url && <Hash value={step.candidate_url} length={30} />}
-                  {step.reason && <span>{step.reason}</span>}
-                  {step.error && <span className="tone-danger">{step.error}</span>}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {result.checks.length > 0 && (
-        <div>
-          <div className="field-label">{t('candidateChecks')}</div>
-          <table className="table small">
-            <tbody>
-              {result.checks.map((c, i) => (
-                <tr key={i}>
-                  <td>{targetLabel(c.target)}</td>
-                  <td>
-                    <Pill tone={c.pass ? 'success' : 'danger'}>{c.pass ? t('pass') : t('fail')}</Pill>
-                  </td>
-                  <td className="mono">{c.checker}</td>
-                  <td>{c.url ? <Hash value={c.url} length={30} /> : <span className="muted">{t('none')}</span>}</td>
-                  <td className="mono small">{compactJson(c.checks)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
       )}
     </div>
   );
@@ -721,14 +692,17 @@ function StageRaw({ stage }: { stage: StageExecution }) {
 function AuditSection({ view }: { view: DeploymentView }) {
   const { t } = useLang();
   return (
-    <Collapsible title={t('auditLog')} summary={<span className="muted small">{view.auditLogs.length}</span>}>
+    <div>
+      <div className="field-label">
+        {t('auditLog')} <span className="muted">{view.auditLogs.length}</span>
+      </div>
       {view.auditLogs.length === 0 ? (
         <Empty>{t('none')}</Empty>
       ) : (
         <table className="table small">
           <thead>
             <tr>
-              <th>{t('kind')}</th>
+              <th>kind</th>
               <th>{t('time')}</th>
               <th>{t('content')}</th>
               <th>plan_hash</th>
@@ -739,35 +713,15 @@ function AuditSection({ view }: { view: DeploymentView }) {
               const p = log.payload as Record<string, unknown>;
               const str = (key: string): string | null => (typeof p[key] === 'string' ? (p[key] as string) : null);
               const list = (key: string): string[] | null => (Array.isArray(p[key]) ? (p[key] as unknown[]).map(String) : null);
-              const decision = str('decision');
               return (
                 <tr key={log.id}>
                   <td className="mono">{log.kind}</td>
                   <td>{fmtTime(str('time') ?? log.createdAt)}</td>
-                  <td>
-                    {log.kind === 'sign' ? (
-                      <span>
-                        <Pill tone={str('result') === 'signed' ? 'success' : 'danger'}>{str('result') ?? t('none')}</Pill>
-                        {str('reason') && <span className="mono small"> {str('reason')}</span>}
-                        <span className="small muted">
-                          {' '}
-                          {t('approver')} {str('approver') ?? t('none')}
-                        </span>
-                      </span>
-                    ) : (
-                      <span>
-                        {decision && decision in DECISION_TONE ? <Pill tone={DECISION_TONE[decision as Decision]}>{decision}</Pill> : <span className="mono">{decision ?? t('none')}</span>}
-                        {list('rule_ids') && (
-                          <span className="small muted">
-                            {' '}
-                            {t('rules')} {list('rule_ids')!.join(', ')}
-                          </span>
-                        )}
-                      </span>
-                    )}
+                  <td className="mono small">
+                    {log.kind === 'sign' ? `${str('result') ?? '-'}${str('reason') ? ` (${str('reason')})` : ''}, approver ${str('approver') ?? '-'}` : `${str('decision') ?? '-'}${list('rule_ids') ? ` [${list('rule_ids')!.join(', ')}]` : ''}`}
                   </td>
                   <td>
-                    <Hash value={str('plan_hash')} />
+                    <Hash value={str('plan_hash')} length={16} />
                   </td>
                 </tr>
               );
@@ -775,7 +729,7 @@ function AuditSection({ view }: { view: DeploymentView }) {
           </tbody>
         </table>
       )}
-    </Collapsible>
+    </div>
   );
 }
 
@@ -784,11 +738,14 @@ function ArtifactsSection({ view }: { view: DeploymentView }) {
   const latest = useMemo(() => latestStages(view.stages), [view.stages]);
   const grouped = STAGE_ORDER.map((name) => ({ name, items: artifactsOf(view, latest[name]) })).filter((g) => g.items.length > 0);
   return (
-    <Collapsible title={t('artifacts')} summary={<span className="muted small">{view.artifacts.length}</span>}>
+    <div>
+      <div className="field-label">
+        {t('artifacts')} <span className="muted">{view.artifacts.length}</span>
+      </div>
       {view.artifacts.length === 0 && <Empty>{t('none')}</Empty>}
       {grouped.map((g) => (
         <div key={g.name} className="artifact-group">
-          <div className="field-label">{t(STEP_DETAIL_KEY[g.name])}</div>
+          <div className="small muted">{t(STEP_DETAIL_KEY[g.name])}</div>
           {g.items.map((a) => {
             const parsed = parseJsonArtifact(a);
             return (
@@ -804,13 +761,13 @@ function ArtifactsSection({ view }: { view: DeploymentView }) {
               >
                 {parsed?.ok ? <JsonBlock value={parsed.value} /> : <pre className={a.mediaType === 'text/plain' ? 'prose' : 'code'}>{a.content}</pre>}
                 <div className="small muted">
-                  sha256 <Hash value={a.contentHash} /> {fmtTime(a.createdAt)}
+                  sha256 <Hash value={a.contentHash} length={16} /> {fmtTime(a.createdAt)}
                 </div>
               </Collapsible>
             );
           })}
         </div>
       ))}
-    </Collapsible>
+    </div>
   );
 }

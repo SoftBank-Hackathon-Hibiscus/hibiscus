@@ -82,3 +82,18 @@ export function Markdown({ source }: { source: string }) {
   flushList();
   return <div className="md">{blocks}</div>;
 }
+
+/**
+ * 정책 설명 문서에서 사람이 읽을 본문과 기술 정보를 나눈다.
+ * - 제목의 "(실행 run_id)" / "（実行run_id）" 를 뗀다
+ * - 문장 끝의 규칙 ID "(R1b)" / "（R5）" 를 뗀다
+ * - 마지막 --- 아래(결정 지문·이미지·커밋 줄)는 기술 정보로 보낸다
+ */
+export function prepareExplain(source: string): { body: string; technical: string } {
+  let text = source.replace(/\r\n/g, '\n');
+  text = text.replace(/^(# .*?)\s*[(（]\s*(실행|実行)\s*[^)）]*[)）]/m, '$1');
+  text = text.replace(/\s*[(（](R\d+[a-z]?|RB\d+|default)[)）]/g, '');
+  const idx = text.lastIndexOf('\n---');
+  if (idx === -1) return { body: text.trim(), technical: '' };
+  return { body: text.slice(0, idx).trim(), technical: text.slice(idx + 4).trim() };
+}

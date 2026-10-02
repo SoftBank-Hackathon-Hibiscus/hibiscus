@@ -1,16 +1,16 @@
-// 결과 요약의 판정. 화면 컴포넌트는 이 결과만 그린다.
+// 결과 요약의 판정. 화면 컴포넌트는 이 결과만 그린다. 문구는 사람이 읽는 말로, 값은 데이터에서.
 
 import type { DeployResult, Plan, PlanRequire, SignResult, TestResult } from '../api/contracts';
 import type { DeploymentView, StageExecution, StageName } from '../api/types';
 import { findArtifact, latestStages, parseJsonArtifact } from './artifacts';
 import { deriveDeployDisplay, type DeployDisplay, type Tone } from './deployState';
-import { durationBetween } from './format';
-import { pickLang, translate, type Lang } from './i18n';
+import { targetLabel } from './format';
+import { pickLang, requireCopy, translate, type DictKey, type Lang } from './i18n';
 
 export interface StepSummary {
   name: StageName;
   label: string;
-  /** 한 단어 결과 */
+  /** 한 줄 결과 (이유 포함) */
   result: string;
   tone: Tone;
   duration: string | null;
@@ -20,24 +20,38 @@ export interface StepSummary {
 export interface ProofLink {
   id: 'run_id' | 'source' | 'digest' | 'plan_hash';
   title: string;
-  /** ok: 모두 같음 / mismatch: 다름 / pending: 비교할 값이 부족 / unverified: 검증 전 */
-  state: 'ok' | 'mismatch' | 'pending' | 'unverified';
+  /** ok: 모두 같음 / mismatch: 다름 / pending: 비교할 값이 부족 / unverified: 검증 전 / na: 이 실행에서는 해당 없음 */
+  state: 'ok' | 'mismatch' | 'pending' | 'unverified' | 'na';
+  /** 사람이 읽는 한 문장 */
   detail: string;
   legs: Array<{ label: string; value: string | null }>;
+}
+
+export interface RequireView {
+  id: string;
+  ruleId: string;
+  title: string;
+  why: string | null;
+  /** 고치면 가능한 위치 (allowed_targets 에서 계산) */
+  unlocks: string[];
 }
 
 export interface DeploymentSummary {
   conclusion: string;
   tone: Tone;
   steps: StepSummary[];
-  /** 결론과 가장 관련된 단계 */
   focusStep: StageName;
   proof: ProofLink[];
   decision: Plan['decision'] | null;
   targets: string[];
   failoverAllowed: boolean | null;
-  requires: PlanRequire[];
+  failoverWhy: string | null;
+  /** 2단계: 개발자가 알아야 할 이유 1~3개 */
+  reasons: string[];
+  requires: RequireView[];
   deploy: DeployDisplay;
+  /** 배포 패널에 보여줄 쉬운 문장들 */
+  deployLines: string[];
   parsed: {
     test: TestResult | null;
     plan: Plan | null;
@@ -46,8 +60,10 @@ export interface DeploymentSummary {
   };
 }
 
+type Scope = 'blocked' | 'held' | 'deployed' | 'partial';
+
 export function summarizeDeployment(view: DeploymentView, lang: Lang): DeploymentSummary {
-  const t = (key: Parameters<typeof translate>[1], params?: Record<string, string | number>) => translate(lang, key, params);
+  const t = (key: DictKey, params?: Record<string, string | number>) => translate(lang, key, params);
   const d = view.deployment;
   const latest = latestStages(view.stages);
   const testParsed = parseJsonArtifact<TestResult>(findArtifact(view, 'test_result', latest.test));
@@ -63,176 +79,335 @@ export function summarizeDeployment(view: DeploymentView, lang: Lang): Deploymen
   const decision = pr?.decision ?? plan?.decision ?? d.decision;
   const targets = pr?.targets ?? plan?.targets ?? [];
   const failoverAllowed = pr?.failoverAllowed ?? plan?.failover_allowed ?? null;
-  const requires: PlanRequire[] = plan?.requires ?? ((pr?.requires ?? []) as PlanRequire[]);
+  const rawRequires: PlanRequire[] = plan?.requires ?? ((pr?.requires ?? []) as PlanRequire[]);
   const deploy = deriveDeployDisplay(latest.deploy, deployResult);
   const finished = d.status === 'blocked' || d.status === 'failed' || d.status === 'succeeded';
+  const blocked = d.status === 'blocked' || decision === 'block';
 
-  const testSummary = (latest.test?.summary ?? {}) as { test_passed?: unknown };
-  const testPassed = test ? test.passed : typeof testSummary.test_passed === 'boolean' ? testSummary.test_passed : null;
+  // ---- 진행 범위
+  const scope: Scope = blocked
+    ? 'blocked'
+    : deployResult
+      ? deployResult.decision === 'activated' && deployResult.routing.result === 'ok'
+        ? 'deployed'
+        : 'held'
+      : 'partial';
 
+  // ---- 테스트 사실
+  const conditions = test?.facts?.conditions ?? [];
+  const failedConditions = conditions.filter((c) => c.failed);
+  const conditionName = (name: string) => (name === 'none' ? t('conditionNone') : name === 'restart' ? t('conditionRestart') : name === 'replace' ? t('conditionReplace') : name);
+  const testPassed = test ? test.passed : typeof (latest.test?.summary as { test_passed?: unknown } | null)?.test_passed === 'boolean' ? ((latest.test!.summary as { test_passed: boolean }).test_passed) : null;
+
+  // ---- 2단계 이유
+  const reasons: string[] = [];
+  for (const c of failedConditions) reasons.push(t('conditionFailLine', { name: conditionName(c.name), total: c.total, diff: c.total - c.matched }));
+  if (test && !conditions.length && !test.passed) reasons.push(`${test.match.matched}/${test.match.total} ${t('requestsMatched')}`);
+  if (test?.facts?.db === 'sqlite') reasons.push(t('factSqlite'));
+  else if (test?.facts?.db && test.facts.db !== 'none' && decision !== 'block') reasons.push(t('factDb', { db: test.facts.db }));
+  const localFiles = (test?.facts?.writes_local_file ?? []).filter((p) => !/\.(db|sqlite3?)$/.test(p));
+  if (localFiles.length) reasons.push(t('factLocalFiles', { paths: localFiles.join(', ') }));
+  if (test?.facts?.migration?.destructive) reasons.push(t('factMigrationDestructive'));
+  if (reasons.length === 0 && plan) {
+    for (const r of plan.rules.filter((x) => x.result === 'matched')) {
+      const reason = pickLang(lang, r.reason, r.reason_i18n);
+      if (reason) reasons.push(reason);
+    }
+  }
+
+  // ---- 고칠 것
+  const requires: RequireView[] = rawRequires.map((r) => {
+    const copy = translateRequire(lang, r);
+    return { id: r.id, ruleId: r.rule_id, title: copy.title, why: copy.why, unlocks: r.allowed_targets ?? [] };
+  });
+
+  // ---- failover 이유
+  let failoverWhy: string | null = null;
+  if (failoverAllowed === false) {
+    if (blocked) failoverWhy = t('failoverWhyBlocked');
+    else if (targets.length < 2) failoverWhy = t('failoverWhyOneTarget');
+    else failoverWhy = t('failoverWhyPolicy');
+  }
+
+  // ---- 단계 띠
+  const notRunReason = blocked ? t('notRunBlocked') : d.status === 'failed' ? t('notRunEarlier') : null;
   const stepFor = (name: StageName, label: string, stage: StageExecution | undefined, word: [string, Tone] | null): StepSummary => {
-    const duration = stage ? durationBetween(stage.startedAt, stage.finishedAt) : null;
-    const base = { name, label, stage, duration: duration === '—' ? null : duration };
+    const base = { name, label, stage, duration: stage ? formatDuration(lang, stage.startedAt, stage.finishedAt) : null };
     const status = stage?.status;
     if (word && status !== 'pending' && status !== 'running') return { ...base, result: word[0], tone: word[1] };
-    if (status === 'running') return { ...base, result: t('running'), tone: 'info' };
-    if (status === 'failed') return { ...base, result: t('failed'), tone: 'danger' };
-    if (status === 'skipped') return { ...base, result: t('skipped'), tone: 'muted' };
-    if (status === 'succeeded') return { ...base, result: t('done'), tone: 'success' };
-    if (!stage && finished) return { ...base, result: t('notRun'), tone: 'muted' };
-    return { ...base, result: t('pending'), tone: 'muted' };
+    if (status === 'running') return { ...base, result: t('resultRunning'), tone: 'info' };
+    if (status === 'failed') return { ...base, result: stage?.error && name === 'deploy' ? t('notRunGate') : t('resultError'), tone: 'danger' };
+    if (status === 'skipped') return { ...base, result: t('resultSkipped'), tone: 'muted' };
+    if (status === 'succeeded') return { ...base, result: t('statusSucceeded'), tone: 'success' };
+    if (!stage && finished) return { ...base, result: notRunReason ?? t('resultPending'), tone: 'muted' };
+    return { ...base, result: t('resultPending'), tone: 'muted' };
   };
 
   const deployWord = (): [string, Tone] | null => {
-    if (!deployResult) {
-      if (deploy.tone === 'muted') return null;
-      return [deploy.tone === 'danger' ? t('notStarted') : t('pending'), deploy.tone];
-    }
+    if (!deployResult) return null;
     switch (deployResult.decision) {
       case 'activated':
-        return deployResult.routing.result === 'ok' ? [t('done'), 'success'] : [t('switchFailed'), 'danger'];
+        return deployResult.routing.result === 'ok' ? [t('resultDeployed'), 'success'] : [t('resultSwitchFailed'), 'danger'];
       case 'held':
-        return [t('held'), 'warning'];
+        return [t('resultHeld'), 'warning'];
       case 'rolled_back':
-        return [t('rolledBack'), 'warning'];
+        return [t('resultRolledBack'), 'warning'];
       case 'error':
-        return [t('error'), 'danger'];
+        return [t('resultError'), 'danger'];
     }
   };
 
+  const testWord: [string, Tone] | null = testPassed === null ? null : testPassed ? [t('resultTestPassed'), 'success'] : [failedConditions.length ? t('resultTestFailed') : t('resultTestFailedGeneric'), 'danger'];
   const steps: StepSummary[] = [
-    stepFor('test', t('stepTest'), latest.test, testPassed === null ? null : testPassed ? [t('passed'), 'success'] : [t('failed'), 'danger']),
-    stepFor(
-      'policy',
-      t('stepPolicy'),
-      latest.policy,
-      decision === 'allow' ? [t('allow'), 'success'] : decision === 'block' ? [t('blocked'), 'danger'] : decision === 'needs_approval' ? [d.approver ? t('approved') : t('approvalNeeded'), 'warning'] : null,
-    ),
-    stepFor('sign', t('stepSign'), latest.sign, sign ? (sign.signature_ref.startsWith('dry-run:') ? [t('dryRun'), 'muted'] : [t('signed'), 'success']) : null),
+    stepFor('test', t('stepTest'), latest.test, testWord),
+    stepFor('policy', t('stepPolicy'), latest.policy, decision === 'allow' ? [t('resultAllow'), 'success'] : decision === 'block' ? [t('resultBlock'), 'danger'] : decision === 'needs_approval' ? [d.approver ? t('resultApproved') : t('resultNeedsApproval'), 'warning'] : null),
+    stepFor('sign', t('stepSign'), latest.sign, sign ? (sign.signature_ref.startsWith('dry-run:') ? [t('resultDryRun'), 'muted'] : [t('resultSigned'), 'success']) : null),
     stepFor('deploy', t('stepDeploy'), latest.deploy, deployWord()),
   ];
 
-  const [conclusion, tone, focusStep] = conclude(view, decision, plan, deployResult, lang, targets);
+  // ---- 결론
+  const [conclusion, tone, focusStep] = conclude(view, decision, deployResult, lang, targets, failedConditions.length > 0, requires);
 
-  const proof: ProofLink[] = [
-    compareLink('run_id', t('proofRun'), lang, [
-      [t('deployment'), d.id],
-      [t('stepTest'), test?.run_id ?? null],
-      [t('stepPolicy'), plan?.run_id ?? null],
-      [t('stepSign'), sign?.run_id ?? null],
-      [t('deployDetail'), deployResult?.run_id ?? null],
-    ]),
-    {
-      id: 'source',
-      title: t('proofSource'),
-      state: d.sourceRevisionVerified ? 'ok' : 'unverified',
-      detail: d.sourceRevisionVerified
-        ? lang === 'ja'
-          ? 'registry parity がビルド manifest とテスト結果のコミット・digest を照合済み'
-          : 'registry parity가 빌드 manifest와 테스트 결과의 커밋·digest를 교차 확인함'
-        : lang === 'ja'
-          ? 'registry parity 検証前。手動・webhook デプロイはこの状態から始まる'
-          : 'registry parity 검증 전. 수동·webhook 배포는 모두 이 상태로 시작함',
-      legs: [
-        { label: t('commit'), value: d.sourceRevision },
-        { label: 'digest', value: d.imageDigest },
-      ],
-    },
-    compareLink('digest', t('proofDigest'), lang, [
-      [t('deployment'), d.imageDigest],
-      [t('stepTest'), test?.digest ?? null],
-      [t('stepPolicy'), plan?.digest ?? null],
-      [t('stepSign'), sign?.digest ?? null],
-      [t('deployDetail'), deployResult?.digest ?? null],
-    ]),
-    planHashLink(pr?.planHash ?? plan?.plan_hash ?? null, sign, deployResult, lang),
-  ];
+  // ---- 배포 패널 문장
+  const deployLines = describeDeploy(lang, latest.deploy, deployResult, deploy);
 
-  return { conclusion, tone, steps, focusStep, proof, decision, targets, failoverAllowed, requires, deploy, parsed: { test, plan, sign, deployResult } };
+  // ---- 증명 체인
+  const proof = buildProof(view, { test, plan, sign, deployResult, scope, lang, policyHash: pr?.planHash ?? plan?.plan_hash ?? null });
+
+  return { conclusion, tone, steps, focusStep, proof, decision, targets, failoverAllowed, failoverWhy, reasons, requires, deploy, deployLines, parsed: { test, plan, sign, deployResult } };
 }
 
-function conclude(view: DeploymentView, decision: Plan['decision'] | null, plan: Plan | null, result: DeployResult | null, lang: Lang, targets: string[]): [string, Tone, StageName] {
+function formatDuration(lang: Lang, start: string, end: string | null): string | null {
+  if (!end) return null;
+  const ms = Date.parse(end) - Date.parse(start);
+  if (!Number.isFinite(ms) || ms < 0) return null;
+  const s = Math.round(ms / 1000);
+  if (lang === 'ja') return s < 60 ? `${s}秒` : `${Math.floor(s / 60)}分${s % 60}秒`;
+  return s < 60 ? `${s}초` : `${Math.floor(s / 60)}분 ${s % 60}초`;
+}
+
+function translateRequire(lang: Lang, r: PlanRequire): { title: string; why: string | null } {
+  const copy = requireCopy(lang, r.id);
+  if (copy) return copy;
+  const hint = pickLang(lang, r.hint, r.hint_i18n);
+  return { title: hint ?? r.id, why: null };
+}
+
+function conclude(view: DeploymentView, decision: Plan['decision'] | null, result: DeployResult | null, lang: Lang, targets: string[], restartIssue: boolean, requires: RequireView[]): [string, Tone, StageName] {
   const ja = lang === 'ja';
   const d = view.deployment;
-  const name = (kind: string | undefined) => translate(lang, kind === 'onprem' ? 'onprem' : 'cloud_run');
-  if (d.status === 'queued') return [ja ? '待機中: パイプラインがまもなく始まります' : '대기 중: 파이프라인이 곧 시작됩니다', 'info', 'test'];
-  if (d.status === 'running') return [ja ? '実行中' : '진행 중', 'info', d.currentStage ?? 'test'];
-  if (d.status === 'awaiting_approval') return [ja ? '承認待ち: 人が確認するとデプロイできます' : '승인 대기: 사람이 확인해야 배포할 수 있습니다', 'warning', 'policy'];
+  const name = (kind: string | undefined) => targetLabel(kind);
+  if (d.status === 'queued') return [ja ? 'まもなく検証を始めます。' : '잠시 뒤 검증을 시작합니다.', 'info', 'test'];
+  if (d.status === 'running') return [ja ? '検証を進めています。' : '검증을 진행하고 있습니다.', 'info', d.currentStage ?? 'test'];
+  if (d.status === 'awaiting_approval') return [ja ? '人が承認するとデプロイできます。' : '사람이 승인해야 배포할 수 있습니다.', 'warning', 'policy'];
   if (d.status === 'blocked' || decision === 'block') {
-    const ids = (plan?.requires ?? []).map((r) => r.id);
-    if (ids.includes('fix_restart_failure') || ids.includes('fix_tests') || ids.includes('investigate_replace_failure')) {
-      return [ja ? 'ブロック: 再起動・入れ替え後にデータが消えます' : '차단됨: 재시작·교체 후 데이터가 사라집니다', 'danger', 'policy'];
-    }
-    const rule = plan?.rules.find((r) => r.result === 'matched');
-    const reason = rule ? pickLang(lang, rule.reason, rule.reason_i18n) : undefined;
-    return [reason ? `${ja ? 'ブロック' : '차단됨'}: ${reason}` : ja ? 'ブロック: ポリシーがデプロイを許可しません' : '차단됨: 정책이 배포를 허용하지 않습니다', 'danger', 'policy'];
+    const ids = requires.map((r) => r.id);
+    if (restartIssue || ids.includes('fix_restart_failure')) return [ja ? '再起動するとデータが消えるため、デプロイを止めました。' : '재시작하면 데이터가 사라져 배포를 막았습니다.', 'danger', 'policy'];
+    if (ids.includes('fix_tests')) return [ja ? 'テストで期待どおりの応答が得られず、デプロイを止めました。' : '테스트에서 기대한 응답이 나오지 않아 배포를 막았습니다.', 'danger', 'policy'];
+    if (ids.includes('two_phase_migration')) return [ja ? '元に戻せないデータベース変更があるため、デプロイを止めました。' : '되돌릴 수 없는 데이터베이스 변경이 있어 배포를 막았습니다.', 'danger', 'policy'];
+    if (ids.includes('rerun_same_run')) return [ja ? 'テストと個人情報判定の実行が一致せず、デプロイを止めました。' : '테스트와 개인정보 판정의 실행이 맞지 않아 배포를 막았습니다.', 'danger', 'policy'];
+    return [ja ? 'ポリシーが許可しないため、デプロイを止めました。' : '정책이 허용하지 않아 배포를 막았습니다.', 'danger', 'policy'];
   }
   if (result) {
     const r = result.routing;
     switch (result.decision) {
       case 'activated':
         if (r.result === 'ok') {
-          const standby = r.standby_target_id ? name(r.kind === 'onprem' ? 'cloud_run' : 'onprem') : null;
+          const standbyKind = r.standby_target_id ? (r.kind === 'onprem' ? 'cloud_run' : 'onprem') : null;
           return [
             ja
-              ? `検証済みイメージがポリシーを通過し ${name(r.kind)} にデプロイされました${standby ? `。${standby} は待機` : ''}`
-              : `검증된 이미지가 정책을 통과해 ${name(r.kind)}에 배포되었습니다${standby ? `. ${standby} 대기` : ''}`,
+              ? `検証を通過したイメージを ${name(r.kind)} にデプロイしました。${standbyKind ? `${name(standbyKind)} は待機中です。` : ''}`
+              : `검증을 통과한 이미지를 ${name(r.kind)}에 배포했습니다.${standbyKind ? ` ${name(standbyKind)}은 대기 중입니다.` : ''}`,
             'success',
             'policy',
           ];
         }
-        if (r.result === 'error') return [ja ? '注意: 新バージョンは起動しましたがトラフィック切替に失敗しました' : '주의: 새 버전은 떴지만 트래픽 전환에 실패했습니다', 'danger', 'deploy'];
-        return [ja ? '有効化済み: トラフィックはまだ切り替えていません' : '활성화됨: 트래픽은 아직 바꾸지 않았습니다', 'warning', 'deploy'];
+        if (r.result === 'error') return [ja ? '新バージョンは起動しましたが、トラフィック切替に失敗しました。' : '새 버전은 떴지만 트래픽 전환에 실패했습니다.', 'danger', 'deploy'];
+        return [ja ? '新バージョンを有効化しましたが、トラフィックはまだ切り替えていません。' : '새 버전을 활성화했지만 트래픽은 아직 옮기지 않았습니다.', 'warning', 'deploy'];
       case 'held':
-        return [ja ? '安全に保留: 新バージョンの検査に失敗し、既存サービスは継続中' : '안전하게 보류됨: 새 버전 검사 실패, 기존 서비스 계속 동작 중', 'warning', 'deploy'];
+        return [ja ? '新バージョンが検査を通らず、トラフィックを切り替えませんでした。既存サービスはそのままです。' : '새 버전이 검사를 통과하지 못해 트래픽을 옮기지 않았습니다. 기존 서비스는 그대로입니다.', 'warning', 'deploy'];
       case 'rolled_back':
-        return [ja ? '前バージョンへ復旧: 切替中の失敗を戻しました' : '이전 버전으로 복구됨: 전환 중 실패를 되돌렸습니다', 'warning', 'deploy'];
+        return [ja ? '切替中に問題が起きたため、前のバージョンに戻しました。' : '전환 중 문제가 생겨 이전 버전으로 되돌렸습니다.', 'warning', 'deploy'];
       case 'error':
-        return [`${ja ? 'デプロイエラー' : '배포 오류'}: ${result.error ?? (ja ? '原因未記録' : '원인 미기록')}`, 'danger', 'deploy'];
+        return [ja ? 'デプロイ中にエラーが起きて止まりました。' : '배포 중 오류가 나서 멈췄습니다.', 'danger', 'deploy'];
     }
   }
-  if (d.status === 'failed') return [`${ja ? '失敗' : '실패'}: ${d.error ?? ''}`, 'danger', 'deploy'];
+  if (d.status === 'failed') return [ja ? 'デプロイを完了できませんでした。' : '배포를 끝내지 못했습니다.', 'danger', 'deploy'];
   if (d.status === 'succeeded') {
     const where = targets.map(name).join(ja ? '・' : ', ');
-    return [ja ? `検証完了: デプロイ段階はスキップされ、実際のデプロイはありません（許可先 ${where}）` : `검증 완료: 배포 단계는 생략되어 실제 배포는 없습니다 (허용 위치 ${where})`, 'success', 'policy'];
+    return [ja ? `検証は完了しました。この実行ではデプロイ段階を省略しました（許可先 ${where}）。` : `검증은 끝났습니다. 이번 실행에서는 배포 단계를 생략했습니다 (허용 위치 ${where}).`, 'success', 'policy'];
   }
-  return [ja ? '状態を判定できません' : '상태를 판정할 수 없습니다', 'muted', 'policy'];
+  return [ja ? '状態を判定できません。' : '상태를 판정할 수 없습니다.', 'muted', 'policy'];
 }
 
-function compareLink(id: ProofLink['id'], title: string, lang: Lang, pairs: Array<[string, string | null]>): ProofLink {
+function describeDeploy(lang: Lang, stage: StageExecution | undefined, result: DeployResult | null, display: DeployDisplay): string[] {
+  const t = (key: DictKey, params?: Record<string, string | number>) => translate(lang, key, params);
+  const lines: string[] = [];
+  if (!stage) {
+    lines.push(t('deployLineNotRun'));
+    return lines;
+  }
+  if (stage.status === 'skipped') {
+    lines.push(t('deployLineSkipped'));
+    return lines;
+  }
+  if (!result) {
+    if (stage.status === 'failed') lines.push(t('deployLineGate', { reason: stage.error ?? display.title }));
+    else lines.push(t('deployLineNotRun'));
+    return lines;
+  }
+  const r = result.routing;
+  const other = (kind: string | undefined) => (kind === 'onprem' ? 'cloud_run' : 'onprem');
+  switch (result.decision) {
+    case 'activated':
+      if (r.result === 'ok') {
+        lines.push(t('deployLineActivated', { target: targetLabel(r.kind) }));
+        if (r.standby_target_id) lines.push(t(r.standby_enabled ? 'deployLineStandby' : 'deployLineStandbyOff', { target: targetLabel(other(r.kind)) }));
+      } else if (r.result === 'error') {
+        lines.push(t('deployLineSwitchFailed'));
+      } else {
+        lines.push(t('deployLineActivated', { target: targetLabel(result.targets.find((s) => s.phase === 'activate' && s.result === 'ok')?.target) }));
+      }
+      break;
+    case 'held': {
+      lines.push(t('deployLineHeld'));
+      for (const c of result.checks) lines.push(c.pass ? t('checkPassed', { target: targetLabel(c.target) }) : t('checkFailed', { target: targetLabel(c.target) }));
+      for (const s of result.targets.filter((x) => x.phase === 'candidate' && x.result === 'error')) lines.push(t('candidateFailed', { target: targetLabel(s.target) }));
+      if (result.targets.some((x) => x.phase === 'discard' && x.result === 'ok')) lines.push(t('deployLineDiscarded'));
+      break;
+    }
+    case 'rolled_back':
+      lines.push(t('deployLineRolledBack'));
+      break;
+    case 'error': {
+      lines.push(t('deployLineError'));
+      const cloudActivated = result.targets.some((x) => x.target === 'cloud_run' && x.phase === 'activate' && x.result === 'ok');
+      const rollbackFailed = result.targets.some((x) => x.phase === 'rollback' && x.result === 'error');
+      if (cloudActivated || rollbackFailed) lines.push(t('deployLineErrorCloud'));
+      break;
+    }
+  }
+  return lines;
+}
+
+interface ProofInput {
+  test: TestResult | null;
+  plan: Plan | null;
+  sign: SignResult | null;
+  deployResult: DeployResult | null;
+  scope: Scope;
+  lang: Lang;
+  policyHash: string | null;
+}
+
+function buildProof(view: DeploymentView, input: ProofInput): ProofLink[] {
+  const { test, plan, sign, deployResult, scope, lang, policyHash } = input;
   const ja = lang === 'ja';
-  const legs = pairs.map(([label, value]) => ({ label, value }));
-  const values = legs.map((l) => l.value).filter((v): v is string => Boolean(v));
-  if (values.length < 2) return { id, title, state: 'pending', detail: ja ? '比較できる値が2つ未満' : '비교할 값이 아직 2개 미만', legs };
-  const first = values[0]!;
-  const same = values.every((v) => v === first);
-  return {
-    id,
-    title,
-    state: same ? 'ok' : 'mismatch',
-    detail: same ? (ja ? `${values.length} 段階の値が一致` : `${values.length}개 단계의 값이 같음`) : ja ? '段階間で値が異なる。成果物を確認する必要あり' : '단계 사이 값이 다름. 산출물을 확인해야 함',
-    legs,
+  const t = (key: DictKey) => translate(lang, key);
+  const d = view.deployment;
+
+  const pick = (ko: string, jaText: string) => (ja ? jaText : ko);
+  const same = (values: Array<string | null>) => {
+    const present = values.filter((v): v is string => Boolean(v));
+    if (present.length < 2) return 'pending' as const;
+    return present.every((v) => v === present[0]) ? ('ok' as const) : ('mismatch' as const);
   };
-}
+  const mismatchText = pick('값이 서로 달라요. 세부 기술 정보를 확인하세요.', '値が一致しません。技術的な詳細を確認してください。');
+  const pendingText = (why: string) => pick(`아직 확인할 수 없어요: ${why}`, `まだ確認できません: ${why}`);
 
-function planHashLink(policyHash: string | null, sign: SignResult | null, result: DeployResult | null, lang: Lang): ProofLink {
-  const ja = lang === 'ja';
-  const title = translate(lang, 'proofPlan');
-  const legs = [
-    { label: translate(lang, 'stepPolicy'), value: policyHash },
-    { label: translate(lang, 'stepSign'), value: sign?.plan_hash ?? null },
-    { label: translate(lang, 'deployDetail'), value: result ? (result.signature ? (ja ? '署名検証済み' : '서명 검증됨') : null) : null },
+  // 같은 배포 요청 (run_id)
+  const runLegs = [
+    { label: t('deployment'), value: d.id },
+    { label: t('stepTest'), value: test?.run_id ?? null },
+    { label: t('stepPolicy'), value: plan?.run_id ?? null },
+    { label: t('stepSign'), value: sign?.run_id ?? null },
+    { label: t('deployDetail'), value: deployResult?.run_id ?? null },
   ];
-  if (!policyHash || !sign) return { id: 'plan_hash', title, state: 'pending', detail: ja ? 'ポリシーまたは署名結果がまだない' : '정책 또는 서명 결과가 아직 없음', legs };
-  if (policyHash !== sign.plan_hash) return { id: 'plan_hash', title, state: 'mismatch', detail: ja ? 'ポリシーと署名の plan_hash が異なる' : '정책과 서명의 plan_hash가 다름', legs };
-  const deployNote = result
-    ? result.signature
-      ? ja
-        ? '。デプロイは cosign 署名検証で間接確認（deploy_result に plan_hash はない）'
-        : '. 배포는 cosign 서명 검증으로 간접 확인 (deploy_result에는 plan_hash가 없음)'
-      : ja
-        ? '。デプロイ結果に署名検証の記録がない'
-        : '. 배포 결과에 서명 검증 기록이 없음'
-    : '';
-  return { id: 'plan_hash', title, state: 'ok', detail: `${ja ? 'ポリシーと署名の plan_hash が一致' : '정책과 서명의 plan_hash가 같음'}${deployNote}`, legs };
+  const runState = same(runLegs.map((l) => l.value));
+  const runDetail =
+    runState === 'mismatch'
+      ? mismatchText
+      : runState === 'pending'
+        ? pendingText(pick('테스트나 정책 결과가 아직 없어요', 'テストまたはポリシー結果がまだありません'))
+        : scope === 'blocked'
+          ? pick('테스트와 정책 판단이 하나의 실행으로 이어졌어요.', 'テストとポリシー判定が1つの実行としてつながっています。')
+          : deployResult
+            ? pick('테스트부터 배포까지 하나의 실행으로 이어졌어요.', 'テストからデプロイまで1つの実行としてつながっています。')
+            : pick('테스트부터 서명까지 하나의 실행으로 이어졌어요.', 'テストから署名まで1つの実行としてつながっています。');
+
+  // 같은 코드 (source ↔ image)
+  const sourceLink: ProofLink = {
+    id: 'source',
+    title: t('proofSource'),
+    state: d.sourceRevisionVerified ? 'ok' : 'unverified',
+    detail: d.sourceRevisionVerified
+      ? pick('이 커밋에서 만든 이미지인지 확인했어요.', 'このコミットから作ったイメージであることを確認しました。')
+      : pick('커밋과 이미지의 연결은 아직 확인하지 않았어요. 빌드 검증을 거치면 확인돼요.', 'コミットとイメージのつながりはまだ確認していません。ビルド検証を経ると確認されます。'),
+    legs: [
+      { label: t('commit'), value: d.sourceRevision },
+      { label: t('digest'), value: d.imageDigest },
+    ],
+  };
+
+  // 같은 이미지 (digest)
+  const digestLegs = [
+    { label: t('deployment'), value: d.imageDigest },
+    { label: t('stepTest'), value: test?.digest ?? null },
+    { label: t('stepPolicy'), value: plan?.digest ?? null },
+    { label: t('stepSign'), value: sign?.digest ?? null },
+    { label: t('deployDetail'), value: deployResult?.digest ?? null },
+  ];
+  const digestState = same(digestLegs.map((l) => l.value));
+  const digestDetail =
+    digestState === 'mismatch'
+      ? mismatchText
+      : digestState === 'pending'
+        ? pendingText(pick('테스트나 정책 결과가 아직 없어요', 'テストまたはポリシー結果がまだありません'))
+        : scope === 'blocked'
+          ? pick('테스트와 정책 판단이 같은 이미지를 기준으로 했어요.', 'テストとポリシー判定が同じイメージを基準にしました。')
+          : scope === 'deployed'
+            ? pick('테스트한 이미지 그대로 서명하고 배포했어요.', 'テストしたイメージをそのまま署名してデプロイしました。')
+            : sign
+              ? pick('서명까지 같은 이미지를 기준으로 했어요.', '署名まで同じイメージを基準にしました。')
+              : pick('테스트와 정책 판단이 같은 이미지를 기준으로 했어요.', 'テストとポリシー判定が同じイメージを基準にしました。');
+
+  // 같은 결정 (plan_hash)
+  let planState: ProofLink['state'];
+  let planDetail: string;
+  if (scope === 'blocked') {
+    planState = 'na';
+    planDetail = pick('정책에서 차단되어 서명과 배포로 진행하지 않았어요.', 'ポリシーで止まったため署名とデプロイには進みませんでした。');
+  } else if (!policyHash || !sign) {
+    planState = 'pending';
+    planDetail = pendingText(pick('서명 결과가 아직 없어요', '署名結果がまだありません'));
+  } else if (policyHash !== sign.plan_hash) {
+    planState = 'mismatch';
+    planDetail = mismatchText;
+  } else if (scope === 'deployed') {
+    planState = 'ok';
+    planDetail = pick('정책이 허용한 위치와 장애 전환 설정 그대로 배포했어요.', 'ポリシーが許可した場所と障害切替の設定どおりにデプロイしました。');
+  } else if (scope === 'held') {
+    planState = 'ok';
+    planDetail = pick('정책 결정 그대로 서명했지만, 새 버전이 검사를 통과하지 못해 트래픽을 옮기지 않았어요.', 'ポリシー判定どおりに署名しましたが、新バージョンが検査を通らずトラフィックは切り替えませんでした。');
+  } else {
+    planState = 'ok';
+    planDetail = pick('정책 결정 그대로 서명했어요.', 'ポリシー判定どおりに署名しました。');
+  }
+
+  return [
+    { id: 'run_id', title: t('proofRun'), state: runState, detail: runDetail, legs: runLegs },
+    sourceLink,
+    { id: 'digest', title: t('proofDigest'), state: digestState, detail: digestDetail, legs: digestLegs },
+    {
+      id: 'plan_hash',
+      title: t('proofPlan'),
+      state: planState,
+      detail: planDetail,
+      legs: [
+        { label: t('stepPolicy'), value: policyHash },
+        { label: t('stepSign'), value: sign?.plan_hash ?? null },
+        { label: t('deployDetail'), value: deployResult ? (deployResult.signature ? pick('서명 검증됨', '署名検証済み') : null) : null },
+      ],
+    },
+  ];
 }

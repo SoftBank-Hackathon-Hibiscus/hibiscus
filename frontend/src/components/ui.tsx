@@ -89,16 +89,16 @@ export function Collapsible({ title, summary, defaultOpen = false, children }: {
   );
 }
 
-/** "자세히 보기" 버튼으로 여는 영역 */
+/** "세부 기술 정보" 버튼으로 여는 영역. 원래 값(ID·해시·JSON)은 여기 안에서만 보인다. */
 export function MoreToggle({ children, label }: { children: ReactNode; label?: string }) {
   const { t } = useLang();
   const [open, setOpen] = useState(false);
   return (
     <div className="more">
-      <button type="button" className="btn btn-small" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
-        {open ? t('hideDetails') : (label ?? t('details'))}
+      <button type="button" className="btn btn-small btn-ghost" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+        {open ? t('hideDetails') : (label ?? t('techDetails'))}
       </button>
-      {open && <div className="more-body">{children}</div>}
+      {open && <div className="more-body frost">{children}</div>}
     </div>
   );
 }
@@ -109,7 +109,7 @@ export function RawToggle({ label, children }: { label?: string; children: React
   return (
     <div className="raw-toggle">
       <button type="button" className="link-btn" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
-        {open ? t('hideDetails') : (label ?? t('raw'))}
+        {open ? t('hideDetails') : (label ?? t('stageSummary'))}
       </button>
       {open && <div className="raw-body">{children}</div>}
     </div>

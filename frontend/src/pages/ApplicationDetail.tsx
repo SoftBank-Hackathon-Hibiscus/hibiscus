@@ -1,4 +1,4 @@
-import { Activity, ArrowRight, Cloud, GitBranch, Hash as HashIcon, Server, Shuffle, Waypoints, type LucideIcon } from 'lucide-react';
+import { Activity, ArrowRight, Cloud, GitBranch, Repeat, Server, Shuffle, Waypoints, type LucideIcon } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError, type DataSource } from '../api/client';
 import { MockDataSource } from '../api/mock';
@@ -123,6 +123,7 @@ export function ApplicationDetail({ id, source }: { id: string; source: DataSour
 
   const headline = !route ? t('noRouteNote') : route.target.kind === 'cloud_run' && (failedOver || onpremUnhealthy) ? t('trafficFailedOver') : t('trafficOn', { target: targetLabel(route.target.kind) });
   const headlineTone: Tone = !route ? 'muted' : route.target.kind === 'cloud_run' && (failedOver || onpremUnhealthy) ? 'warning' : 'success';
+  const failoverValue = !route ? t('none') : snap.routePolicyError ? describeError(snap.routePolicyError, lang).title : snap.routePolicy ? (snap.routePolicy.failoverAllowed ? t('statFailoverOn') : t('statFailoverOff')) : t('none');
 
   return (
     <div className="page">
@@ -154,20 +155,9 @@ export function ApplicationDetail({ id, source }: { id: string; source: DataSour
 
       <section className="stats">
         <StatCard icon={Waypoints} tone={headlineTone === 'muted' ? 'accent' : headlineTone} label={t('trafficNow')} value={route ? targetLabel(route.target.kind) : t('noRoute')} />
-        <StatCard
-          icon={Activity}
-          tone={route ? healthTone(routeHealth) : 'accent'}
-          label={t('status')}
-          value={route ? t(HEALTH_KEY[routeHealth ?? 'unknown'] ?? 'unknown') : t('none')}
-          pill={route ? <Pill tone={healthTone(routeHealth)}>{routeHealth}</Pill> : undefined}
-        />
-        <StatCard
-          icon={Shuffle}
-          tone="accent"
-          label={t('failoverPolicy')}
-          value={!route ? t('none') : snap.routePolicyError ? describeError(snap.routePolicyError, lang).title : snap.routePolicy ? (snap.routePolicy.failoverAllowed ? t('allow') : t('denied')) : t('none')}
-        />
-        <StatCard icon={HashIcon} tone="accent" label={t('routeRevision')} value={route ? String(route.revision) : t('none')} />
+        <StatCard icon={Activity} tone={route ? healthTone(routeHealth) : 'accent'} label={t('status')} value={route ? t(HEALTH_KEY[routeHealth ?? 'unknown'] ?? 'unknown') : t('none')} />
+        <StatCard icon={Shuffle} tone="accent" label={t('failoverLabel')} value={failoverValue} />
+        <StatCard icon={Repeat} tone="accent" label={t('switchCount')} value={route ? String(route.revision) : t('none')} />
       </section>
 
       <section className="targets">
@@ -178,7 +168,7 @@ export function ApplicationDetail({ id, source }: { id: string; source: DataSour
       <section className="card">
         <div className="card-head">
           <h2 className="card-title">{t('deployHistory')}</h2>
-          <span className="small muted">{h.enabled ? t('healthConfig', { method: h.method, path: h.path, interval: h.intervalSeconds, threshold: h.failureThreshold }) : t('healthOff')}</span>
+          <span className="small muted">{h.enabled ? t('healthConfig', { interval: h.intervalSeconds, threshold: h.failureThreshold }) : t('healthOff')}</span>
         </div>
         <DeploymentTimeline deployments={snap.deployments} activeDeploymentId={route?.target.deploymentId ?? null} />
       </section>
@@ -187,10 +177,8 @@ export function ApplicationDetail({ id, source }: { id: string; source: DataSour
         <section className="card">
           <h2 className="card-title">{t('changesSeen')}</h2>
           <ul className="plain">
-            {events.map((e) => (
-              <li key={e.at}>
-                {fmtTime(new Date(e.at).toISOString())}: {e.fromKind ? targetLabel(e.fromKind) : t('none')} <ArrowRight size={14} className="inline-icon" aria-hidden /> {targetLabel(e.toKind)} (rev {e.fromRevision ?? '-'} <ArrowRight size={12} className="inline-icon" aria-hidden /> {e.toRevision})
-              </li>
+            {events.map((e, i) => (
+              <li key={e.at}>{t('bannerLine', { from: e.fromKind ? targetLabel(e.fromKind) : t('none'), to: targetLabel(e.toKind), time: fmtTime(new Date(e.at).toISOString()), n: i + 1 })}</li>
             ))}
           </ul>
         </section>
@@ -199,13 +187,12 @@ export function ApplicationDetail({ id, source }: { id: string; source: DataSour
   );
 }
 
-function StatCard({ icon, tone, label, value, pill }: { icon: LucideIcon; tone: Tone | 'accent'; label: string; value: string; pill?: React.ReactNode }) {
+function StatCard({ icon, tone, label, value }: { icon: LucideIcon; tone: Tone | 'accent'; label: string; value: string }) {
   return (
     <div className="card stat">
       <IconTile icon={icon} tone={tone} />
       <div className="stat-label">{label}</div>
       <div className="stat-value">{value}</div>
-      {pill && <div className="stat-pill">{pill}</div>}
     </div>
   );
 }
@@ -215,15 +202,12 @@ function RouteBanner({ event, count }: { event: RouteChange; count: number }) {
   const isFailover = event.fromKind === 'onprem' && event.toKind === 'cloud_run';
   return (
     <div className={`banner banner-${isFailover ? 'warning' : 'info'}`} role="alert">
-      <IconTile icon={Shuffle} tone={isFailover ? 'warning' : 'info'} size={36} />
+      <IconTile icon={Shuffle} tone={isFailover ? 'warning' : 'info'} size={40} />
       <div>
-        <div className="banner-title">
-          {isFailover ? t('failoverHappened') : t('routeChanged')} (rev {event.fromRevision ?? '-'} <ArrowRight size={16} className="inline-icon" aria-hidden /> {event.toRevision})
-        </div>
+        <div className="banner-title">{isFailover ? t('failoverHappened') : t('routeChanged')}</div>
         <div className="banner-body">
-          {event.fromKind ? targetLabel(event.fromKind) : t('none')} <ArrowRight size={14} className="inline-icon" aria-hidden /> <strong>{targetLabel(event.toKind)}</strong>, {fmtTime(new Date(event.at).toISOString())}
-          {isFailover && `. ${t('noFailback')}`}
-          {count > 1 && ` (${count})`}
+          {t('bannerLine', { from: event.fromKind ? targetLabel(event.fromKind) : t('none'), to: targetLabel(event.toKind), time: fmtTime(new Date(event.at).toISOString()), n: count })}
+          {isFailover && ` ${t('noFailback')}`}
         </div>
       </div>
     </div>
@@ -253,11 +237,11 @@ function TargetCard({ kind, snap, agents }: { kind: TargetKind; snap: Snapshot; 
   const Icon = kind === 'onprem' ? Server : Cloud;
 
   return (
-    <div className={`card target-card ${isActive ? `target-active target-active-${tone}` : ''} ${primary ? '' : 'target-missing'}`}>
+    <div className={`card target-card tint-${isActive ? tone : 'muted'} ${isActive ? `target-active target-active-${tone}` : ''} ${primary ? '' : 'target-missing'}`}>
       <div className={`traffic-strip ${isActive ? 'traffic-on' : ''}`} aria-hidden>
         {isActive ? (
           <>
-            <span className="mono">{snap.app.application.publicHost ?? t('gateway')}</span>
+            <span className="mono">{snap.app.application.publicHost ?? 'gateway'}</span>
             <ArrowRight size={16} />
             <span>{t('hereNow')}</span>
           </>
@@ -269,22 +253,13 @@ function TargetCard({ kind, snap, agents }: { kind: TargetKind; snap: Snapshot; 
         <IconTile icon={Icon} tone={primary ? (isActive ? (tone === 'muted' ? 'accent' : tone) : 'accent') : 'muted'} size={44} />
         <div className="target-title">
           <h2>{targetLabel(kind)}</h2>
-          <span className="small muted">
-            {primary ? (
-              <>
-                {version !== undefined ? `v${version}` : ''} {kind === 'cloud_run' && primary.target.url ? primary.target.url.replace('https://', '') : ''}
-                {kind === 'onprem' && primary.target.localPort ? `:${primary.target.localPort}` : ''}
-              </>
-            ) : (
-              t('notRegisteredNote', { target: targetLabel(kind) })
-            )}
-          </span>
+          <span className="small muted">{primary ? (version !== undefined ? `v${version}` : '') : t('notRegisteredNote', { target: targetLabel(kind) })}</span>
         </div>
         {isActive && <Pill tone={tone === 'muted' ? 'info' : tone}>{t('hereNow')}</Pill>}
-        {isStandby && <Pill tone="info">{snap.routePolicy ? (snap.routePolicy.failoverAllowed ? t('standbyFailover') : t('standbyNoFailover')) : t('waiting')}</Pill>}
+        {isStandby && <Pill tone="info">{snap.routePolicy ? (snap.routePolicy.failoverAllowed ? t('standbyReady') : t('standbyOff')) : t('waiting')}</Pill>}
         {isFormerPrimary && <Pill tone="muted">{t('manualAfterRecovery')}</Pill>}
         {!primary && <Pill tone="muted">{t('notRegistered')}</Pill>}
-        {primary && !isActive && !isStandby && !isFormerPrimary && <Pill tone="muted">{primary.target.enabled ? t('waiting') : t('inactive')}</Pill>}
+        {primary && !isActive && !isStandby && !isFormerPrimary && <Pill tone="muted">{t('waiting')}</Pill>}
       </div>
       {primary && (
         <>
@@ -294,7 +269,6 @@ function TargetCard({ kind, snap, agents }: { kind: TargetKind; snap: Snapshot; 
             {health && <span className="muted small">{displayStatus === 'healthy' ? t('consecutiveOk', { n: health.consecutiveSuccesses }) : t('consecutiveFail', { n: health.consecutiveFailures })}</span>}
             {expired && <Pill tone="muted">{t('observationExpired')}</Pill>}
           </div>
-          {health?.reason && displayStatus !== 'healthy' && <div className="mono small tone-danger">{health.reason}</div>}
           {kind === 'onprem' && agents.length > 0 && (
             <ul className="agent-list">
               {agents.map(({ agent, status, error }) => {
@@ -304,7 +278,7 @@ function TargetCard({ kind, snap, agents }: { kind: TargetKind; snap: Snapshot; 
                   <li key={agent.id} className="agent-row">
                     <span className="muted small">{t('agent')}</span>
                     <strong>{agent.name}</strong>
-                    <Pill tone={agentTone}>{s}</Pill>
+                    <Pill tone={agentTone}>{s === 'online' ? t('agentOnline') : s === 'offline' ? t('agentOffline') : s}</Pill>
                     <span className="small muted">{status?.last_seen_at ? relTime(status.last_seen_at) : agent.lastSeenAt ? relTime(agent.lastSeenAt) : ''}</span>
                     {error ? <span className="small tone-danger">{describeError(error).title}</span> : null}
                   </li>
@@ -317,17 +291,14 @@ function TargetCard({ kind, snap, agents }: { kind: TargetKind; snap: Snapshot; 
             <Kv
               columns={2}
               items={[
-                ['deployment', <Hash value={primary.target.deploymentId} length={18} />],
-                ['target', <Hash value={primary.target.id} length={18} />],
-                kind === 'onprem' ? [t('ports'), <span className="mono">local {primary.target.localPort ?? '-'}, gateway {primary.target.gatewayPort ?? '-'}</span>] : null,
-                kind === 'cloud_run' ? ['URL', primary.target.url ? <Hash value={primary.target.url} length={40} /> : t('none')] : null,
-                ['enabled', primary.target.enabled ? t('yes') : t('no')],
-                [t('lastObserved'), health ? `${relTime(health.observedAt)} (${fmtTime(health.observedAt)})` : t('none')],
-                ...agents.flatMap(({ agent, status }) =>
-                  status?.serving
-                    ? ([[`${t('serving')} (${agent.name})`, <Hash value={status.serving.container} length={28} />]] as Array<[string, React.ReactNode]>)
-                    : [],
-                ),
+                ['deployment_id', <Hash value={primary.target.deploymentId} length={20} />],
+                ['target_id', <Hash value={primary.target.id} length={20} />],
+                kind === 'onprem' ? ['ports', <span className="mono">local {primary.target.localPort ?? '-'}, gateway {primary.target.gatewayPort ?? '-'}</span>] : null,
+                kind === 'cloud_run' ? ['url', primary.target.url ? <Hash value={primary.target.url} length={40} /> : '-'] : null,
+                ['enabled', <span className="mono">{String(primary.target.enabled)}</span>],
+                ['health.reason', health?.reason ? <span className="mono small">{health.reason}</span> : <span className="muted">-</span>],
+                [t('lastObserved'), health ? `${relTime(health.observedAt)} (${fmtTime(health.observedAt)})` : '-'],
+                ...agents.flatMap(({ agent, status }) => (status?.serving ? ([[`serving (${agent.name})`, <Hash value={status.serving.container} length={28} />]] as Array<[string, React.ReactNode]>) : [])),
               ]}
             />
           </MoreToggle>
@@ -341,7 +312,7 @@ function DeploymentTimeline({ deployments, activeDeploymentId }: { deployments: 
   const { t } = useLang();
   if (deployments.length === 0) return <Empty>{t('none')}</Empty>;
   return (
-    <ol className="history">
+    <ol className="history frost">
       {deployments.map((d) => (
         <li key={d.id} className={`history-item ${d.id === activeDeploymentId ? 'history-active' : ''}`}>
           <span className={`history-dot dot-${STATUS_TONE[d.status]}`} aria-hidden />
@@ -350,7 +321,7 @@ function DeploymentTimeline({ deployments, activeDeploymentId }: { deployments: 
           </a>
           <span className="history-meta">
             <Pill tone={STATUS_TONE[d.status]}>{t(STATUS_KEY[d.status])}</Pill>
-            {d.decision && <span className="mono small">{d.decision}</span>}
+            {d.decision && <Pill tone={d.decision === 'allow' ? 'success' : d.decision === 'block' ? 'danger' : 'warning'}>{d.decision === 'allow' ? 'ALLOW' : d.decision === 'block' ? 'BLOCK' : 'NEEDS_APPROVAL'}</Pill>}
             {d.id === activeDeploymentId && <Pill tone="success">{t('servingNow')}</Pill>}
             {!d.deploymentPerformed && d.status === 'succeeded' && <span className="small muted">{t('notDeployed')}</span>}
           </span>
