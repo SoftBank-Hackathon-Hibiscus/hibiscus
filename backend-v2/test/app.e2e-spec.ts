@@ -54,6 +54,10 @@ describe('deployment API (e2e)', () => {
     process.env.JWT_REFRESH_SECRET = randomBytes(32).toString('hex');
     process.env.GITHUB_APP_CLIENT_ID = 'Iv1.test-client';
     process.env.GITHUB_APP_CLIENT_SECRET = 'test-client-secret';
+    process.env.ALLOWED_GITHUB_IDS = [
+      ...Array.from({ length: 32 }, (_, index) => String(index + 1)),
+      '1000000',
+    ].join(',');
 
     const { AppModule } = await import('../src/app.module.js');
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -208,6 +212,17 @@ describe('deployment API (e2e)', () => {
       });
   });
 
+  it('rejects a GitHub user outside the configured allowlist', async () => {
+    const response = await githubLogin(
+      'outside-user',
+      'Outside User',
+      9_999_999,
+      403,
+    );
+    expect(response.body.message).toBe('GitHub user is not allowed');
+    expect(response.body).not.toHaveProperty('access_token');
+  });
+
   it('rejects missing, wrong, modified, and expired OAuth state before contacting GitHub', async () => {
     const start = await request(app.getHttpServer())
       .get('/auth/github')
@@ -319,7 +334,12 @@ describe('deployment API (e2e)', () => {
     expect(response.body.user.name).toBe(name);
   });
 
-  async function githubLogin(login: string, name = 'Person') {
+  async function githubLogin(
+    login: string,
+    name = 'Person',
+    githubId = 1_000_000,
+    expectedStatus = 200,
+  ) {
     const start = await request(app.getHttpServer())
       .get('/auth/github')
       .expect(200);
@@ -353,10 +373,10 @@ describe('deployment API (e2e)', () => {
       )
       .mockResolvedValueOnce(
         Response.json({
-          id: 1000000,
+          id: githubId,
           login,
           name,
-          avatar_url: 'https://avatars.githubusercontent.com/u/1000000',
+          avatar_url: `https://avatars.githubusercontent.com/u/${githubId}`,
         }),
       );
     vi.stubGlobal('fetch', fetchMock);
@@ -365,7 +385,7 @@ describe('deployment API (e2e)', () => {
         .get('/auth/github/callback')
         .set('Cookie', cookie)
         .query({ code: 'test-code', state: url.searchParams.get('state') })
-        .expect(200);
+        .expect(expectedStatus);
       const exchange: RequestInit = fetchMock.mock.calls[0]![1];
       expect((exchange.body as URLSearchParams).get('client_id')).toBe(
         'Iv1.test-client',
@@ -1815,5 +1835,6 @@ describe('deployment API (e2e)', () => {
     delete process.env.JWT_REFRESH_SECRET;
     delete process.env.GITHUB_APP_CLIENT_ID;
     delete process.env.GITHUB_APP_CLIENT_SECRET;
+    delete process.env.ALLOWED_GITHUB_IDS;
   });
 });

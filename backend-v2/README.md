@@ -147,7 +147,7 @@ npm run start:dev
 
 기본 주소는 `http://127.0.0.1:8080`입니다.
 
-`JWT_ACCESS_SECRET`과 `JWT_REFRESH_SECRET`은 각각 최소 32자이며 서로 달라야 합니다. 각 키는 `openssl rand -hex 32`로 생성할 수 있습니다. GitHub App의 Client ID와 Client Secret도 필수입니다. 설정은 서버 시작 시 검증합니다. 필수 설정이 없거나 잘못되면 서버를 시작하지 않습니다. 서비스 안에서는 설정 누락을 다시 검사하지 않습니다.
+`JWT_ACCESS_SECRET`과 `JWT_REFRESH_SECRET`은 각각 최소 32자이며 서로 달라야 합니다. 각 키는 `openssl rand -hex 32`로 생성할 수 있습니다. GitHub App의 Client ID, Client Secret, `ALLOWED_GITHUB_IDS`도 필수입니다. 설정은 서버 시작 시 검증합니다. 필수 설정이 없거나 잘못되면 서버를 시작하지 않습니다. 서비스 안에서는 설정 누락을 다시 검사하지 않습니다.
 
 백엔드 오류 메시지는 영문입니다. CLI의 원본 출력과 공통 계약의 정책 설명은 수정하지 않습니다. CLI 실패 시 원본 출력은 단계의 `summary.stdout`, `summary.stderr`에 보관하고 `error`에는 영문 오류를 저장합니다. 예상하지 못한 단계 오류의 원문은 `summary.details`에 보관합니다. Worker 자체 오류의 원문은 서버 로그에만 남깁니다.
 
@@ -170,7 +170,10 @@ GitHub App 등록 방법:
 GITHUB_APP_CLIENT_ID=your-github-app-client-id
 GITHUB_APP_CLIENT_SECRET=your-github-app-client-secret
 GITHUB_APP_CALLBACK_URL=http://localhost:8080/auth/github/callback
+ALLOWED_GITHUB_IDS=12345678,87654321
 ```
+
+`ALLOWED_GITHUB_IDS`에는 로그인할 팀원의 GitHub 숫자 사용자 ID를 쉼표로 구분해서 넣습니다. OAuth Callback과 기존 JWT 검증에서 이 목록을 확인합니다. 목록에서 사용자를 제거하면 기존 Access·Refresh JWT도 더 이상 사용할 수 없습니다.
 
 1. 같은 브라우저에서 `GET /auth/github`를 호출합니다. 서버가 `authorization_url`과 10분짜리 HttpOnly 임시 Cookie를 제공합니다.
 2. 브라우저를 `authorization_url`로 이동합니다. `state`와 PKCE `S256`을 사용합니다. Cookie에는 서명한 state와 verifier를 보관합니다. 서버 세션은 저장하지 않습니다.
