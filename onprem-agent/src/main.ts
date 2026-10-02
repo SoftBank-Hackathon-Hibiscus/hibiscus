@@ -8,10 +8,12 @@ import { JobExecutor } from "./job-executor.js";
 import { JobRunner } from "./job-runner.js";
 import { StateStore } from "./state-store.js";
 import { SshTunnel } from "./ssh-tunnel.js";
+import { SshIdentity } from "./ssh-identity.js";
 
 const config = loadConfig();
 const commands = new CommandRunner(config.commandTimeoutMs);
 const backend = new BackendClient(config);
+await new SshIdentity(config, backend).ensure();
 const state = new StateStore(config.stateFile);
 const executor = new JobExecutor(
   config.agentId,

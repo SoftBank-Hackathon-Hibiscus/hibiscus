@@ -52,3 +52,16 @@ void test("rejects an invalid SSH host key fingerprint", () => {
     }),
   );
 });
+
+void test("allows SSH connection settings to come from enrollment", () => {
+  const config = loadConfig({
+    ...requiredEnvironment,
+    SSH_HOST: "",
+    SSH_USER: "",
+    SSH_HOST_KEY_SHA256: "",
+    SSH_ENROLLMENT_TOKEN: "e".repeat(43),
+  });
+
+  assert.equal(config.sshHost, "");
+  assert.equal(config.sshEnrollmentToken, "e".repeat(43));
+});

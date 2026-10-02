@@ -96,12 +96,25 @@ export interface BackendAgentClient {
   submitResult(result: AgentJobResult): Promise<void>;
   heartbeat(serving: ServingContainer | null): Promise<void>;
   forwards(): Promise<SshForward[]>;
+  enrollSsh(token: string, publicKey: string): Promise<SshEnrollment>;
 }
 
 export interface SshForward {
   target_id: string;
   gateway_port: number;
   local_port: number;
+}
+
+export interface SshEnrollment {
+  agent_id: string;
+  fingerprint: string;
+  enrolled_at: string;
+  ssh: {
+    host: string;
+    port: number;
+    user: string;
+    host_key_sha256: string;
+  };
 }
 
 export interface ContainerRuntime {

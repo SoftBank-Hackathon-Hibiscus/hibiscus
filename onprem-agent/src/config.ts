@@ -33,17 +33,26 @@ const environmentSchema = z.object({
   COSIGN_COMMAND: z.string().min(1).default("cosign"),
   COSIGN_ALLOW_INSECURE_REGISTRY: booleanString.default(false),
   COSIGN_INSECURE_IGNORE_TLOG: booleanString.default(false),
-  SSH_HOST: z.string().min(1),
+  SSH_HOST: z.string().default(""),
   SSH_PORT: z.coerce.number().int().min(1).max(65_535).default(22),
-  SSH_USER: z.string().min(1),
-  SSH_IDENTITY_FILE: z.string().min(1),
+  SSH_USER: z.string().default(""),
+  SSH_IDENTITY_FILE: z.string().min(1).default("./data/ssh/agent_ed25519"),
+  SSH_ENROLLMENT_TOKEN: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.string().min(32).optional(),
+  ),
   SSH_HOST_KEY_SHA256: z
     .string()
-    .regex(/^SHA256:[A-Za-z0-9+/]{43}$/, "SSH host key fingerprint is invalid"),
+    .refine(
+      (value) => value === "" || /^SHA256:[A-Za-z0-9+/]{43}$/.test(value),
+      "SSH host key fingerprint is invalid",
+    )
+    .default(""),
   SSH_READY_TIMEOUT_MS: z.coerce.number().int().min(1_000).default(10_000),
   SSH_FORWARD_POLL_INTERVAL_MS: z.coerce.number().int().min(250).default(2_000),
   SSH_SERVER_ALIVE_INTERVAL_SECONDS: z.coerce.number().int().min(1).default(15),
   SSH_SERVER_ALIVE_COUNT_MAX: z.coerce.number().int().min(1).default(3),
+  SSH_SESSION_MAX_MS: z.coerce.number().int().min(60_000).default(900_000),
 });
 
 export interface AgentConfig {
@@ -65,11 +74,13 @@ export interface AgentConfig {
   sshPort: number;
   sshUser: string;
   sshIdentityFile: string;
+  sshEnrollmentToken?: string;
   sshHostKeySha256: string;
   sshReadyTimeoutMs: number;
   sshForwardPollIntervalMs: number;
   sshServerAliveIntervalSeconds: number;
   sshServerAliveCountMax: number;
+  sshSessionMaxMs: number;
 }
 
 export function loadConfig(
@@ -99,10 +110,12 @@ export function loadConfig(
     sshPort: env.SSH_PORT,
     sshUser: env.SSH_USER,
     sshIdentityFile: resolve(env.SSH_IDENTITY_FILE),
+    sshEnrollmentToken: env.SSH_ENROLLMENT_TOKEN,
     sshHostKeySha256: env.SSH_HOST_KEY_SHA256,
     sshReadyTimeoutMs: env.SSH_READY_TIMEOUT_MS,
     sshForwardPollIntervalMs: env.SSH_FORWARD_POLL_INTERVAL_MS,
     sshServerAliveIntervalSeconds: env.SSH_SERVER_ALIVE_INTERVAL_SECONDS,
     sshServerAliveCountMax: env.SSH_SERVER_ALIVE_COUNT_MAX,
+    sshSessionMaxMs: env.SSH_SESSION_MAX_MS,
   };
 }

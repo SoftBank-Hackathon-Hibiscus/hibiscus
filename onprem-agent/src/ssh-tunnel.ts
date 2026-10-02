@@ -1,17 +1,21 @@
-import { createHash, timingSafeEqual } from "node:crypto";
+import { timingSafeEqual } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { connect as connectLocal } from "node:net";
-import { Client, type ConnectConfig } from "ssh2";
+import ssh2 from "ssh2";
+import type { Client as SshClient, ConnectConfig } from "ssh2";
 import type { AgentConfig } from "./config.js";
 import type { StateStore } from "./state-store.js";
 import type { BackendAgentClient, SshForward } from "./types.js";
+import { sshKeyFingerprint } from "./ssh-identity.js";
 
 const remoteBindHost = "127.0.0.1";
 const localTargetHost = "127.0.0.1";
+const { Client } = ssh2;
 
 export class SshTunnel {
-  private client?: Client;
+  private client?: SshClient;
   private signature?: string;
+  private connectedAt?: number;
   private stopping = false;
 
   constructor(
@@ -46,11 +50,18 @@ export class SshTunnel {
     );
     const forwards = selectSshForwards(requested, allowedPorts);
     const signature = JSON.stringify(forwards);
-    if (this.client && signature === this.signature) return;
+    if (
+      this.client &&
+      signature === this.signature &&
+      this.connectedAt !== undefined &&
+      Date.now() - this.connectedAt < this.config.sshSessionMaxMs
+    )
+      return;
 
     await this.disconnect();
     if (forwards.length === 0) {
       this.signature = signature;
+      this.connectedAt = Date.now();
       return;
     }
     await this.connect(forwards, signature);
@@ -86,6 +97,7 @@ export class SshTunnel {
       if (this.client !== client) return;
       this.client = undefined;
       this.signature = undefined;
+      this.connectedAt = undefined;
       if (!this.stopping) console.error("[ssh-tunnel] SSH connection closed");
     });
 
@@ -105,13 +117,14 @@ export class SshTunnel {
         throw new Error("SSH connection closed before forwards were ready");
       }
       this.signature = signature;
+      this.connectedAt = Date.now();
     } catch (error) {
       await this.disconnect();
       throw error;
     }
   }
 
-  private bindForward(client: Client, gatewayPort: number): Promise<void> {
+  private bindForward(client: SshClient, gatewayPort: number): Promise<void> {
     return new Promise((resolve, reject) => {
       client.forwardIn(remoteBindHost, gatewayPort, (error, assignedPort) => {
         if (error) {
@@ -131,6 +144,7 @@ export class SshTunnel {
     const client = this.client;
     this.client = undefined;
     this.signature = undefined;
+    this.connectedAt = undefined;
     if (!client) return Promise.resolve();
 
     return new Promise((resolve) => {
@@ -168,16 +182,12 @@ export function sshConnectionConfig(
     readyTimeout: config.sshReadyTimeoutMs,
     keepaliveInterval: config.sshServerAliveIntervalSeconds * 1_000,
     keepaliveCountMax: config.sshServerAliveCountMax,
-    hostVerifier: (key: Buffer) =>
-      matchesHostKey(key, config.sshHostKeySha256),
+    hostVerifier: (key: Buffer) => matchesHostKey(key, config.sshHostKeySha256),
   };
 }
 
 export function matchesHostKey(key: Buffer, expected: string): boolean {
-  const actual = `SHA256:${createHash("sha256")
-    .update(key)
-    .digest("base64")
-    .replace(/=+$/, "")}`;
+  const actual = sshKeyFingerprint(key);
   const actualBytes = Buffer.from(actual);
   const expectedBytes = Buffer.from(expected);
   return (

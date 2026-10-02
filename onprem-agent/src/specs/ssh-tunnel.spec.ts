@@ -80,5 +80,6 @@ function config(): AgentConfig {
     sshForwardPollIntervalMs: 2_000,
     sshServerAliveIntervalSeconds: 15,
     sshServerAliveCountMax: 3,
+    sshSessionMaxMs: 900_000,
   };
 }
