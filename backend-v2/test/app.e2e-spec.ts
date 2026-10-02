@@ -36,6 +36,7 @@ import { Agent, createServer, request as httpRequest } from 'node:http';
 import { connect, type Socket } from 'node:net';
 import { TunnelService } from '../src/tunnel/tunnel.service.js';
 import { RoutingService } from '../src/routing/routing.service.js';
+import { FailoverService } from '../src/health/failover.service.js';
 
 describe('deployment API (e2e)', () => {
   let app: INestApplication<App>;
@@ -54,6 +55,7 @@ describe('deployment API (e2e)', () => {
     process.env.JWT_REFRESH_SECRET = randomBytes(32).toString('hex');
     process.env.GITHUB_APP_CLIENT_ID = 'Iv1.test-client';
     process.env.GITHUB_APP_CLIENT_SECRET = 'test-client-secret';
+    process.env.HEALTH_MONITOR_ENABLED = 'false';
     process.env.ALLOWED_GITHUB_IDS = [
       ...Array.from({ length: 32 }, (_, index) => String(index + 1)),
       '1000000',
@@ -462,11 +464,20 @@ describe('deployment API (e2e)', () => {
         health_check: { path: '//external.example/health' },
       })
       .expect(400);
+
+    await api()
+      .post('/applications')
+      .send({
+        ...validApplication,
+        health_check: { version_path: 'https://external.example/version' },
+      })
+      .expect(400);
   });
 
   it('creates an application with configurable health checks', async () => {
     const application = await createApplication('health-config', false, {
       path: '/ready',
+      version_path: '/version',
       interval_seconds: 10,
       timeout_seconds: 3,
       failure_threshold: 5,
@@ -475,6 +486,7 @@ describe('deployment API (e2e)', () => {
     expect(application.healthCheck).toMatchObject({
       applicationId: application.application.id,
       path: '/ready',
+      versionPath: '/version',
       intervalSeconds: 10,
       timeoutSeconds: 3,
       successStatusMin: 200,
@@ -1122,6 +1134,77 @@ describe('deployment API (e2e)', () => {
       });
   });
 
+  it('fails over from unhealthy on-prem to healthy Cloud Run after the configured threshold', async () => {
+    const context = await createAgentContext('failover-route', {
+      success_threshold: 1,
+      failure_threshold: 2,
+    });
+    const onPrem = await api()
+      .post(`/applications/${context.applicationId}/targets`)
+      .send({
+        deployment_id: context.runId,
+        kind: 'onprem',
+        agent_id: context.agentId,
+        local_port: 18082,
+      })
+      .expect(201);
+    const cloudRun = await api()
+      .post(`/applications/${context.applicationId}/targets`)
+      .send({
+        deployment_id: context.runId,
+        kind: 'cloud_run',
+        url: 'https://failover-route.example.run.app',
+      })
+      .expect(201);
+    await api()
+      .patch(`/applications/${context.applicationId}/routing`)
+      .send({ target_id: onPrem.body.id, expected_revision: 0 })
+      .expect(200);
+
+    const routing = app.get(RoutingService);
+    const failover = app.get(FailoverService);
+    const base = Date.now();
+    routing.recordHealth({
+      targetId: cloudRun.body.id,
+      deploymentId: context.runId,
+      status: 'healthy',
+      observedAt: new Date(base).toISOString(),
+      expiresAt: new Date(base + 60_000).toISOString(),
+    });
+    const firstFailure = routing.recordHealth({
+      targetId: onPrem.body.id,
+      deploymentId: context.runId,
+      status: 'unhealthy',
+      observedAt: new Date(base + 1_000).toISOString(),
+      expiresAt: new Date(base + 60_000).toISOString(),
+    });
+    expect(firstFailure).toMatchObject({
+      status: 'unknown',
+      consecutiveFailures: 1,
+    });
+    expect(failover.handleUnhealthyTarget(onPrem.body.id)).toBe(false);
+
+    const secondFailure = routing.recordHealth({
+      targetId: onPrem.body.id,
+      deploymentId: context.runId,
+      status: 'unhealthy',
+      observedAt: new Date(base + 2_000).toISOString(),
+      expiresAt: new Date(base + 60_000).toISOString(),
+    });
+    expect(secondFailure).toMatchObject({
+      status: 'unhealthy',
+      consecutiveFailures: 2,
+    });
+    expect(failover.handleUnhealthyTarget(onPrem.body.id)).toBe(true);
+    await api()
+      .get(`/applications/${context.applicationId}/routing`)
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.revision).toBe(2);
+        expect(response.body.target.id).toBe(cloudRun.body.id);
+      });
+  });
+
   it('opens an authenticated tunnel and carries an HTTP request to an on-prem port', async () => {
     const localServer = createServer((incoming, outgoing) => {
       let body = '';
@@ -1152,6 +1235,14 @@ describe('deployment API (e2e)', () => {
         local_port: localAddress.port,
       })
       .expect(201);
+    await api()
+      .patch(`/applications/${context.applicationId}/routing`)
+      .send({
+        target_id: target.body.id,
+        expected_revision: 0,
+        reason: 'Gateway E2E target',
+      })
+      .expect(200);
     const backendAddress = app.getHttpServer().address();
     if (!backendAddress || typeof backendAddress === 'string') {
       throw new Error('Backend test server did not start');
@@ -1185,6 +1276,19 @@ describe('deployment API (e2e)', () => {
     });
 
     try {
+      await request(app.getHttpServer())
+        .post('/echo?value=gateway')
+        .set('Host', 'tunnel-http.apps.test')
+        .set('Content-Type', 'text/plain')
+        .send('gateway')
+        .expect(200)
+        .expect('x-hibiscus-tunnel', 'ok')
+        .expect('POST /echo?value=gateway gateway');
+      await request(app.getHttpServer())
+        .get('/_gateway/tunnel-http/dev-path')
+        .expect(200)
+        .expect('GET /dev-path ');
+
       const stream = await app.get(TunnelService).openTarget(target.body.id);
       const tunnelAgent = new Agent({ keepAlive: false });
       tunnelAgent.createConnection = () => stream as Socket;
@@ -1671,8 +1775,11 @@ describe('deployment API (e2e)', () => {
     ).toBe(2);
   });
 
-  async function createAgentContext(name: string) {
-    const application = await createApplication(name, false);
+  async function createAgentContext(
+    name: string,
+    healthCheck: Record<string, unknown> = {},
+  ) {
+    const application = await createApplication(name, false, healthCheck);
     const deployment = await createDeployment(
       application.application.id,
       'tester',
@@ -1762,6 +1869,7 @@ describe('deployment API (e2e)', () => {
         slug: name,
         source_path: `./fixtures/${name}`,
         image_repo: `registry.example/${name}`,
+        public_host: `${name}.apps.test`,
         requires_approval: requiresApproval,
         test_template: testTemplate,
         health_check: healthCheck,
@@ -1849,5 +1957,6 @@ describe('deployment API (e2e)', () => {
     delete process.env.GITHUB_APP_CLIENT_ID;
     delete process.env.GITHUB_APP_CLIENT_SECRET;
     delete process.env.ALLOWED_GITHUB_IDS;
+    delete process.env.HEALTH_MONITOR_ENABLED;
   });
 });

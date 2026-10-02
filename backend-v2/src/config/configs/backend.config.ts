@@ -3,6 +3,10 @@ import { tmpdir } from 'node:os';
 import { registerAs } from '@nestjs/config';
 import { z } from 'zod';
 
+const booleanString = z
+  .enum(['true', 'false'])
+  .transform((value) => value === 'true');
+
 export const environmentSchema = z.object({
   HOST: z.string().min(1).default('127.0.0.1'),
   PORT: z.coerce.number().int().min(1).max(65_535).default(8080),
@@ -48,6 +52,9 @@ export const environmentSchema = z.object({
     .int()
     .min(16_384)
     .default(1_048_576),
+  GATEWAY_IDLE_TIMEOUT_MS: z.coerce.number().int().min(1_000).default(60_000),
+  HEALTH_MONITOR_ENABLED: booleanString.default(true),
+  HEALTH_MONITOR_TICK_MS: z.coerce.number().int().min(250).default(1_000),
 });
 
 export const backendConfig = registerAs('backend', () => {
@@ -75,6 +82,9 @@ export const backendConfig = registerAs('backend', () => {
     tunnelOpenTimeoutMs: env.TUNNEL_OPEN_TIMEOUT_MS,
     tunnelMaxChannelsPerAgent: env.TUNNEL_MAX_CHANNELS_PER_AGENT,
     tunnelMaxFrameBytes: env.TUNNEL_MAX_FRAME_BYTES,
+    gatewayIdleTimeoutMs: env.GATEWAY_IDLE_TIMEOUT_MS,
+    healthMonitorEnabled: env.HEALTH_MONITOR_ENABLED,
+    healthMonitorTickMs: env.HEALTH_MONITOR_TICK_MS,
     npmCommand:
       process.env.NPM_COMMAND ||
       (process.platform === 'win32' ? 'npm.cmd' : 'npm'),

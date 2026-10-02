@@ -46,6 +46,7 @@ describe('GitHub management and Webhook (e2e)', () => {
       GITHUB_TOKEN_ENCRYPTION_KEY: randomBytes(32).toString('hex'),
       STAGE_MODE: 'skeleton',
       DEPLOY_MODE: 'off',
+      HEALTH_MONITOR_ENABLED: 'false',
     });
     const { AppModule } = await import('../src/app.module.js');
     const module = await Test.createTestingModule({
@@ -462,6 +463,7 @@ describe('GitHub management and Webhook (e2e)', () => {
       'GITHUB_TOKEN_ENCRYPTION_KEY',
       'STAGE_MODE',
       'DEPLOY_MODE',
+      'HEALTH_MONITOR_ENABLED',
     ])
       delete process.env[key];
   });

@@ -157,13 +157,40 @@ export class RoutingService {
         'Health expires_at must follow observed_at',
       );
     }
+    const healthConfig = this.applications.getView(
+      target.applicationId,
+    )!.healthCheck;
+    const current = this.repository.findHealth(target.id);
+    const consecutiveFailures =
+      input.status === 'unhealthy'
+        ? (current?.consecutiveFailures ?? 0) + 1
+        : 0;
+    const consecutiveSuccesses =
+      input.status === 'healthy' ? (current?.consecutiveSuccesses ?? 0) + 1 : 0;
+    let status: RoutingTargetHealth['status'] = 'unknown';
+    if (
+      input.status === 'healthy' &&
+      consecutiveSuccesses >= healthConfig.successThreshold
+    ) {
+      status = 'healthy';
+    } else if (
+      input.status === 'unhealthy' &&
+      consecutiveFailures >= healthConfig.failureThreshold
+    ) {
+      status = 'unhealthy';
+    } else if (input.status !== 'unknown' && current) {
+      status = current.status;
+    }
     return this.repository.saveHealth({
       targetId: target.id,
       deploymentId: target.deploymentId,
-      status: input.status,
+      status,
       observedAt,
       expiresAt,
       reason: input.reason ?? null,
+      failureKind: input.failureKind ?? null,
+      consecutiveFailures,
+      consecutiveSuccesses,
       updatedAt: new Date().toISOString(),
     });
   }
