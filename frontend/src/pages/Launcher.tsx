@@ -27,7 +27,15 @@ export function Launcher() {
   const paths = new Map(scenarioSummaries().map((s) => [s.id, s.defaultPath]));
   return (
     <div className="page launcher">
-      <PageTitle title={t('heroTitle')} sub={t('heroSub')} />
+      <PageTitle
+        title={t('heroTitle')}
+        sub={
+          <>
+            <span className="line">{t('heroSub1')}</span>
+            <span className="line">{t('heroSub2')}</span>
+          </>
+        }
+      />
       <div className="launch-grid">
         {CARDS.map((card) => (
           <a key={card.id} className="card launch-card" href={`${configToSearch({ mode: 'mock', scenario: card.id })}#${paths.get(card.id) ?? ''}`}>

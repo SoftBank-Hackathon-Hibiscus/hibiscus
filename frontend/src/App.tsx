@@ -1,5 +1,5 @@
 import { Flower2 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { configToSearch, createDataSource, readConfig } from './api';
 import { TokenBar } from './components/TokenBar';
 import { DemoBadge } from './components/ui';
@@ -28,6 +28,11 @@ function Shell() {
   const isReal = config.mode === 'real';
   const connection = useConnection(source, tokenVersion, isReal ? 15000 : 3_600_000);
   const onTokenChange = () => setTokenVersion((v) => v + 1);
+
+  // 한국어는 단어 중간에서 끊지 않고(keep-all), 일본어는 기본 줄바꿈. CSS 가 html[lang] 을 본다.
+  useEffect(() => {
+    document.documentElement.lang = lang;
+  }, [lang]);
 
   return (
     <div className="app">

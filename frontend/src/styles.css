@@ -1,12 +1,10 @@
 /* Hibiscus 데모 콘솔. 안개 낀 청회색 바탕 위의 유리 표면, 세이지 강조색 하나, 낮은 채도의 상태색.
    유리는 상단 바, 큰 섹션 카드, 모달에만. 안쪽 행·표·배지는 평면. */
 :root {
-  --bg-a: #e6edee;
-  --bg-b: #d9e3e4;
-  --bg-c: #e9ece6;
+  --bg-base: #f4f7f6;
   --card: #f1f5f4;
-  --glass: rgba(255, 255, 255, 0.66);
-  --glass-strong: rgba(255, 255, 255, 0.82);
+  --glass: rgba(255, 255, 255, 0.72);
+  --glass-strong: rgba(255, 255, 255, 0.88);
   --glass-line: rgba(255, 255, 255, 0.78);
   --glass-shadow: 0 10px 30px rgba(47, 62, 70, 0.1), 0 1px 2px rgba(47, 62, 70, 0.05);
   --line: rgba(47, 62, 70, 0.1);
@@ -46,46 +44,37 @@ body {
 }
 body {
   min-height: 100vh;
-  background: linear-gradient(160deg, var(--bg-a) 0%, var(--bg-b) 55%, var(--bg-c) 100%);
-  background-attachment: fixed;
-  position: relative;
+  background: var(--bg-base);
 }
-/* 움직이지 않는 흐린 빛 세 개 */
-body::before,
-body::after {
-  content: '';
-  position: fixed;
-  z-index: -1;
-  border-radius: 50%;
-  pointer-events: none;
-  filter: blur(70px);
-}
+/* 배경 레이어 하나를 viewport 전체에 고정. 거의 흰 바탕 위에 아주 흐린 glow 세 개, 스크롤해도 끊기지 않는다. */
 body::before {
-  width: 640px;
-  height: 640px;
-  left: -180px;
-  top: -200px;
-  background: radial-gradient(circle, rgba(167, 199, 231, 0.55), rgba(167, 199, 231, 0) 70%);
-}
-body::after {
-  width: 720px;
-  height: 720px;
-  right: -240px;
-  bottom: -260px;
-  background: radial-gradient(circle, rgba(94, 139, 126, 0.3), rgba(94, 139, 126, 0) 70%);
-}
-.app::before {
   content: '';
   position: fixed;
+  inset: 0;
   z-index: -1;
-  width: 520px;
-  height: 520px;
-  left: 45%;
-  top: 30%;
-  border-radius: 50%;
   pointer-events: none;
-  filter: blur(80px);
-  background: radial-gradient(circle, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0) 70%);
+  background:
+    radial-gradient(640px 640px at 8% 0%, rgba(167, 199, 231, 0.18), rgba(167, 199, 231, 0) 70%),
+    radial-gradient(720px 720px at 100% 100%, rgba(94, 139, 126, 0.14), rgba(94, 139, 126, 0) 70%),
+    radial-gradient(560px 560px at 55% 45%, rgba(167, 199, 231, 0.1), rgba(167, 199, 231, 0) 70%),
+    linear-gradient(180deg, #f6f8f7 0%, #f2f5f4 100%);
+}
+/* 한국어는 단어 중간에서 끊지 않는다. 일본어는 기본 줄바꿈. */
+html[lang='ko'] body {
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+h1,
+.page-sub,
+.conclusion,
+.launch-line,
+.launch-title,
+.stat-value,
+.banner-title {
+  text-wrap: balance;
+}
+.page-sub .line {
+  display: block;
 }
 a {
   color: var(--accent-ink);
@@ -295,7 +284,7 @@ code {
   box-shadow: 0 1px 3px rgba(47, 62, 70, 0.15);
 }
 main {
-  padding: 28px 32px 72px;
+  padding: 40px 32px 80px;
 }
 .page {
   max-width: 1160px;
@@ -800,30 +789,31 @@ main {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 50;
+  z-index: 100;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: rgba(47, 62, 70, 0.28);
-  -webkit-backdrop-filter: blur(6px);
-  backdrop-filter: blur(6px);
+  background: rgba(47, 62, 70, 0.22);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
 }
 .modal {
   --blur: 20px;
-  width: min(760px, 100%);
-  max-height: calc(100vh - 48px);
+  width: min(760px, calc(100vw - 48px));
+  max-height: min(78vh, 760px);
   display: flex;
   flex-direction: column;
   border-radius: var(--radius);
   background: var(--glass-strong);
 }
 .modal-head {
+  flex: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 18px 22px 12px;
+  padding: 18px 24px 12px;
   border-bottom: 1px solid var(--line);
 }
 .modal-title {
@@ -835,14 +825,26 @@ main {
   gap: 10px;
 }
 .modal-body {
-  overflow: auto;
-  padding: 16px 22px 26px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 20px 28px 30px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(47, 62, 70, 0.25) transparent;
+}
+.modal-body::-webkit-scrollbar {
+  width: 8px;
+}
+.modal-body::-webkit-scrollbar-thumb {
+  background: rgba(47, 62, 70, 0.25);
+  border-radius: 4px;
 }
 .md {
   max-width: 720px;
   margin: 0 auto;
   font-size: 15.5px;
-  line-height: 1.75;
+  line-height: 1.7;
 }
 .md h2 {
   font-size: 20px;
