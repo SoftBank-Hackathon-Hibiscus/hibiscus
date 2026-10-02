@@ -10,6 +10,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import ssh2 from 'ssh2';
 import type { BackendConfig } from '../config/configs/backend.config.js';
 import type { Agent } from '../database/schema.js';
+import { SshTunnelEndpointService } from '../ssh-tunnel/ssh-tunnel-endpoint.service.js';
 import { AgentRepository } from './agent.repository.js';
 import type { EnrollAgentSshDto } from './dto/agent-ssh.dto.js';
 
@@ -20,6 +21,7 @@ export class AgentSshService {
   constructor(
     private readonly repository: AgentRepository,
     private readonly config: ConfigService<BackendConfig, true>,
+    private readonly endpoint: SshTunnelEndpointService,
   ) {}
 
   issue() {
@@ -125,14 +127,7 @@ export class AgentSshService {
   }
 
   connection() {
-    return {
-      host: this.config.get('backend.sshHost', { infer: true }),
-      port: this.config.get('backend.sshPort', { infer: true }),
-      user: this.config.get('backend.sshUser', { infer: true }),
-      host_key_sha256: this.config.get('backend.sshHostKeySha256', {
-        infer: true,
-      }),
-    };
+    return this.endpoint.connection();
   }
 
   private hash(token: string): string {

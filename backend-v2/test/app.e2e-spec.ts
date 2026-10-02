@@ -32,12 +32,12 @@ import { AgentRepository } from '../src/agent/agent.repository.js';
 import { agentJobs, agents } from '../src/database/schema.js';
 import { eq } from 'drizzle-orm';
 import { createServer } from 'node:http';
-import { connect, createServer as createTcpServer } from 'node:net';
+import { connect } from 'node:net';
 import { RoutingService } from '../src/routing/routing.service.js';
 import { FailoverService } from '../src/health/failover.service.js';
 import ssh2 from 'ssh2';
 
-const { utils: sshUtils } = ssh2;
+const { Client: SshClient, utils: sshUtils } = ssh2;
 
 describe('deployment API (e2e)', () => {
   let app: INestApplication<App>;
@@ -57,8 +57,11 @@ describe('deployment API (e2e)', () => {
     process.env.GITHUB_APP_CLIENT_ID = 'Iv1.test-client';
     process.env.GITHUB_APP_CLIENT_SECRET = 'test-client-secret';
     process.env.HEALTH_MONITOR_ENABLED = 'false';
+    process.env.SSH_SERVER_ENABLED = 'true';
+    process.env.SSH_BIND_HOST = '127.0.0.1';
     process.env.SSH_HOST = '127.0.0.1';
-    process.env.SSH_HOST_KEY_SHA256 = `SHA256:${'A'.repeat(43)}`;
+    process.env.SSH_PORT = '0';
+    process.env.SSH_HOST_KEY_FILE = join(testDirectory, 'ssh-host-key');
     process.env.ALLOWED_GITHUB_IDS = [
       ...Array.from({ length: 32 }, (_, index) => String(index + 1)),
       '1000000',
@@ -1060,10 +1063,11 @@ describe('deployment API (e2e)', () => {
     );
     expect(registration.body.ssh).toEqual({
       host: '127.0.0.1',
-      port: 22,
+      port: expect.any(Number),
       user: 'hibiscus-agent',
-      host_key_sha256: `SHA256:${'A'.repeat(43)}`,
+      host_key_sha256: expect.stringMatching(/^SHA256:[A-Za-z0-9+/]{43}$/),
     });
+    expect(registration.body.ssh.port).toBeGreaterThan(0);
     expect(registration.body.agent).not.toHaveProperty('tokenHash');
 
     const keys = sshUtils.generateKeyPairSync('ed25519', {
@@ -1286,13 +1290,94 @@ describe('deployment API (e2e)', () => {
         reason: 'Gateway E2E target',
       })
       .expect(200);
-    const sshForward = createTcpServer((gatewaySocket) => {
-      const localSocket = connect(localAddress.port, '127.0.0.1');
-      gatewaySocket.pipe(localSocket).pipe(gatewaySocket);
+    const keys = sshUtils.generateKeyPairSync('ed25519', {
+      comment: `hibiscus:${context.agentId}`,
     });
-    await new Promise<void>((resolve) =>
-      sshForward.listen(target.body.gatewayPort, '127.0.0.1', resolve),
-    );
+    const enrollment = await request(app.getHttpServer())
+      .post('/agent/v1/ssh/enroll')
+      .set('Authorization', `Bearer ${context.sshEnrollmentToken}`)
+      .send({ public_key: keys.public })
+      .expect(200);
+    const rejectedClient = new SshClient();
+    rejectedClient.on('error', () => undefined);
+    const unknownKeys = sshUtils.generateKeyPairSync('ed25519');
+    await expect(
+      new Promise<void>((resolve, reject) => {
+        rejectedClient.once('ready', resolve);
+        rejectedClient.once('error', reject);
+        rejectedClient.connect({
+          host: enrollment.body.ssh.host,
+          port: enrollment.body.ssh.port,
+          username: enrollment.body.ssh.user,
+          privateKey: unknownKeys.private,
+        });
+      }),
+    ).rejects.toBeTruthy();
+    rejectedClient.destroy();
+
+    const sshClient = new SshClient();
+    sshClient.on('error', () => undefined);
+    sshClient.on('tcp connection', (details, accept, reject) => {
+      if (details.destPort !== target.body.gatewayPort) {
+        reject();
+        return;
+      }
+      const channel = accept();
+      const localSocket = connect(localAddress.port, '127.0.0.1');
+      channel.pipe(localSocket).pipe(channel);
+    });
+    await new Promise<void>((resolve, reject) => {
+      sshClient.once('ready', resolve);
+      sshClient.once('error', reject);
+      sshClient.connect({
+        host: enrollment.body.ssh.host,
+        port: enrollment.body.ssh.port,
+        username: enrollment.body.ssh.user,
+        privateKey: keys.private,
+        hostVerifier: (key) =>
+          `SHA256:${createHash('sha256')
+            .update(key)
+            .digest('base64')
+            .replace(/=+$/, '')}` === enrollment.body.ssh.host_key_sha256,
+      });
+    });
+    await expect(
+      new Promise<void>((resolve, reject) => {
+        sshClient.forwardIn('127.0.0.1', 65_534, (error) =>
+          error ? reject(error) : resolve(),
+        );
+      }),
+    ).rejects.toBeTruthy();
+    await expect(
+      new Promise<void>((resolve, reject) => {
+        sshClient.shell((error, stream) => {
+          stream?.destroy();
+          if (error) reject(error);
+          else resolve();
+        });
+      }),
+    ).rejects.toBeTruthy();
+    await expect(
+      new Promise<void>((resolve, reject) => {
+        sshClient.forwardOut(
+          '127.0.0.1',
+          12_345,
+          '127.0.0.1',
+          localAddress.port,
+          (error, stream) => {
+            stream?.destroy();
+            if (error) reject(error);
+            else resolve();
+          },
+        );
+      }),
+    ).rejects.toBeTruthy();
+    await new Promise<void>((resolve, reject) => {
+      sshClient.forwardIn('127.0.0.1', target.body.gatewayPort, (error) =>
+        error ? reject(error) : resolve(),
+      );
+    });
+    let sshClientClosed = false;
 
     try {
       await request(app.getHttpServer())
@@ -1314,14 +1399,39 @@ describe('deployment API (e2e)', () => {
           expect(result.body.connected).toBe(true);
           expect(result.body.active_forwards).toBe(1);
         });
-      await new Promise<void>((resolve) => sshForward.close(() => resolve()));
+      await new Promise<void>((resolve, reject) => {
+        sshClient.unforwardIn('127.0.0.1', target.body.gatewayPort, (error) =>
+          error ? reject(error) : resolve(),
+        );
+      });
+      await api()
+        .get(`/agents/${context.agentId}/tunnel`)
+        .expect(200)
+        .expect((result) => expect(result.body.connected).toBe(false));
+      await new Promise<void>((resolve, reject) => {
+        sshClient.forwardIn('127.0.0.1', target.body.gatewayPort, (error) =>
+          error ? reject(error) : resolve(),
+        );
+      });
+      const disconnected = new Promise<void>((resolve) =>
+        sshClient.once('close', resolve),
+      );
+      await request(app.getHttpServer())
+        .delete(`/agents/${context.agentId}/token`)
+        .set('Authorization', `Bearer ${defaultToken}`)
+        .expect(200);
+      await disconnected;
+      sshClientClosed = true;
       await api()
         .get(`/agents/${context.agentId}/tunnel`)
         .expect(200)
         .expect((result) => expect(result.body.connected).toBe(false));
     } finally {
-      if (sshForward.listening) {
-        await new Promise<void>((resolve) => sshForward.close(() => resolve()));
+      if (!sshClientClosed) {
+        await new Promise<void>((resolve) => {
+          sshClient.once('close', resolve);
+          sshClient.end();
+        });
       }
       await new Promise<void>((resolve) => localServer.close(() => resolve()));
     }
@@ -1769,6 +1879,7 @@ describe('deployment API (e2e)', () => {
       applicationId: application.application.id as string,
       agentId,
       token: registered.body.token as string,
+      sshEnrollmentToken: registered.body.ssh_enrollment_token as string,
       runId: deployment.id as string,
       digest: deployment.imageDigest as string,
       imageRepo: application.application.imageRepo as string,
@@ -1918,5 +2029,10 @@ describe('deployment API (e2e)', () => {
     delete process.env.GITHUB_APP_CLIENT_SECRET;
     delete process.env.ALLOWED_GITHUB_IDS;
     delete process.env.HEALTH_MONITOR_ENABLED;
+    delete process.env.SSH_SERVER_ENABLED;
+    delete process.env.SSH_BIND_HOST;
+    delete process.env.SSH_HOST;
+    delete process.env.SSH_PORT;
+    delete process.env.SSH_HOST_KEY_FILE;
   });
 });

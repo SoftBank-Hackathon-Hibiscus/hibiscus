@@ -47,8 +47,9 @@ describe('GitHub management and Webhook (e2e)', () => {
       STAGE_MODE: 'skeleton',
       DEPLOY_MODE: 'off',
       HEALTH_MONITOR_ENABLED: 'false',
+      SSH_SERVER_ENABLED: 'false',
       SSH_HOST: '127.0.0.1',
-      SSH_HOST_KEY_SHA256: `SHA256:${'A'.repeat(43)}`,
+      SSH_HOST_KEY_FILE: join(directory, 'ssh-host-key'),
     });
     const { AppModule } = await import('../src/app.module.js');
     const module = await Test.createTestingModule({
@@ -466,6 +467,9 @@ describe('GitHub management and Webhook (e2e)', () => {
       'STAGE_MODE',
       'DEPLOY_MODE',
       'HEALTH_MONITOR_ENABLED',
+      'SSH_SERVER_ENABLED',
+      'SSH_HOST',
+      'SSH_HOST_KEY_FILE',
     ])
       delete process.env[key];
   });

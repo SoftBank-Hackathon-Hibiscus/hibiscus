@@ -59,15 +59,16 @@ export const environmentSchema = z
       .int()
       .min(100)
       .default(3_000),
+    SSH_SERVER_ENABLED: booleanString.default(true),
+    SSH_BIND_HOST: z.string().min(1).default('0.0.0.0'),
     SSH_HOST: z.string().min(1),
-    SSH_PORT: z.coerce.number().int().min(1).max(65_535).default(22),
+    SSH_PORT: z.coerce.number().int().min(0).max(65_535).default(2_222),
     SSH_USER: z.string().min(1).default('hibiscus-agent'),
-    SSH_HOST_KEY_SHA256: z
+    SSH_HOST_KEY_FILE: z
       .string()
-      .regex(
-        /^SHA256:[A-Za-z0-9+/]{43}$/,
-        'SSH host key fingerprint is invalid',
-      ),
+      .min(1)
+      .default('./data/ssh/host_ed25519')
+      .transform((value) => resolve(value)),
     SSH_ENROLLMENT_TTL_SECONDS: z.coerce
       .number()
       .int()
@@ -105,10 +106,12 @@ export const backendConfig = registerAs('backend', () => {
     sshForwardPortMin: env.SSH_FORWARD_PORT_MIN,
     sshForwardPortMax: env.SSH_FORWARD_PORT_MAX,
     sshForwardConnectTimeoutMs: env.SSH_FORWARD_CONNECT_TIMEOUT_MS,
+    sshServerEnabled: env.SSH_SERVER_ENABLED,
+    sshBindHost: env.SSH_BIND_HOST,
     sshHost: env.SSH_HOST,
     sshPort: env.SSH_PORT,
     sshUser: env.SSH_USER,
-    sshHostKeySha256: env.SSH_HOST_KEY_SHA256,
+    sshHostKeyFile: env.SSH_HOST_KEY_FILE,
     sshEnrollmentTtlSeconds: env.SSH_ENROLLMENT_TTL_SECONDS,
     npmCommand:
       process.env.NPM_COMMAND ||

@@ -34,7 +34,7 @@ const environmentSchema = z.object({
   COSIGN_ALLOW_INSECURE_REGISTRY: booleanString.default(false),
   COSIGN_INSECURE_IGNORE_TLOG: booleanString.default(false),
   SSH_HOST: z.string().default(""),
-  SSH_PORT: z.coerce.number().int().min(1).max(65_535).default(22),
+  SSH_PORT: z.coerce.number().int().min(1).max(65_535).default(2_222),
   SSH_USER: z.string().default(""),
   SSH_IDENTITY_FILE: z.string().min(1).default("./data/ssh/agent_ed25519"),
   SSH_ENROLLMENT_TOKEN: z.preprocess(
