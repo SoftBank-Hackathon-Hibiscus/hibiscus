@@ -1,0 +1,90 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1790871649725,
+      "tag": "0000_initial",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1790873789927,
+      "tag": "0001_material_banshee",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1790875636070,
+      "tag": "0002_left_stellaris",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1790878225313,
+      "tag": "0003_boring_infant_terrible",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1790881272344,
+      "tag": "0004_ambitious_zodiak",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1790882453358,
+      "tag": "0005_safe_morbius",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1790917384433,
+      "tag": "0006_big_doctor_doom",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1790917733641,
+      "tag": "0007_mysterious_doctor_doom",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1790917946521,
+      "tag": "0008_magenta_lorna_dane",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1790918113296,
+      "tag": "0009_brainy_gabe_jones",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1790922812852,
+      "tag": "0010_chilly_patch",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1790930716401,
+      "tag": "0011_loving_romulus",
+      "breakpoints": true
+    }
+  ]
+}
