@@ -1,5 +1,6 @@
 """실행·정책 사이에서 다른 이미지, 미완료 결과, 바뀐 소스가 섞이지 않는지 검사한다."""
 import json
+import shutil
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -101,6 +102,64 @@ class BuiltPipelineTest(unittest.TestCase):
         with self.assertRaises(PremortemError):
             self.run_pipeline()
         self.assertEqual(self.docker.calls, [])
+
+    def assert_source_changed(self):
+        with self.assertRaises(PremortemError) as caught:
+            self.run_pipeline()
+        self.assertEqual(caught.exception.code, 'SOURCE_CHANGED')
+        self.assertEqual(load_json(self.out / 'execution_error.json')['error_code'], 'SOURCE_CHANGED')
+        for filename in ('parity_handoff.json', 'execution_manifest.json', 'verified.diagnostics.json'):
+            self.assertFalse((self.out / filename).exists(), filename)
+
+    def test_source_changed_after_pull_stops_before_container(self):
+        run = self.fixture.runner.run
+
+        def mutate_after_pull(args, timeout):
+            result = run(args, timeout)
+            if args[:2] == ['docker', 'pull']:
+                (self.manifest.parent / 'source/start.sh').write_text('changed after pull', encoding='utf-8')
+            return result
+
+        with patch.object(self.fixture.runner, 'run', side_effect=mutate_after_pull):
+            self.assert_source_changed()
+        self.assertEqual(self.docker.calls, [])
+
+    def test_copied_source_changed_stops_before_container(self):
+        copytree = shutil.copytree
+
+        def mutate_copy(source, destination, *args, **kwargs):
+            result = copytree(source, destination, *args, **kwargs)
+            (Path(destination) / 'start.sh').write_text('changed during copy', encoding='utf-8')
+            return result
+
+        with patch('premortem.built_test.shutil.copytree', side_effect=mutate_copy):
+            self.assert_source_changed()
+        self.assertEqual(self.docker.calls, [])
+
+    def test_source_changed_during_replay_cleans_up_without_handoff(self):
+        execute = self.execute
+
+        def mutate_during_replay(args, log):
+            code = execute(args, log)
+            (self.out / 'source/start.sh').write_text('changed during replay', encoding='utf-8')
+            return code
+
+        with patch.object(self, 'execute', side_effect=mutate_during_replay), \
+                patch.object(self.docker, 'cleanup', wraps=self.docker.cleanup) as cleanup:
+            self.assert_source_changed()
+        cleanup.assert_called_once()
+        self.assertEqual((self.out / 'result.json').read_bytes(), self.raw_bytes)
+
+    def test_excluded_file_added_during_replay_has_no_handoff(self):
+        execute = self.execute
+
+        def inject_during_replay(args, log):
+            code = execute(args, log)
+            (self.out / 'source/.env').write_text('injected=true', encoding='utf-8')
+            return code
+
+        with patch.object(self, 'execute', side_effect=inject_during_replay):
+            self.assert_source_changed()
 
     def test_tampered_local_image_label_is_rejected(self):
         self.fixture.runner.bad_label = True

@@ -23,6 +23,7 @@
  */
 import { z } from "zod";
 import {
+  BASELINE_CONDITION,
   CONDITION_NAMES,
   type ConditionFact,
   type ConditionMismatch,
@@ -39,8 +40,8 @@ import {
 
 export const PARITY_HANDOFF_FORMAT = "parity-handoff-v1-proposal";
 export const PARITY_DIAGNOSTICS_FORMAT = "parity-execution-v1";
-/** 기준 조건. match 는 이 조건의 결과다 */
-export const BASELINE_CONDITION = "none";
+/** 기준 조건. match 는 이 조건의 결과다 (schema.ts 와 공유. 스키마가 match 와 none 조건이 같은지 검사한다) */
+export { BASELINE_CONDITION };
 /** 정책 판단(R1 / R1b / R1c)에 필요한 조건 (schema.ts 의 CONDITION_NAMES). 이 세 개가 정확히 한 번씩 있어야 변환한다 */
 export const REQUIRED_CONDITIONS: readonly string[] = CONDITION_NAMES;
 /** facts.db = "sqlite" 가 되는 사실 종류와 facts.writes_local_file 에 들어가는 사실 종류 (schema.ts 와 공유. 스키마가 같은 기준으로 related_* 를 검증한다) */

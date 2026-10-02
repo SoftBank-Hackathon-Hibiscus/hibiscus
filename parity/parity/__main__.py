@@ -131,6 +131,11 @@ def cmd_verify(args):
 def cmd_summary(args):
     with open(args.result, encoding="utf-8") as f:
         result = json.load(f)
+    if getattr(args, "matrix", False):
+        from .summary_matrix import matrix_lines
+        for line in matrix_lines(result):
+            print(line)
+        return 0
     for line in summary_lines(result):
         print(line)
     for m in result["mismatches"]:
@@ -207,6 +212,8 @@ def build_parser():
 
     p = sub.add_parser("summary", help="결과 JSON 요약 출력")
     p.add_argument("result")
+    p.add_argument("--matrix", action="store_true",
+                   help="같은 요청의 none/restart/replace 결과를 표로 비교 (원본 판정 유지)")
     p.set_defaults(func=cmd_summary)
     return parser
 

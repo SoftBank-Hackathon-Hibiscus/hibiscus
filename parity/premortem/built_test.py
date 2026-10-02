@@ -14,7 +14,7 @@ from .docker_driver import DockerDriver
 from .errors import PremortemError
 from .gate import fault_positions
 from .jsonio import load_json, write_json_atomic
-from .snapshot import copy_file, sha256_file
+from .snapshot import copy_file, sha256_file, verify_source_tree
 
 
 def test_build(*, manifest_path, record, noise, app, out_dir, runner, run_id=None,
@@ -48,7 +48,8 @@ def test_build(*, manifest_path, record, noise, app, out_dir, runner, run_id=Non
             raise PremortemError('INPUT_INVALID', '세 조건을 시험하려면 요청이 두 건 이상 필요함')
         run_id = build['run_id']
         local_id = build['image']['local_image_id']
-        shutil.copytree(manifest_path.parent / 'source', out_dir / 'source')
+        shutil.copytree(manifest_path.parent / 'source', out_dir / 'source', symlinks=True)
+        verify_source_tree(out_dir / 'source', build['source']['tree_sha256'])
         copy_file(record, out_dir / 'baseline/session.jsonl', sha256_file(record))
         copy_file(noise, out_dir / 'baseline/noise.json', sha256_file(noise))
         write_json_atomic(out_dir / 'build_manifest.json', build)
@@ -88,6 +89,8 @@ def test_build(*, manifest_path, record, noise, app, out_dir, runner, run_id=Non
         if (diagnostics['local_image_id'] != local_id or diagnostics['baseline_unchanged'] is not True
                 or diagnostics['baseline_sha256'] != baseline.hashes()):
             raise PremortemError('BUILD_IDENTITY_INVALID', '실제 시험 이미지나 기준 파일이 입력과 다름')
+        # 재생 도중 복사본이 바뀌었으면 완료 진단과 정책 인계 파일을 내보내지 않는다.
+        verify_source_tree(out_dir / 'source', build['source']['tree_sha256'])
         verified = dict(diagnostics, registry_digest=build['image']['registry_digest'],
                         source_revision=build['source']['commit'], run_id=run_id,
                         target_binding_verified=True, result_sha256=sha256_file(out_dir / 'result.json'))
