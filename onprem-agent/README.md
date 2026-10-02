@@ -33,7 +33,6 @@ Result + heartbeat 전송
 - Node.js
 - Docker
 - cosign
-- OpenSSH client (`ssh`)
 
 ```bash
 npm install
@@ -66,22 +65,22 @@ node dist/main.js
 | `SSH_PORT`                        |                      `22` | Backend VM SSH 포트                     |
 | `SSH_USER`                        |                      필수 | Tunnel 전용 OS 사용자                   |
 | `SSH_IDENTITY_FILE`               |                      필수 | Agent 전용 SSH 개인 키 경로             |
-| `SSH_KNOWN_HOSTS_FILE`            |                      필수 | 고정한 VM host key 파일                 |
-| `SSH_COMMAND`                     |                     `ssh` | OpenSSH 실행 파일                       |
+| `SSH_HOST_KEY_SHA256`             |                      필수 | 고정한 VM SSH host key 지문             |
+| `SSH_READY_TIMEOUT_MS`            |                   `10000` | SSH 연결 준비 시간 초과                 |
 | `SSH_FORWARD_POLL_INTERVAL_MS`    |                    `2000` | 전달 목록 확인 간격                     |
 | `SSH_SERVER_ALIVE_INTERVAL_SECONDS` |                    `15` | SSH keepalive 간격                      |
 | `SSH_SERVER_ALIVE_COUNT_MAX`      |                       `3` | 연결 종료 전 keepalive 실패 횟수        |
 
-Agent는 전달 목록이 바뀌면 SSH 프로세스를 다시 시작합니다. OpenSSH 연결 하나가 여러 앱의 TCP 연결을 함께 처리합니다. `BatchMode`, `IdentitiesOnly`, `StrictHostKeyChecking`, `ExitOnForwardFailure`를 항상 사용합니다.
+SSH Tunnel은 `ssh2` Node 모듈을 사용합니다. 시스템 `ssh` 명령과 `child_process`를 사용하지 않습니다. SSH 연결 하나가 여러 앱의 TCP 연결을 함께 처리합니다. 전달 목록이 바뀌면 연결을 다시 구성합니다.
 
-VM의 공개키 등록과 `known_hosts` 준비 예:
+Agent 키 생성과 VM host key 지문 확인 예:
 
 ```bash
 ssh-keygen -t ed25519 -f ./keys/agent_ed25519
-ssh-keyscan -H backend.example.com > ./keys/known_hosts
+ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256
 ```
 
-개인 키는 Agent에만 둡니다. Backend VM에는 공개키만 등록합니다. Tunnel 전용 OS 사용자는 shell 작업에 사용하지 않습니다.
+첫 명령은 Agent에서 실행합니다. 두 번째 명령은 Backend VM에서 실행합니다. 출력의 `SHA256:...` 값을 `SSH_HOST_KEY_SHA256`에 넣습니다. 개인 키는 Agent에만 둡니다. Backend VM에는 공개키만 등록합니다. Tunnel 전용 OS 사용자는 shell 작업에 사용하지 않습니다.
 
 `candidate`는 다음 서명을 확인합니다.
 

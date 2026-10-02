@@ -1,16 +1,16 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { createHash, timingSafeEqual } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { connect as connectLocal } from "node:net";
+import { Client, type ConnectConfig } from "ssh2";
 import type { AgentConfig } from "./config.js";
 import type { StateStore } from "./state-store.js";
 import type { BackendAgentClient, SshForward } from "./types.js";
 
-type ProcessSpawner = (
-  command: string,
-  args: string[],
-  options: { stdio: ["ignore", "ignore", "pipe"] },
-) => ChildProcess;
+const remoteBindHost = "127.0.0.1";
+const localTargetHost = "127.0.0.1";
 
 export class SshTunnel {
-  private process?: ChildProcess;
+  private client?: Client;
   private signature?: string;
   private stopping = false;
 
@@ -18,7 +18,6 @@ export class SshTunnel {
     private readonly config: AgentConfig,
     private readonly backend: BackendAgentClient,
     private readonly state: StateStore,
-    private readonly spawnProcess: ProcessSpawner = spawn,
   ) {}
 
   async start(): Promise<void> {
@@ -36,7 +35,7 @@ export class SshTunnel {
 
   stop(): void {
     this.stopping = true;
-    this.stopProcess();
+    void this.disconnect();
   }
 
   private async reconcile(): Promise<void> {
@@ -47,52 +46,109 @@ export class SshTunnel {
     );
     const forwards = selectSshForwards(requested, allowedPorts);
     const signature = JSON.stringify(forwards);
-    if (this.process && signature === this.signature) return;
-    if (this.process) {
-      this.stopProcess();
-      return;
-    }
+    if (this.client && signature === this.signature) return;
+
+    await this.disconnect();
     if (forwards.length === 0) {
       this.signature = signature;
       return;
     }
-    this.startProcess(forwards, signature);
+    await this.connect(forwards, signature);
   }
 
-  private startProcess(forwards: SshForward[], signature: string): void {
-    const process = this.spawnProcess(
-      this.config.sshCommand,
-      sshArguments(this.config, forwards),
-      { stdio: ["ignore", "ignore", "pipe"] },
+  private async connect(
+    forwards: SshForward[],
+    signature: string,
+  ): Promise<void> {
+    const privateKey = await readFile(this.config.sshIdentityFile);
+    const client = new Client();
+    const forwardsByGatewayPort = new Map(
+      forwards.map((forward) => [forward.gateway_port, forward]),
     );
-    this.process = process;
-    this.signature = signature;
-    process.stderr?.on("data", (chunk: Buffer) => {
-      const message = chunk.toString("utf8").trim();
-      if (message) console.error(`[ssh-tunnel] ${message}`);
+    this.client = client;
+
+    client.on("tcp connection", (details, accept, reject) => {
+      const forward = forwardsByGatewayPort.get(details.destPort);
+      if (!forward) {
+        reject();
+        return;
+      }
+      const channel = accept();
+      const local = connectLocal(forward.local_port, localTargetHost);
+      channel.once("error", () => local.destroy());
+      local.once("error", () => channel.destroy());
+      channel.pipe(local).pipe(channel);
     });
-    process.once("error", (error) => {
+    client.on("error", (error) => {
       console.error(`[ssh-tunnel] ${error.message}`);
     });
-    process.once("close", (code, signal) => {
-      if (this.process !== process) return;
-      this.process = undefined;
+    client.on("close", () => {
+      if (this.client !== client) return;
+      this.client = undefined;
       this.signature = undefined;
-      if (!this.stopping) {
-        console.error(
-          `[ssh-tunnel] SSH exited (${signal ?? code ?? "unknown"})`,
-        );
+      if (!this.stopping) console.error("[ssh-tunnel] SSH connection closed");
+    });
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        client.once("error", reject);
+        client.once("ready", () => {
+          Promise.all(
+            forwards.map((forward) =>
+              this.bindForward(client, forward.gateway_port),
+            ),
+          ).then(() => resolve(), reject);
+        });
+        client.connect(sshConnectionConfig(this.config, privateKey));
+      });
+      if (this.client !== client) {
+        throw new Error("SSH connection closed before forwards were ready");
       }
+      this.signature = signature;
+    } catch (error) {
+      await this.disconnect();
+      throw error;
+    }
+  }
+
+  private bindForward(client: Client, gatewayPort: number): Promise<void> {
+    return new Promise((resolve, reject) => {
+      client.forwardIn(remoteBindHost, gatewayPort, (error, assignedPort) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        if (assignedPort !== gatewayPort) {
+          reject(new Error("SSH server assigned an unexpected forward port"));
+          return;
+        }
+        resolve();
+      });
     });
   }
 
-  private stopProcess(): void {
-    const process = this.process;
-    this.process = undefined;
+  private disconnect(): Promise<void> {
+    const client = this.client;
+    this.client = undefined;
     this.signature = undefined;
-    if (process && process.exitCode === null && process.signalCode === null) {
-      process.kill("SIGTERM");
-    }
+    if (!client) return Promise.resolve();
+
+    return new Promise((resolve) => {
+      let completed = false;
+      const finish = () => {
+        if (completed) return;
+        completed = true;
+        clearTimeout(timer);
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        client.destroy();
+        finish();
+      }, 1_000);
+      timer.unref();
+      client.once("close", finish);
+      client.end();
+    });
   }
 
   private wait(delay: number): Promise<void> {
@@ -100,37 +156,34 @@ export class SshTunnel {
   }
 }
 
-export function sshArguments(
+export function sshConnectionConfig(
   config: AgentConfig,
-  forwards: SshForward[],
-): string[] {
-  return [
-    "-N",
-    "-T",
-    "-p",
-    String(config.sshPort),
-    "-i",
-    config.sshIdentityFile,
-    "-o",
-    "BatchMode=yes",
-    "-o",
-    "IdentitiesOnly=yes",
-    "-o",
-    "StrictHostKeyChecking=yes",
-    "-o",
-    `UserKnownHostsFile=${config.sshKnownHostsFile}`,
-    "-o",
-    "ExitOnForwardFailure=yes",
-    "-o",
-    `ServerAliveInterval=${config.sshServerAliveIntervalSeconds}`,
-    "-o",
-    `ServerAliveCountMax=${config.sshServerAliveCountMax}`,
-    ...forwards.flatMap((forward) => [
-      "-R",
-      `127.0.0.1:${forward.gateway_port}:127.0.0.1:${forward.local_port}`,
-    ]),
-    `${config.sshUser}@${config.sshHost}`,
-  ];
+  privateKey: Buffer,
+): ConnectConfig {
+  return {
+    host: config.sshHost,
+    port: config.sshPort,
+    username: config.sshUser,
+    privateKey,
+    readyTimeout: config.sshReadyTimeoutMs,
+    keepaliveInterval: config.sshServerAliveIntervalSeconds * 1_000,
+    keepaliveCountMax: config.sshServerAliveCountMax,
+    hostVerifier: (key: Buffer) =>
+      matchesHostKey(key, config.sshHostKeySha256),
+  };
+}
+
+export function matchesHostKey(key: Buffer, expected: string): boolean {
+  const actual = `SHA256:${createHash("sha256")
+    .update(key)
+    .digest("base64")
+    .replace(/=+$/, "")}`;
+  const actualBytes = Buffer.from(actual);
+  const expectedBytes = Buffer.from(expected);
+  return (
+    actualBytes.length === expectedBytes.length &&
+    timingSafeEqual(actualBytes, expectedBytes)
+  );
 }
 
 export function selectSshForwards(

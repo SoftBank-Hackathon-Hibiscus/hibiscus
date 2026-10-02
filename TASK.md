@@ -49,7 +49,7 @@ API 전송 계약과 예시는 `backend-v2/README.md`의 `Agent API 계약 v1`�
 - [x] VM Backend가 앱별 loopback 전달 포트를 할당한다.
 - [x] Agent token으로 SSH 전달 목록을 조회한다.
 - [x] Agent가 VM으로 outbound 연결하게 한다.
-- [x] Agent가 OpenSSH 프로세스 하나로 여러 전달 규칙을 관리한다.
+- [x] Agent가 `ssh2` Node 모듈 연결 하나로 여러 전달 규칙을 관리한다.
 - [x] Gateway 요청과 Agent 응답을 중계한다.
 - [x] 연결 종료와 요청 시간 초과를 처리한다.
 - [x] Agent 자동 재연결을 만든다.

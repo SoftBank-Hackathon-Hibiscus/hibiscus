@@ -10,7 +10,7 @@ const requiredEnvironment = {
   SSH_HOST: "backend.example.com",
   SSH_USER: "hibiscus-agent",
   SSH_IDENTITY_FILE: "./agent_ed25519",
-  SSH_KNOWN_HOSTS_FILE: "./known_hosts",
+  SSH_HOST_KEY_SHA256: `SHA256:${"A".repeat(43)}`,
 };
 
 void test("parses explicit false security options as false", () => {
@@ -40,6 +40,15 @@ void test("rejects ambiguous boolean values", () => {
     loadConfig({
       ...requiredEnvironment,
       COSIGN_ALLOW_INSECURE_REGISTRY: "1",
+    }),
+  );
+});
+
+void test("rejects an invalid SSH host key fingerprint", () => {
+  assert.throws(() =>
+    loadConfig({
+      ...requiredEnvironment,
+      SSH_HOST_KEY_SHA256: "replace-me",
     }),
   );
 });

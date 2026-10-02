@@ -37,8 +37,10 @@ const environmentSchema = z.object({
   SSH_PORT: z.coerce.number().int().min(1).max(65_535).default(22),
   SSH_USER: z.string().min(1),
   SSH_IDENTITY_FILE: z.string().min(1),
-  SSH_KNOWN_HOSTS_FILE: z.string().min(1),
-  SSH_COMMAND: z.string().min(1).default("ssh"),
+  SSH_HOST_KEY_SHA256: z
+    .string()
+    .regex(/^SHA256:[A-Za-z0-9+/]{43}$/, "SSH host key fingerprint is invalid"),
+  SSH_READY_TIMEOUT_MS: z.coerce.number().int().min(1_000).default(10_000),
   SSH_FORWARD_POLL_INTERVAL_MS: z.coerce.number().int().min(250).default(2_000),
   SSH_SERVER_ALIVE_INTERVAL_SECONDS: z.coerce.number().int().min(1).default(15),
   SSH_SERVER_ALIVE_COUNT_MAX: z.coerce.number().int().min(1).default(3),
@@ -63,8 +65,8 @@ export interface AgentConfig {
   sshPort: number;
   sshUser: string;
   sshIdentityFile: string;
-  sshKnownHostsFile: string;
-  sshCommand: string;
+  sshHostKeySha256: string;
+  sshReadyTimeoutMs: number;
   sshForwardPollIntervalMs: number;
   sshServerAliveIntervalSeconds: number;
   sshServerAliveCountMax: number;
@@ -97,8 +99,8 @@ export function loadConfig(
     sshPort: env.SSH_PORT,
     sshUser: env.SSH_USER,
     sshIdentityFile: resolve(env.SSH_IDENTITY_FILE),
-    sshKnownHostsFile: resolve(env.SSH_KNOWN_HOSTS_FILE),
-    sshCommand: env.SSH_COMMAND,
+    sshHostKeySha256: env.SSH_HOST_KEY_SHA256,
+    sshReadyTimeoutMs: env.SSH_READY_TIMEOUT_MS,
     sshForwardPollIntervalMs: env.SSH_FORWARD_POLL_INTERVAL_MS,
     sshServerAliveIntervalSeconds: env.SSH_SERVER_ALIVE_INTERVAL_SECONDS,
     sshServerAliveCountMax: env.SSH_SERVER_ALIVE_COUNT_MAX,

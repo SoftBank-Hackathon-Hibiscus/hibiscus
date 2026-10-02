@@ -19,7 +19,7 @@ Nest CLI로 생성한 하이브리드 배포 백엔드 재구현 초안입니다
 - Application Host 기반 Reverse Proxy와 개발용 slug 경로
 - On-Prem SSH Tunnel·Cloud Run 요청 전달과 스트리밍
 - Application별 임계값을 사용하는 Health Monitor와 On-Prem → Cloud Run 자동 Failover
-- Agent가 OpenSSH로 만드는 outbound SSH Reverse Tunnel
+- Agent가 `ssh2` Node 모듈로 만드는 outbound SSH Reverse Tunnel
 - 앱별 VM loopback 전달 포트 할당과 연결 상태 확인
 - SQLite 작업함을 확인하는 배포 Worker
 - `test → policy → sign → deploy` 단계 실행과 시도별 기록
@@ -301,7 +301,7 @@ Gateway 진입 방법은 두 개입니다.
 
 Gateway는 요청과 응답을 스트리밍합니다. Hop-by-hop 헤더는 전달하지 않습니다. 쓰기 요청도 자동 재전송하지 않습니다. `GATEWAY_IDLE_TIMEOUT_MS` 동안 데이터가 없으면 요청을 종료합니다.
 
-Agent는 Backend API에서 전달 목록을 폴링합니다. 그 뒤 OpenSSH 연결 하나에 여러 `-R` 전달 규칙을 설정합니다.
+Agent는 Backend API에서 전달 목록을 폴링합니다. 그 뒤 `ssh2` 연결 하나에 여러 remote forward를 설정합니다.
 
 ```text
 Gateway request

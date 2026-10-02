@@ -1,23 +1,43 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 import type { AgentConfig } from "../config.js";
-import { selectSshForwards, sshArguments } from "../ssh-tunnel.js";
+import {
+  matchesHostKey,
+  selectSshForwards,
+  sshConnectionConfig,
+} from "../ssh-tunnel.js";
 
-void test("creates one restricted SSH connection with multiple reverse forwards", () => {
+void test("selects multiple managed reverse forwards", () => {
   const forwards = [
     { target_id: "target-b", gateway_port: 20002, local_port: 32769 },
     { target_id: "target-a", gateway_port: 20001, local_port: 32768 },
   ];
   const selected = selectSshForwards(forwards, new Set([32768, 32769]));
-  const args = sshArguments(config(), selected);
 
-  assert.deepEqual(
-    args.filter((argument) => argument.startsWith("127.0.0.1:")),
-    ["127.0.0.1:20001:127.0.0.1:32768", "127.0.0.1:20002:127.0.0.1:32769"],
-  );
-  assert.ok(args.includes("StrictHostKeyChecking=yes"));
-  assert.ok(args.includes("ExitOnForwardFailure=yes"));
-  assert.equal(args.at(-1), "hibiscus-agent@gateway.example.com");
+  assert.deepEqual(selected, [forwards[1], forwards[0]]);
+});
+
+void test("builds an ssh2 connection with host key pinning", () => {
+  const privateKey = Buffer.from("private-key");
+  const connection = sshConnectionConfig(config(), privateKey);
+
+  assert.equal(connection.host, "gateway.example.com");
+  assert.equal(connection.username, "hibiscus-agent");
+  assert.equal(connection.privateKey, privateKey);
+  assert.equal(connection.readyTimeout, 10_000);
+  assert.equal(connection.keepaliveInterval, 15_000);
+});
+
+void test("accepts only the configured SSH host key", () => {
+  const key = Buffer.from("server-host-key");
+  const fingerprint = `SHA256:${createHash("sha256")
+    .update(key)
+    .digest("base64")
+    .replace(/=+$/, "")}`;
+
+  assert.equal(matchesHostKey(key, fingerprint), true);
+  assert.equal(matchesHostKey(Buffer.from("other-key"), fingerprint), false);
 });
 
 void test("rejects forwards to ports not owned by managed containers", () => {
@@ -55,8 +75,8 @@ function config(): AgentConfig {
     sshPort: 22,
     sshUser: "hibiscus-agent",
     sshIdentityFile: "/keys/agent_ed25519",
-    sshKnownHostsFile: "/keys/known_hosts",
-    sshCommand: "ssh",
+    sshHostKeySha256: `SHA256:${"A".repeat(43)}`,
+    sshReadyTimeoutMs: 10_000,
     sshForwardPollIntervalMs: 2_000,
     sshServerAliveIntervalSeconds: 15,
     sshServerAliveCountMax: 3,
