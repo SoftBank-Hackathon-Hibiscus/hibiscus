@@ -5,6 +5,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
+import { ConfigService } from '@nestjs/config';
+import type { BackendConfig } from '../config/configs/backend.config.js';
 import type { Application, HealthCheckConfig } from '../database/schema.js';
 import { ApplicationRepository } from './application.repository.js';
 import type {
@@ -14,11 +16,14 @@ import type {
 
 @Injectable()
 export class ApplicationService {
-  constructor(private readonly repository: ApplicationRepository) {}
+  constructor(
+    private readonly repository: ApplicationRepository,
+    private readonly config: ConfigService<BackendConfig, true>,
+  ) {}
 
   create(input: CreateApplicationDto) {
-    const publicHost = input.public_host?.toLowerCase() ?? null;
-    if (publicHost && this.repository.findByPublicHost(publicHost)) {
+    const publicHost = `${input.slug}.${this.config.get('backend.gatewayBaseDomain', { infer: true })}`;
+    if (this.repository.findByPublicHost(publicHost)) {
       throw new ConflictException('Application public host already exists');
     }
     const timestamp = new Date().toISOString();

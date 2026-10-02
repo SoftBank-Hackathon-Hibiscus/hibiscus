@@ -40,6 +40,15 @@ export const environmentSchema = z
       .default(120_000),
     AGENT_ACTION_LEASE_MS: z.coerce.number().int().min(1_000).default(30_000),
     GATEWAY_IDLE_TIMEOUT_MS: z.coerce.number().int().min(1_000).default(60_000),
+    GATEWAY_BASE_DOMAIN: z
+      .string()
+      .trim()
+      .toLowerCase()
+      .regex(
+        /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/,
+        'GATEWAY_BASE_DOMAIN must be a valid hostname',
+      )
+      .default('lth.so'),
     HEALTH_MONITOR_ENABLED: booleanString.default(true),
     HEALTH_MONITOR_TICK_MS: z.coerce.number().int().min(250).default(1_000),
     SSH_FORWARD_PORT_MIN: z.coerce
@@ -101,6 +110,7 @@ export const backendConfig = registerAs('backend', () => {
     agentCandidateLeaseMs: env.AGENT_CANDIDATE_LEASE_MS,
     agentActionLeaseMs: env.AGENT_ACTION_LEASE_MS,
     gatewayIdleTimeoutMs: env.GATEWAY_IDLE_TIMEOUT_MS,
+    gatewayBaseDomain: env.GATEWAY_BASE_DOMAIN,
     healthMonitorEnabled: env.HEALTH_MONITOR_ENABLED,
     healthMonitorTickMs: env.HEALTH_MONITOR_TICK_MS,
     sshForwardPortMin: env.SSH_FORWARD_PORT_MIN,

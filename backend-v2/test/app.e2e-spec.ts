@@ -57,6 +57,7 @@ describe('deployment API (e2e)', () => {
     process.env.GITHUB_APP_CLIENT_ID = 'Iv1.test-client';
     process.env.GITHUB_APP_CLIENT_SECRET = 'test-client-secret';
     process.env.HEALTH_MONITOR_ENABLED = 'false';
+    process.env.GATEWAY_BASE_DOMAIN = 'apps.test';
     process.env.SSH_SERVER_ENABLED = 'true';
     process.env.SSH_BIND_HOST = '127.0.0.1';
     process.env.SSH_HOST = '127.0.0.1';
@@ -500,6 +501,7 @@ describe('deployment API (e2e)', () => {
       failureThreshold: 5,
     });
     expect(application.application.containerPort).toBe(8080);
+    expect(application.application.publicHost).toBe('health-config.apps.test');
 
     const response = await api()
       .patch(`/applications/${application.application.id}/health-check`)
@@ -1390,8 +1392,7 @@ describe('deployment API (e2e)', () => {
         .expect('POST /echo?value=gateway gateway');
       await request(app.getHttpServer())
         .get('/_gateway/tunnel-http/dev-path')
-        .expect(200)
-        .expect('GET /dev-path ');
+        .expect(404);
       await api()
         .get(`/agents/${context.agentId}/tunnel`)
         .expect(200)
@@ -1940,7 +1941,6 @@ describe('deployment API (e2e)', () => {
         slug: name,
         source_path: `./fixtures/${name}`,
         image_repo: `registry.example/${name}`,
-        public_host: `${name}.apps.test`,
         requires_approval: requiresApproval,
         test_template: testTemplate,
         health_check: healthCheck,
@@ -2029,6 +2029,7 @@ describe('deployment API (e2e)', () => {
     delete process.env.GITHUB_APP_CLIENT_SECRET;
     delete process.env.ALLOWED_GITHUB_IDS;
     delete process.env.HEALTH_MONITOR_ENABLED;
+    delete process.env.GATEWAY_BASE_DOMAIN;
     delete process.env.SSH_SERVER_ENABLED;
     delete process.env.SSH_BIND_HOST;
     delete process.env.SSH_HOST;
