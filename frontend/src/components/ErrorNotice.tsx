@@ -1,19 +1,21 @@
 import { ApiError } from '../api/client';
+import { translate, useLang, type Lang } from '../lib/i18n';
 import { Notice } from './ui';
 
-export function describeError(error: unknown): { title: string; detail?: string; unauthorized: boolean } {
+export function describeError(error: unknown, lang: Lang = 'ko'): { title: string; detail?: string; unauthorized: boolean } {
   if (error instanceof ApiError) {
-    if (error.isUnauthorized) return { title: '토큰이 만료되었습니다. 새 토큰을 입력하세요', detail: error.message, unauthorized: true };
-    if (error.status === 0) return { title: '백엔드에 연결할 수 없습니다', detail: error.message, unauthorized: false };
-    return { title: `요청 실패 (${error.status})`, detail: error.message, unauthorized: false };
+    if (error.isUnauthorized) return { title: translate(lang, 'tokenExpired'), detail: error.message, unauthorized: true };
+    if (error.status === 0) return { title: translate(lang, 'backendUnreachable'), detail: error.message, unauthorized: false };
+    return { title: `${translate(lang, 'requestFailed')} (${error.status})`, detail: error.message, unauthorized: false };
   }
-  if (error instanceof Error) return { title: '오류', detail: error.message, unauthorized: false };
-  return { title: '오류', detail: String(error), unauthorized: false };
+  if (error instanceof Error) return { title: translate(lang, 'error'), detail: error.message, unauthorized: false };
+  return { title: translate(lang, 'error'), detail: String(error), unauthorized: false };
 }
 
 export function ErrorNotice({ error }: { error: unknown }) {
+  const { lang } = useLang();
   if (!error) return null;
-  const { title, detail, unauthorized } = describeError(error);
+  const { title, detail, unauthorized } = describeError(error, lang);
   return (
     <Notice tone={unauthorized ? 'warning' : 'danger'} title={title}>
       {detail && <span className="mono small">{detail}</span>}

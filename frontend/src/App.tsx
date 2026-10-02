@@ -1,9 +1,10 @@
+import { Flower2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { configToSearch, createDataSource, readConfig } from './api';
 import { TokenBar } from './components/TokenBar';
 import { DemoBadge } from './components/ui';
 import { useConnection, type ConnectionState } from './hooks/useConnection';
-import { scenarioSummaries } from './mocks';
+import { LangProvider, useLang } from './lib/i18n';
 import { hrefFor, useHashRoute } from './lib/router';
 import { ApplicationDetail } from './pages/ApplicationDetail';
 import { Connect } from './pages/Connect';
@@ -11,39 +12,47 @@ import { DeploymentDetail } from './pages/DeploymentDetail';
 import { Launcher } from './pages/Launcher';
 
 export function App() {
+  return (
+    <LangProvider>
+      <Shell />
+    </LangProvider>
+  );
+}
+
+function Shell() {
+  const { lang, setLang, t } = useLang();
   const config = useMemo(() => readConfig(), []);
   const [tokenVersion, setTokenVersion] = useState(0);
   const source = useMemo(() => createDataSource(config), [config]);
   const route = useHashRoute();
-  const scenarios = useMemo(() => scenarioSummaries(), []);
   const isReal = config.mode === 'real';
   const connection = useConnection(source, tokenVersion, isReal ? 15000 : 3_600_000);
   const onTokenChange = () => setTokenVersion((v) => v + 1);
 
   return (
-    <div className={`app ${isReal ? '' : 'app-demo'}`}>
+    <div className="app">
       <nav className="topbar">
         <div className="topbar-left">
-          <a className="brand" href={hrefFor('')}>Hibiscus</a>
+          <a className="brand" href={hrefFor('')}>
+            <span className="brand-mark" aria-hidden>
+              <Flower2 size={18} />
+            </span>
+            Hibiscus
+          </a>
           {!isReal && <DemoBadge />}
           {isReal && <ConnectionPill state={connection.state} />}
         </div>
         <div className="topbar-right">
-          {!isReal && (
-            <div className="scenarios">
-              {scenarios.map((s) => (
-                <a key={s.id} className={`scenario ${s.id === config.scenario && route.page !== 'none' ? 'scenario-current' : ''}`} href={`${configToSearch({ mode: 'mock', scenario: s.id })}#${s.defaultPath}`} title={s.description}>
-                  {s.title}
-                </a>
-              ))}
-            </div>
+          {isReal && route.page !== 'none' && <TokenBar onChange={onTokenChange} />}
+          {isReal ? (
+            <a className="topbar-link" href={`${configToSearch({ mode: 'mock', scenario: 1 })}#`}>{t('backToDemo')}</a>
+          ) : (
+            route.page !== 'none' && <a className="topbar-link" href={hrefFor('')}>{t('backToDemo')}</a>
           )}
-          {isReal && (
-            <>
-              {route.page !== 'none' && <TokenBar onChange={onTokenChange} />}
-              <a className="scenario" href={`${configToSearch({ mode: 'mock', scenario: 1 })}#`}>데모로 돌아가기</a>
-            </>
-          )}
+          <div className="lang-switch" role="group" aria-label="language">
+            <button type="button" className={lang === 'ko' ? 'lang-on' : ''} onClick={() => setLang('ko')}>KO</button>
+            <button type="button" className={lang === 'ja' ? 'lang-on' : ''} onClick={() => setLang('ja')}>JA</button>
+          </div>
         </div>
       </nav>
       <main>
@@ -57,25 +66,26 @@ export function App() {
 }
 
 function ConnectionPill({ state }: { state: ConnectionState }) {
+  const { t } = useLang();
   switch (state.level) {
     case 'checking':
-      return <span className="conn conn-muted">연결 확인 중</span>;
+      return <span className="conn conn-muted">{t('connChecking')}</span>;
     case 'down':
       return (
         <span className="conn conn-danger" title={state.detail}>
-          <span className="conn-dot" /> 백엔드 연결 안 됨
+          <span className="conn-dot" /> {t('connDown')}
         </span>
       );
     case 'login':
       return (
         <span className="conn conn-warning" title={state.detail}>
-          <span className="conn-dot" /> 로그인 필요
+          <span className="conn-dot" /> {t('connLogin')}
         </span>
       );
     case 'ok':
       return (
         <span className="conn conn-success">
-          <span className="conn-dot" /> 실제 백엔드 연결됨, @{state.user.login}
+          <span className="conn-dot" /> {t('connOk')} @{state.user.login}
         </span>
       );
   }

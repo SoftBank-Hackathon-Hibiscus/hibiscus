@@ -15,7 +15,7 @@ npm install
 npm run dev
 ```
 
-`http://127.0.0.1:5173` 이 열린다. 루트는 **Demo Launcher** (mock 시나리오 4개를 고르는 시작판)이고, 상단에 DEMO DATA 배지가 항상 보인다.
+`http://127.0.0.1:5173` 이 열린다. 루트는 **Demo Launcher** (mock 시나리오 4개를 고르는 시작판)이고, 상단에 DEMO DATA 배지가 항상 보인다. 상단 바의 KO / JA 로 화면 라벨과 정책 문구(reason_i18n, hint_i18n, explain.ja)를 한 언어로 바꾼다. 아이콘은 lucide-react 하나만 쓴다.
 
 | 명령 | 내용 |
 |---|---|
