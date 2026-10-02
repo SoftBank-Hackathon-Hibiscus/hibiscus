@@ -1398,6 +1398,23 @@ main {
   gap: 4px;
 }
 
+/* ---- mock 전용 발표 조작 ---- */
+.demo-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.btn-danger {
+  background: var(--danger-soft);
+  border-color: rgba(232, 174, 183, 0.9);
+  color: var(--danger);
+  font-weight: 700;
+}
+.btn-danger:hover {
+  background: rgba(232, 174, 183, 0.6);
+}
+
 /* ---- application list ---- */
 .app-rows {
   list-style: none;

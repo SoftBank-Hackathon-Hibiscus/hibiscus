@@ -146,6 +146,25 @@ export function ApplicationDetail({ id, source }: { id: string; source: DataSour
           <span className="demo-badge demo-badge-small">DEMO DATA</span> {mockCaption}
         </div>
       )}
+      {source instanceof MockDataSource && source.actions().length > 0 && (
+        <div className="demo-controls" aria-label={t('demoControls')}>
+          <span className="small muted">{t('demoControls')}</span>
+          {source.actions().map((action) => (
+            <button
+              key={action.id}
+              type="button"
+              className={`btn btn-small ${action.id === 'fail-onprem' ? 'btn-danger' : ''}`}
+              disabled={!action.enabled()}
+              onClick={() => {
+                source.runAction(action.id);
+                poll.refresh();
+              }}
+            >
+              {t(action.labelKey)}
+            </button>
+          ))}
+        </div>
+      )}
 
       <section className="stats">
         <StatCard icon={Waypoints} tone={headlineTone === 'muted' ? 'accent' : headlineTone} label={t('trafficNow')} value={route ? targetLabel(route.target.kind) : t('noRoute')} />
@@ -259,8 +278,8 @@ function TargetCard({ kind, snap, agents }: { kind: TargetKind; snap: Snapshot; 
         <>
           <div className="target-status">
             <span className={`status-big tone-${tone}`}>{displayStatus ? t(HEALTH_KEY[displayStatus] ?? 'unknown') : t('noHealth')}</span>
-            {health?.failureKind && displayStatus !== 'healthy' && <Pill tone="danger">{health.failureKind === 'network' ? t('networkError') : t('appError')}</Pill>}
-            {health && <span className="muted small">{displayStatus === 'healthy' ? t('consecutiveOk', { n: health.consecutiveSuccesses }) : t('consecutiveFail', { n: health.consecutiveFailures })}</span>}
+            {health?.failureKind && health.consecutiveFailures > 0 && <Pill tone={displayStatus === 'healthy' ? 'warning' : 'danger'}>{health.failureKind === 'network' ? t('networkError') : t('appError')}</Pill>}
+            {health && <span className="muted small">{health.consecutiveFailures > 0 ? t('consecutiveFail', { n: health.consecutiveFailures }) : t('consecutiveOk', { n: health.consecutiveSuccesses })}</span>}
             {expired && <Pill tone="muted">{t('observationExpired')}</Pill>}
           </div>
           {kind === 'onprem' && agents.length > 0 && (
