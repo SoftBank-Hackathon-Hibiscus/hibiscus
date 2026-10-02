@@ -6,6 +6,7 @@ import type { AgentStatusResponse, ApplicationAgentSummary, ApplicationView, Dep
 import { ErrorNotice, describeError } from '../components/ErrorNotice';
 import { Empty, Hash, IconTile, Kv, MoreToggle, PageTitle, Pill, type Tone } from '../components/ui';
 import { usePolling } from '../hooks/usePolling';
+import { detectRouteChange, markOf, type RouteChange, type RouteMark } from '../lib/failover';
 import { fmtTime, relTime, targetLabel } from '../lib/format';
 import { useLang, type DictKey } from '../lib/i18n';
 import { deploymentPath, hrefFor } from '../lib/router';
@@ -29,12 +30,9 @@ interface Snapshot {
   fetchedAt: number;
 }
 
-interface RouteChange {
+interface SeenChange {
   at: number;
-  fromKind: TargetKind | null;
-  toKind: TargetKind;
-  fromRevision: number | null;
-  toRevision: number;
+  change: RouteChange;
 }
 
 const STATUS_TONE: Record<DeploymentStatus, Tone> = { queued: 'info', running: 'info', awaiting_approval: 'warning', blocked: 'danger', failed: 'danger', succeeded: 'success' };
@@ -93,19 +91,15 @@ export function ApplicationDetail({ id, source }: { id: string; source: DataSour
     [id, source],
   );
 
-  const [events, setEvents] = useState<RouteChange[]>([]);
-  const previousRoute = useRef<RouteSnapshot | null | undefined>(undefined);
+  // route 변화 감지는 lib/failover.ts 의 순수 함수. 첫 관측·같은 revision·route 사라짐은 변화로 치지 않는다.
+  const [events, setEvents] = useState<SeenChange[]>([]);
+  const previousRoute = useRef<RouteMark | null>(null);
   useEffect(() => {
     if (!poll.data) return;
-    const current = poll.data.route;
-    const previous = previousRoute.current;
-    if (previous !== undefined && current) {
-      const changed = !previous || previous.revision !== current.revision || previous.target.id !== current.target.id;
-      if (changed) {
-        setEvents((list) => [...list, { at: poll.data!.fetchedAt, fromKind: previous?.target.kind ?? null, toKind: current.target.kind, fromRevision: previous?.revision ?? null, toRevision: current.revision }]);
-      }
-    }
-    previousRoute.current = current;
+    const current = markOf(poll.data.route);
+    const change = detectRouteChange(previousRoute.current, current);
+    if (change) setEvents((list) => [...list, { at: poll.data!.fetchedAt, change }]);
+    if (current) previousRoute.current = current;
   }, [poll.data]);
 
   const snap = poll.data;
@@ -116,7 +110,7 @@ export function ApplicationDetail({ id, source }: { id: string; source: DataSour
   const h = snap.app.healthCheck;
   const route = snap.route;
   const latestEvent = events[events.length - 1];
-  const failedOver = Boolean(latestEvent && latestEvent.fromKind === 'onprem' && latestEvent.toKind === 'cloud_run');
+  const failedOver = Boolean(latestEvent?.change.failover);
   const onpremUnhealthy = snap.targets.some((x) => x.target.kind === 'onprem' && x.health?.status === 'unhealthy');
   const routeHealth = route ? (route.health && Date.parse(route.health.expiresAt) >= Date.now() ? route.health.status : 'unknown') : undefined;
   const mockCaption = source instanceof MockDataSource ? source.frameCaption() : null;
@@ -127,7 +121,7 @@ export function ApplicationDetail({ id, source }: { id: string; source: DataSour
 
   return (
     <div className="page">
-      {latestEvent && <RouteBanner event={latestEvent} count={events.length} />}
+      {latestEvent && <RouteBanner seen={latestEvent} count={events.length} />}
       {poll.error ? <ErrorNotice error={poll.error} /> : null}
       <PageTitle
         title={a.name}
@@ -178,7 +172,7 @@ export function ApplicationDetail({ id, source }: { id: string; source: DataSour
           <h2 className="card-title">{t('changesSeen')}</h2>
           <ul className="plain">
             {events.map((e, i) => (
-              <li key={e.at}>{t('bannerLine', { from: e.fromKind ? targetLabel(e.fromKind) : t('none'), to: targetLabel(e.toKind), time: fmtTime(new Date(e.at).toISOString()), n: i + 1 })}</li>
+              <li key={e.at}>{t('bannerLine', { from: targetLabel(e.change.from.kind), to: targetLabel(e.change.to.kind), time: fmtTime(new Date(e.at).toISOString()), n: i + 1 })}</li>
             ))}
           </ul>
         </section>
@@ -197,17 +191,17 @@ function StatCard({ icon, tone, label, value }: { icon: LucideIcon; tone: Tone |
   );
 }
 
-function RouteBanner({ event, count }: { event: RouteChange; count: number }) {
+function RouteBanner({ seen, count }: { seen: SeenChange; count: number }) {
   const { t } = useLang();
-  const isFailover = event.fromKind === 'onprem' && event.toKind === 'cloud_run';
+  const { change, at } = seen;
   return (
-    <div className={`banner banner-${isFailover ? 'warning' : 'info'}`} role="alert">
-      <IconTile icon={Shuffle} tone={isFailover ? 'warning' : 'info'} size={40} />
+    <div className={`banner banner-${change.failover ? 'warning' : 'info'}`} role="alert">
+      <IconTile icon={Shuffle} tone={change.failover ? 'warning' : 'info'} size={40} />
       <div>
-        <div className="banner-title">{isFailover ? t('failoverHappened') : t('routeChanged')}</div>
+        <div className="banner-title">{change.failover ? t('failoverHappened') : t('routeChanged')}</div>
         <div className="banner-body">
-          {t('bannerLine', { from: event.fromKind ? targetLabel(event.fromKind) : t('none'), to: targetLabel(event.toKind), time: fmtTime(new Date(event.at).toISOString()), n: count })}
-          {isFailover && ` ${t('noFailback')}`}
+          {t('bannerLine', { from: targetLabel(change.from.kind), to: targetLabel(change.to.kind), time: fmtTime(new Date(at).toISOString()), n: count })}
+          {change.failover && ` ${t('noFailback')}`}
         </div>
       </div>
     </div>

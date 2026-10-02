@@ -32,9 +32,16 @@ export function findArtifact(view: DeploymentView, name: string, stage?: StageEx
 
 export type Parsed<T> = { ok: true; value: T; artifact: DeploymentArtifact } | { ok: false; raw: string; artifact: DeploymentArtifact; error: string };
 
-/** JSON 산출물만 parse 한다. text/plain 이거나 parse 실패면 raw 를 돌려준다. */
+/**
+ * JSON 산출물만 parse 한다. text/plain 이거나 parse 실패면 raw 를 돌려준다.
+ * 서버가 `validationError` 를 남긴 산출물(run_id·digest 불일치 등)은 JSON 이 멀쩡해도 증거로 쓰지 않는다:
+ * ok:false 로 돌려주고 원문은 raw 로 남긴다 (세부 기술 정보에서만 보인다).
+ */
 export function parseJsonArtifact<T>(artifact: DeploymentArtifact | undefined): Parsed<T> | undefined {
   if (!artifact) return undefined;
+  if (artifact.validationError) {
+    return { ok: false, raw: artifact.content, artifact, error: artifact.validationError };
+  }
   if (artifact.mediaType !== 'application/json') {
     return { ok: false, raw: artifact.content, artifact, error: `${artifact.mediaType} 산출물은 parse 하지 않음` };
   }

@@ -70,16 +70,9 @@ export function Connect({ source, connection, onTokenChange, onRecheck }: { sour
           </div>
           {backendOk && !tokenOk && (
             <div className="check-body">
+              <p className="check-help">{t('loginHelp1', { url: '<backend>/auth/github' })}</p>
               <p className="check-help">
-                {lang === 'ja' ? (
-                  <>
-                    ブラウザで <code>/auth/github</code> を開き <code>authorization_url</code> へ移動、GitHub ログイン後のコールバック JSON にある <code>access_token</code> を下に貼り付けてください。既定の期限は15分です。
-                  </>
-                ) : (
-                  <>
-                    브라우저로 <code>/auth/github</code> 를 열어 <code>authorization_url</code> 로 이동하고, GitHub 로그인 뒤 콜백 JSON의 <code>access_token</code> 을 아래에 붙여넣으세요. 기본 만료는 15분입니다.
-                  </>
-                )}
+                {t('loginHelp2')}
                 {connection.level === 'login' && connection.tokenPresent && <span className="muted"> ({connection.detail})</span>}
               </p>
               <TokenBar onChange={onTokenChange} />
