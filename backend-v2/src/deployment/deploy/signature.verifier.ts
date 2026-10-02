@@ -10,6 +10,8 @@ export interface SignatureVerifierOptions {
   publicKey: string;
   cwd: string;
   timeoutMs: number;
+  /** signer --no-tlog 로 Rekor 없이 서명한 경우. 투명성 로그 확인만 건너뛰고 키·주석 확인은 그대로 한다 */
+  ignoreTlog?: boolean;
 }
 
 /**
@@ -46,6 +48,7 @@ export class SignatureVerifier implements SignatureVerifierPort {
         'verify',
         '--key',
         this.options.publicKey,
+        ...(this.options.ignoreTlog ? ['--insecure-ignore-tlog=true'] : []),
         '-a',
         `run_id=${sign.run_id}`,
         '-a',
@@ -63,6 +66,12 @@ export class SignatureVerifier implements SignatureVerifierPort {
         `Signature verification failed: ${lines.at(-1) ?? 'no output'}`,
       );
     }
-    return { imageRef, key: this.options.publicKey };
+    return {
+      imageRef,
+      key: this.options.publicKey,
+      tlog: this.options.ignoreTlog
+        ? ('ignored' as const)
+        : ('verified' as const),
+    };
   }
 }

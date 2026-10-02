@@ -49,7 +49,12 @@ export interface DeployResult {
   digest: string;
   image: string | null;
   decision: DeployDecision;
-  signature: { verified: boolean; ref: string; key: string } | null;
+  signature: {
+    verified: boolean;
+    ref: string;
+    key: string;
+    tlog?: 'verified' | 'ignored';
+  } | null;
   targets_planned: string[];
   failover_allowed: boolean | null;
   targets: DeployTargetStep[];
@@ -121,7 +126,7 @@ export interface SignatureVerifierPort {
   verify(
     sign: DeploymentSignResult,
     imageRepo: string,
-  ): Promise<{ imageRef: string; key: string }>;
+  ): Promise<{ imageRef: string; key: string; tlog?: 'verified' | 'ignored' }>;
 }
 
 export interface HealthCheckerPort {

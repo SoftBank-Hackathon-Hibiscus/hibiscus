@@ -70,10 +70,12 @@ export class DeployStage implements StageRunner {
     }
 
     const { deployment, application, paths } = context;
-    // 레지스트리 digest 가 아니면 서명할 수도, 배포할 수도 없다.
-    // sourceRevisionVerified 는 backend-v2 가 아직 항상 false 로 저장해서 여기서는 막지 않는다 (리뷰 코멘트 4번)
+    // 서명 단계와 같은 조건을 배포 직전에 한 번 더 확인한다 (서명 단계를 거치지 않은 경로 방지)
     if (deployment.digestSource !== 'registry') {
       return this.failed('Real deploy requires a registry image digest');
+    }
+    if (!deployment.sourceRevisionVerified) {
+      return this.failed('Real deploy requires a verified source revision');
     }
     const signPath = join(paths.sign, 'sign_result.json');
     if (!existsSync(signPath))
@@ -146,6 +148,7 @@ export class DeployStage implements StageRunner {
         publicKey,
         cwd: repoRoot,
         timeoutMs: deploy.scriptTimeoutMs,
+        ignoreTlog: deploy.cosignIgnoreTlog,
       }),
       health: new HttpHealthChecker(),
       routing: new RoutingAdapter(
