@@ -1,0 +1,95 @@
+{
+  "run_id": "7b2e4d9c-1f36-4a50-ad43-c3e20b15f403",
+  "app": "guestbook",
+  "digest": "sha256:616b99cd71e839fc4930d4f5659017ed801fbab0af74410f0046bf2175e8e5f7",
+  "source_revision": "9d41c7e2a0b85f36e1d24c7a98b03f5e6a1c2d40",
+  "decision": "block",
+  "targets": [],
+  "failover_allowed": false,
+  "requires": [
+    {
+      "id": "fix_restart_failure",
+      "hint": "재시작 후 상태·초기화 동작을 수정 (예: 시작할 때 데이터 삭제, 메모리에만 두는 세션)",
+      "hint_i18n": {
+        "ja": "再起動後の状態・初期化動作を修正（例：起動時のデータ削除、メモリのみのセッション）"
+      },
+      "rule_id": "R1b",
+      "allowed_targets": [
+        "onprem"
+      ]
+    },
+    {
+      "id": "managed_db",
+      "hint": "SQLite를 PostgreSQL로 전환",
+      "hint_i18n": {
+        "ja": "SQLiteをPostgreSQLへ移行"
+      },
+      "rule_id": "R5",
+      "allowed_targets": [
+        "onprem"
+      ]
+    },
+    {
+      "id": "object_storage",
+      "hint": "로컬 폴더에 쓰는 파일을 오브젝트 스토리지로 이전",
+      "hint_i18n": {
+        "ja": "ローカルフォルダに書き込むファイルをオブジェクトストレージへ移行"
+      },
+      "rule_id": "R6",
+      "allowed_targets": [
+        "onprem"
+      ]
+    }
+  ],
+  "rules": [
+    {
+      "id": "R1",
+      "result": "not_matched"
+    },
+    {
+      "id": "R1b",
+      "result": "matched",
+      "reason": "재시작 후 불일치 (14/20 일치)",
+      "reason_i18n": {
+        "ja": "再起動後に不一致（14/20一致）"
+      }
+    },
+    {
+      "id": "R1c",
+      "result": "not_matched"
+    },
+    {
+      "id": "R2",
+      "result": "not_matched"
+    },
+    {
+      "id": "R3",
+      "result": "not_matched"
+    },
+    {
+      "id": "R4",
+      "result": "not_matched"
+    },
+    {
+      "id": "R5",
+      "result": "matched_after_block",
+      "reason": "SQLite 사용 (sqlite): 관리형 DB로 전환하기 전까지 클라우드 배포 제외",
+      "reason_i18n": {
+        "ja": "SQLiteを使用（sqlite）：マネージドDBへ移行するまでクラウドデプロイを除外"
+      }
+    },
+    {
+      "id": "R6",
+      "result": "matched_after_block",
+      "reason": "로컬 파일 쓰기: /app/uploads",
+      "reason_i18n": {
+        "ja": "ローカルファイルへの書き込み：/app/uploads"
+      }
+    },
+    {
+      "id": "R7",
+      "result": "not_matched"
+    }
+  ],
+  "plan_hash": "c4e8a1f0b7d2963e5a1c8f4b0d7e2a96c3f185b0e4d7a2c9f6b13e8d0a5c7f42"
+}

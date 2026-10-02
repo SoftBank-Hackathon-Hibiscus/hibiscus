@@ -1,0 +1,140 @@
+{
+  "run_id": "7b2e4d9c-1f36-4a50-ad43-c3e20b15f403",
+  "app": "guestbook",
+  "digest": "sha256:616b99cd71e839fc4930d4f5659017ed801fbab0af74410f0046bf2175e8e5f7",
+  "source_revision": "9d41c7e2a0b85f36e1d24c7a98b03f5e6a1c2d40",
+  "passed": false,
+  "match": {
+    "total": 20,
+    "matched": 20
+  },
+  "failures": [],
+  "facts": {
+    "db": "sqlite",
+    "writes_local_file": [
+      "/app/uploads"
+    ],
+    "migration": {
+      "destructive": false,
+      "backward_compatible": true,
+      "findings": []
+    },
+    "conditions": [
+      {
+        "name": "none",
+        "total": 20,
+        "matched": 20,
+        "failed": false,
+        "mismatches": []
+      },
+      {
+        "name": "restart",
+        "total": 20,
+        "matched": 14,
+        "failed": true,
+        "mismatches": [
+          {
+            "index": 11,
+            "request": "GET /me",
+            "summary": "상태코드 예상 200, 실제 401"
+          },
+          {
+            "index": 12,
+            "request": "GET /posts/1",
+            "summary": "응답 본문 불일치 (1개 필드)"
+          },
+          {
+            "index": 13,
+            "request": "GET /posts",
+            "summary": "응답 본문 불일치 (10개 필드)"
+          },
+          {
+            "index": 14,
+            "request": "GET /uploads/cat.png",
+            "summary": "상태코드 예상 200, 실제 404"
+          },
+          {
+            "index": 17,
+            "request": "POST /posts",
+            "summary": "상태코드 예상 200, 실제 401"
+          },
+          {
+            "index": 20,
+            "request": "GET /posts",
+            "summary": "응답 본문 불일치 (10개 필드)"
+          }
+        ]
+      },
+      {
+        "name": "replace",
+        "total": 20,
+        "matched": 13,
+        "failed": true,
+        "mismatches": [
+          {
+            "index": 11,
+            "request": "GET /me",
+            "summary": "상태코드 예상 200, 실제 401"
+          },
+          {
+            "index": 12,
+            "request": "GET /posts/1",
+            "summary": "응답 본문 불일치 (1개 필드)",
+            "related_fact": "/app/data/data.db",
+            "related_storage": "container_layer",
+            "related_kind": "sqlite"
+          },
+          {
+            "index": 13,
+            "request": "GET /posts",
+            "summary": "응답 본문 불일치 (10개 필드)",
+            "related_fact": "/app/data/data.db",
+            "related_storage": "container_layer",
+            "related_kind": "sqlite"
+          },
+          {
+            "index": 14,
+            "request": "GET /uploads/cat.png",
+            "summary": "상태코드 예상 200, 실제 404",
+            "related_fact": "/app/uploads",
+            "related_storage": "container_layer",
+            "related_kind": "local_upload"
+          },
+          {
+            "index": 16,
+            "request": "GET /uploads/dog.png",
+            "summary": "응답 본문 불일치 (2개 필드)",
+            "related_fact": "/app/uploads",
+            "related_storage": "container_layer",
+            "related_kind": "local_upload"
+          },
+          {
+            "index": 17,
+            "request": "POST /posts",
+            "summary": "상태코드 예상 200, 실제 401"
+          },
+          {
+            "index": 20,
+            "request": "GET /posts",
+            "summary": "응답 본문 불일치 (10개 필드)",
+            "related_fact": "/app/data/data.db",
+            "related_storage": "container_layer",
+            "related_kind": "sqlite"
+          }
+        ]
+      }
+    ],
+    "storage": [
+      {
+        "kind": "sqlite",
+        "path": "/app/data/data.db",
+        "storage": "container_layer"
+      },
+      {
+        "kind": "local_upload",
+        "path": "/app/uploads",
+        "storage": "container_layer"
+      }
+    ]
+  }
+}

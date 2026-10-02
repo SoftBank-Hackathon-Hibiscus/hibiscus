@@ -1,0 +1,85 @@
+{
+  "run_id": "5e0c2b7a-9f14-4d3e-8b21-a1c0e9f3d201",
+  "digest": "sha256:fa5174222cfb8d06574fdd6d4e9b27d5f5402662d131bab2bfb5386a63a96745",
+  "image": "asia-northeast3-docker.pkg.dev/hib-hackathon-1004/hib/guestbook@sha256:fa5174222cfb8d06574fdd6d4e9b27d5f5402662d131bab2bfb5386a63a96745",
+  "decision": "activated",
+  "signature": {
+    "verified": true,
+    "ref": "cosign:asia-northeast3-docker.pkg.dev/hib-hackathon-1004/hib/guestbook@sha256:fa5174222cfb8d06574fdd6d4e9b27d5f5402662d131bab2bfb5386a63a96745",
+    "key": "signer/keys/cosign.pub",
+    "tlog": "verified"
+  },
+  "targets_planned": [
+    "onprem",
+    "cloud_run"
+  ],
+  "failover_allowed": true,
+  "targets": [
+    {
+      "target": "cloud_run",
+      "phase": "candidate",
+      "result": "ok",
+      "revision": "guestbook-dfa5174222cfb",
+      "candidate_url": "https://cand---guestbook-k6pucunkwq-du.a.run.app"
+    },
+    {
+      "target": "onprem",
+      "phase": "candidate",
+      "result": "ok",
+      "job_id": "5e0c2b7a-9f14-4d3e-8b21-a1c0e9f3d201-candidate-01",
+      "container": "guestbook-candidate-5e0c2b7a",
+      "candidate_url": "http://127.0.0.1:18081"
+    },
+    {
+      "target": "cloud_run",
+      "phase": "activate",
+      "result": "ok",
+      "previous": null,
+      "serving": "guestbook-dfa5174222cfb"
+    },
+    {
+      "target": "onprem",
+      "phase": "activate",
+      "result": "ok",
+      "job_id": "5e0c2b7a-9f14-4d3e-8b21-a1c0e9f3d201-activate-01",
+      "previous": null,
+      "serving": "guestbook-5e0c2b7a"
+    }
+  ],
+  "checks": [
+    {
+      "target": "cloud_run",
+      "mode": "candidate",
+      "pass": true,
+      "url": "https://cand---guestbook-k6pucunkwq-du.a.run.app",
+      "checker": "http-health",
+      "checks": [
+        {
+          "name": "http_200",
+          "pass": true,
+          "status": 200,
+          "ms": 658,
+          "error": null
+        }
+      ]
+    },
+    {
+      "target": "onprem",
+      "mode": "candidate",
+      "pass": true,
+      "url": "http://127.0.0.1:18081",
+      "checker": "onprem-agent",
+      "checks": []
+    }
+  ],
+  "routing": {
+    "result": "ok",
+    "target_id": "t-gb1-onprem",
+    "kind": "onprem",
+    "revision": 1,
+    "standby_target_id": "t-gb1-cloudrun",
+    "standby_enabled": true
+  },
+  "started_at": "2026-10-02T05:12:40.000Z",
+  "finished_at": "2026-10-02T05:13:21.000Z"
+}
