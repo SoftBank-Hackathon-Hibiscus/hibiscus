@@ -16,6 +16,9 @@ Nest CLI로 생성한 하이브리드 배포 백엔드 재구현 초안입니다
 - Application별 On-Prem·Cloud Run Routing Target과 현재 Route 저장
 - Revision 확인을 사용하는 수동 Route 변경과 변경 이력 저장
 - Health Monitor가 전달할 Target Health 저장과 만료 처리
+- Application Host 기반 Reverse Proxy와 개발용 slug 경로
+- On-Prem Tunnel·Cloud Run 요청 전달과 스트리밍
+- Application별 임계값을 사용하는 Health Monitor와 On-Prem → Cloud Run 자동 Failover
 - Agent token으로 인증하는 outbound WSS Reverse Tunnel
 - Agent별 Tunnel 세션·채널·heartbeat·시간 초과 관리
 - SQLite 작업함을 확인하는 배포 Worker
@@ -52,6 +55,8 @@ src/
 ├── agent/        Agent와 Application 연결
 ├── routing/      Target, 현재 Route, Health 상태
 ├── tunnel/       Agent WSS 제어·데이터 터널
+├── gateway/      Host 선택과 On-Prem·Cloud Run Reverse Proxy
+├── health/       Target 점검과 자동 Failover
 ├── auth/         GitHub 로그인, JWT 발급·검증·갱신
 ├── user/         GitHub 계정과 고정 사용자 ID
 ├── app.module.ts
@@ -208,13 +213,17 @@ GitHub App 사용자 토큰과 GitHub refresh token은 AES-256-GCM으로 암호�
 {
   "name": "My app",
   "slug": "my-app",
+  "public_host": "my-app.example.com",
   "image_repo": "registry.example/my-app",
   "container_port": 8080,
   "installation_id": 123,
   "repository_id": 456,
   "branch": "main",
   "auto_deploy": true,
-  "health_check": { "path": "/health" }
+  "health_check": {
+    "path": "/health",
+    "version_path": "/version"
+  }
 }
 ```
 
@@ -280,6 +289,17 @@ Routing Target은 특정 Deployment의 실행 위치입니다.
 - `PATCH /applications/:id/routing`은 `target_id`, `expected_revision`, 선택 `reason`을 받습니다.
 - Revision이 다르면 `409`를 반환합니다. 동시 변경으로 새 Route를 덮어쓰지 않습니다.
 - Target Health는 `healthy`, `unhealthy`, `unknown`을 저장합니다. `expires_at`이 지나면 조회 결과는 `unknown`입니다.
+- Health Monitor는 Application의 interval, timeout, success/failure threshold를 사용합니다.
+- HTTP 상태 오류는 `application`, 연결·Tunnel·timeout 오류는 `network`로 저장합니다.
+- 현재 On-Prem Target이 `unhealthy`이면 같은 Deployment의 정상 Cloud Run Target으로 전환합니다. 정책의 `failoverAllowed`가 `true`여야 합니다.
+- Tunnel 종료만으로 전환하지 않습니다. 자동 Failback도 하지 않습니다.
+
+Gateway 진입 방법은 두 개입니다.
+
+- 운영: Application의 `public_host`와 요청 `Host`가 일치해야 합니다.
+- 개발: `/_gateway/<application-slug>/<path>`를 사용합니다.
+
+Gateway는 요청과 응답을 스트리밍합니다. Hop-by-hop 헤더는 전달하지 않습니다. 쓰기 요청도 자동 재전송하지 않습니다. `GATEWAY_IDLE_TIMEOUT_MS` 동안 데이터가 없으면 요청을 종료합니다.
 
 Tunnel은 제어 연결과 요청별 데이터 연결을 분리합니다.
 
@@ -300,7 +320,7 @@ On-Prem Agent -- WSS data ----> VM Backend -- raw stream --> Gateway request
 
 `TUNNEL_PING_INTERVAL_MS`, `TUNNEL_HEARTBEAT_TIMEOUT_MS`, `TUNNEL_OPEN_TIMEOUT_MS`, `TUNNEL_MAX_CHANNELS_PER_AGENT`, `TUNNEL_MAX_FRAME_BYTES`로 제한을 설정합니다.
 
-현재 Tunnel Service는 Gateway가 사용할 raw duplex stream을 제공합니다. 외부 요청을 받는 Host 기반 Gateway, Cloud Run proxy, 자동 Failover는 아직 없습니다.
+Tunnel Service는 Gateway에 raw duplex stream을 제공합니다. Gateway는 이 stream으로 On-Prem 컨테이너에 HTTP 요청을 전달합니다.
 
 ## Agent API 계약 v1
 
@@ -364,6 +384,7 @@ token 원문은 등록·교체 응답에서 한 번만 제공합니다. DB에는
   "health_check": {
     "enabled": true,
     "path": "/health",
+    "version_path": "/version",
     "method": "GET",
     "interval_seconds": 5,
     "timeout_seconds": 2,
@@ -374,6 +395,8 @@ token 원문은 등록·교체 응답에서 한 번만 제공합니다. DB에는
   }
 }
 ```
+
+`version_path`는 선택 값입니다. 값이 있으면 Agent가 후보 Health Check 뒤 해당 경로를 `GET`으로 호출합니다. JSON 응답의 `run_id`가 Job의 `run_id`와 같아야 후보 배포가 성공합니다. 값이 없으면 기존 Health Check만 실행합니다.
 
 lease 기본값은 candidate 120초, 나머지 작업 30초입니다. `AGENT_CANDIDATE_LEASE_MS`, `AGENT_ACTION_LEASE_MS`로 서버 시작 전에 설정합니다. `lease_until`은 `deadline`을 넘지 않습니다. lease 만료 후 재전달할 때는 같은 `job_id`에서 `attempt`를 올립니다. deadline이 지난 작업은 `expired`로 종료합니다.
 
@@ -447,5 +470,5 @@ DB 결과 저장, 잘못된 결과의 차단, 원문 해시와 경로 검사, �
 - 운영 정책 설정과 실제 이미지 서명 검증
 - Cloud Run 후보 배포, 트래픽 전환, 롤백
 - 배포 조율기와 Agent Job 자동 연결
-- Health Monitor와 Failover 정책
-- Host 기반 Gateway와 Cloud Run proxy
+- 앱 오류와 네트워크 오류의 구조화된 구분
+- 운영 도메인 DNS와 TLS 인증서 연결
