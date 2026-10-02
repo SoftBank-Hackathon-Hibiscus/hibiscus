@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from premortem.backend_test import validate_request
 from premortem.built_image import verify_build
 from premortem.built_test import test_build
 from premortem.errors import PremortemError
@@ -145,3 +146,12 @@ class BuiltPipelineTest(unittest.TestCase):
             self.run_pipeline()
         self.assertEqual(caught.exception.code, 'RUN_EXISTS')
         self.assertEqual((self.out / 'execution_manifest.json').read_bytes(), original)
+
+    def test_backend_requires_all_identifiers_and_explicit_paths(self):
+        request = {'format': 'premortem-backend-test-v1', 'run_id': 'run-1', 'app': 'app',
+                   'source_revision': 'a' * 40, 'digest': 'sha256:' + 'b' * 64,
+                   'build_manifest': str(self.manifest), 'record': str(self.record), 'noise': str(self.noise)}
+        self.assertEqual(validate_request(request), request)
+        for changes in ({'source_revision': 'unknown'}, {'record': 'session.jsonl'}, {'after': [True]}, {'cmd': 'deploy'}):
+            with self.subTest(changes=changes), self.assertRaises(PremortemError):
+                validate_request(dict(request, **changes))
