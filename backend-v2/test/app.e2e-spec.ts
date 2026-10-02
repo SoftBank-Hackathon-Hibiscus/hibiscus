@@ -1119,11 +1119,7 @@ describe('deployment API (e2e)', () => {
         local_port: localAddress.port,
       })
       .expect(201);
-    const backendAddress = app.getHttpServer().address();
-    if (!backendAddress || typeof backendAddress === 'string') {
-      throw new Error('Backend test server did not start');
-    }
-    const tunnelUrl = `ws://127.0.0.1:${backendAddress.port}`;
+    const tunnelUrl = (await app.getUrl()).replace(/^http:/, 'ws:');
     const control = new WebSocket(`${tunnelUrl}/agent/v1/tunnel/control`, {
       headers: { Authorization: `Bearer ${context.token}` },
     });
