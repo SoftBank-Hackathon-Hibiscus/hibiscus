@@ -93,6 +93,26 @@ def _cmd_backend_test(args) -> int:
     return EXIT_OK
 
 
+def _cmd_repair_build(args) -> int:
+    from .repair_build import repair_build
+
+    try:
+        after = tuple(int(value) for value in args.after.split(',')) if args.after else ()
+    except ValueError:
+        raise PremortemError('INPUT_INVALID', '--after는 요청 번호여야 함') from None
+    result = repair_build(manifest_path=args.build_manifest, record=args.record, noise=args.noise,
+        name=args.name, out_dir=args.out_dir, allowed=tuple(args.allow_edit), ai_mode=args.ai,
+        analysis_file=args.analysis_file, plan=args.plan, port=args.port, health_path=args.health_path,
+        health_timeout=args.health_timeout, after=after)
+    if args.json:
+        _print_json(result)
+    else:
+        print('\n'.join(result['summary']))
+    if result['cleanup_failures']:
+        return EXIT_ERROR
+    if result.get('analysis', {}).get('status') != 'succeeded' or not result.get('retest'):
+        return EXIT_INCOMPLETE
+    return EXIT_OK if result['retest']['overall_status'] == 'passed' else EXIT_FAILED
 
 
 def _cmd_demo(args) -> int:
@@ -306,6 +326,22 @@ def build_parser() -> argparse.ArgumentParser:
     backend.add_argument('--json', action='store_true', default=True)
     backend.set_defaults(handler=_cmd_backend_test)
 
+    repair = sub.add_parser('repair-build', help='AI 수정안을 복사본에만 적용하고 같은 기록으로 재검증')
+    repair.add_argument('--build-manifest', required=True)
+    repair.add_argument('--record', required=True)
+    repair.add_argument('--noise', required=True)
+    repair.add_argument('--name', required=True)
+    repair.add_argument('--out-dir', required=True)
+    repair.add_argument('--allow-edit', action='append', required=True)
+    repair.add_argument('--ai', choices=('live', 'json-file', 'recorded'), required=True)
+    repair.add_argument('--analysis-file')
+    repair.add_argument('--plan')
+    repair.add_argument('--port', type=int, default=8080)
+    repair.add_argument('--health-path', default='/healthz')
+    repair.add_argument('--health-timeout', type=float, default=30)
+    repair.add_argument('--after')
+    repair.add_argument('--json', action='store_true')
+    repair.set_defaults(handler=_cmd_repair_build)
     return parser
 
 

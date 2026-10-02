@@ -45,7 +45,7 @@ class RunResult:
 
 def execute_run(scenario, source_dir: Path, stage: str, parent_run_id: Optional[str], settings: Settings,
                 docker, replay_port, commit_runner, run_root: Optional[Path] = None,
-                run_id: Optional[str] = None) -> RunResult:
+                run_id: Optional[str] = None, build_manifest: Optional[Path] = None) -> RunResult:
     run_root = Path(run_root or settings.run_root)
     # 파이프라인이 준 run_id가 있으면 그대로 쓴다. 같은 run_id의 결과는 덮어쓰지 않는다(RUN_EXISTS)
     run_id = (validate_run_id(run_id) if run_id is not None
@@ -66,10 +66,23 @@ def execute_run(scenario, source_dir: Path, stage: str, parent_run_id: Optional[
 
     team = replay_port.backend == "parity"  # 윤선님 재생기로 실제 앱을 검사하는 실행. 아니면 개발용 샘플
     tag = f"{'premortem' if team else 'premortem-demo'}/{scenario.name}:{snapshot.tree_sha256[:12]}"
-    log(f"[{run_id}] 이미지 빌드: {tag}")
-    image_id = docker.build(str(snapshot.root), tag, {OWNER_LABEL_KEY: OWNER_LABEL_VALUE,
+    if build_manifest is not None:
+        from .built_image import verify_build
+
+        built = verify_build(build_manifest, commit_runner, run_id=run_id)
+        if built['source']['tree_sha256'] != snapshot.tree_sha256:
+            raise PremortemError('BUILD_IDENTITY_INVALID', '검사 소스와 빌드 소스가 다름')
+        source['commit'] = built['source']['commit']
+        image = {key: built['image'][key] for key in (
+            'reference', 'local_image_id', 'registry_digest', 'registry_link_verified',
+            'source_build_link_verified', 'platform')}
+        image_id, tag = image['local_image_id'], image['reference']
+        log(f'[{run_id}] 빌드 이미지 재사용: {tag}')
+    else:
+        log(f"[{run_id}] 이미지 빌드: {tag}")
+        image_id = docker.build(str(snapshot.root), tag, {OWNER_LABEL_KEY: OWNER_LABEL_VALUE,
                                                       "premortem.source_tree_sha256": snapshot.tree_sha256})
-    image = {"reference": tag, "local_image_id": image_id, "registry_digest": None,
+        image = {"reference": tag, "local_image_id": image_id, "registry_digest": None,
              "registry_link_verified": False, "source_build_link_verified": True,
              "platform": docker.image_platform(image_id)}
 
@@ -95,7 +108,7 @@ def execute_run(scenario, source_dir: Path, stage: str, parent_run_id: Optional[
                  f"소스 tree sha256 {snapshot.tree_sha256[:16]}…, 파일 {len(snapshot.files)}개, commit {source['commit'][:12]}")
     evidence.add("none", "baseline_identity", f"session sha256 {session_sha[:16]}…, noise sha256 {noise_sha[:16]}…")
     evidence.add("none", "image_identity",
-                 f"{tag} → local image ID {image_id[:19]}…, registry digest 없음(로컬 전용 시험)")
+                 f"{tag} → local image ID {image_id[:19]}…, registry digest {image['registry_digest'] or '없음(로컬 전용 시험)'}")
 
     runner = ConditionRunner(docker, evidence, replay_port, scenario, run_id, image_id, request_count)
     conditions, cleanup_failures = [], []
@@ -114,6 +127,8 @@ def execute_run(scenario, source_dir: Path, stage: str, parent_run_id: Optional[
         baseline_ok = False
     overall = overall_status(required, conditions) if baseline_ok else "error"
     manifest_blockers = list(PARITY_BLOCKERS if team else REFERENCE_BLOCKERS)
+    if image['registry_link_verified']:
+        manifest_blockers = [entry for entry in manifest_blockers if not entry.startswith('이미지:')]
     if overall != "passed":
         manifest_blockers.append(f"판정: {overall}. 필수 조건이 모두 통과하지 않음")
     if not baseline_ok:

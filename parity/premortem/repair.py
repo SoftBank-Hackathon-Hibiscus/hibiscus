@@ -92,7 +92,7 @@ def _write_review(retest, pre, record, note, patch, held_back) -> Path:
         "## 남은 것",
         "",
         *(manual or ["- 없음"]),
-        "- 재생은 reference(개발용 샘플 전용)이고, 윤선님 재생기·류진님 계약과는 아직 연결되지 않음",
+        f"- 재생기: {retest.env_report['replay_backend']}. 수정 이미지는 로컬 재검증 결과이며 새 registry digest는 없음",
         "- 정책 판단과 서명·배포는 이 모듈이 하지 않음. 수정한 버전은 새 후보라 정책을 다시 평가해야 함",
     ]
     path = Path(retest.run_dir) / "review.md"
@@ -103,14 +103,15 @@ def _write_review(retest, pre, record, note, patch, held_back) -> Path:
 def run_repair_loop(scenario, pre, ai_mode: str, settings, docker, replay, command_runner,
                     analysis_file: Optional[Path], run_root: Optional[Path], plan_path: Optional[Path] = None) -> dict:
     result = {"ai_mode": ai_mode, "expected_outcome": False, "cleanup_failures": [], "summary": []}
-    if pre.env_report["overall_status"] == "passed":
-        result["summary"] = ["고칠 불일치가 없어 AI 분석을 하지 않음"]
-        return result
-
     requires = ()
     if plan_path is not None:
-        requires = tuple(load_requires(plan_path, pre.run_id, pre.env_report["image"]["registry_digest"]))
+        registry_digest = pre.env_report['image']['registry_digest']
+        requires = tuple(load_requires(plan_path, pre.run_id, registry_digest,
+            pre.env_report['source']['commit'] if registry_digest is not None else None))
         result["unsupported_requires"] = unsupported(list(requires))
+    if pre.env_report['overall_status'] == 'passed' and not requires:
+        result['summary'] = ['고칠 불일치나 정책 해결 조건이 없어 AI 분석을 하지 않음']
+        return result
     record, _, note = analyze_run(pre.run_dir, scenario.allowed_edit_paths, scenario.name, ai_mode,
                                   settings.ai_timeout_sec, analysis_file, requires=requires)
     result["analysis"] = {"path": str(Path(pre.run_dir) / "analysis.json"), "provider": record["provider"],
