@@ -9,11 +9,12 @@ import { runSign } from "./sign.js";
 const USAGE = `사용법
   npx tsx src/cli.ts approve --plan <plan.json> --requester <id> --approver <id> [--out approval.json]
   npx tsx src/cli.ts sign --plan <plan.json> --requester <id> [--approval <approval.json>]
-                          --image-repo <저장소> (--key <cosign.key> | --dry-run)
+                          --image-repo <저장소> (--key <cosign.key> [--no-tlog] | --dry-run)
                           [--out sign_result.json] [--log decisions.jsonl] [--plan-schema <Plan.schema.json>]
 
   --image-repo  태그 없는 이미지 저장소 (예: asia-northeast3-docker.pkg.dev/<프로젝트>/<저장소>/<이미지>). 없으면 IMAGE_REPO 환경변수
   --key         cosign 개인키 경로. 없으면 SIGNER_COSIGN_KEY 환경변수. 비밀번호는 COSIGN_PASSWORD 환경변수
+  --no-tlog     Rekor 에 안 올리고 서명 (Rekor 장애 대비). 배포 쪽 verify 에도 --insecure-ignore-tlog=true 필요
   --dry-run     cosign 을 부르지 않고 signature_ref 를 dry-run:... 으로 채움 (연결 확인용, 실제 배포에 쓰지 말 것)
 
 종료 코드: 0 서명함 / 1 서명 거절 / 2 실행 오류`;
@@ -35,6 +36,7 @@ async function main(argv: string[]): Promise<number> {
       "image-repo": { type: "string" },
       key: { type: "string" },
       "dry-run": { type: "boolean", default: false },
+      "no-tlog": { type: "boolean", default: false },
       out: { type: "string" },
       log: { type: "string" },
       "plan-schema": { type: "string" },
@@ -53,7 +55,10 @@ async function main(argv: string[]): Promise<number> {
 
   if (command === "sign") {
     const dryRun = values["dry-run"] === true;
-    const signer = dryRun ? new DryRunSigner() : new CosignSigner(required(values.key ?? process.env.SIGNER_COSIGN_KEY, "key"));
+    const noTlog = values["no-tlog"] === true;
+    const signer = dryRun
+      ? new DryRunSigner()
+      : new CosignSigner(required(values.key ?? process.env.SIGNER_COSIGN_KEY, "key"), "cosign", { noTlog });
     const out = values.out ?? "sign_result.json";
     const outcome = await runSign({
       planPath: required(values.plan, "plan"),
@@ -70,7 +75,7 @@ async function main(argv: string[]): Promise<number> {
       console.log(`[signer] 서명함 run_id=${r.run_id} digest=${r.digest}`);
       console.log(`  targets  : ${r.targets.join(", ")}`);
       console.log(`  approver : ${r.approver}`);
-      console.log(`  signature: ${r.signature_ref}${dryRun ? "  (시험 실행)" : ""}`);
+      console.log(`  signature: ${r.signature_ref}${dryRun ? "  (시험 실행)" : noTlog ? "  (Rekor 없이)" : ""}`);
       console.log(`  저장     : ${out}`);
     } else {
       console.error(`[signer] 서명 안 함 (${outcome.reason}): ${outcome.detail}`);
