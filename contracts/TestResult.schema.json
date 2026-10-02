@@ -1,0 +1,275 @@
+{
+  "$id": "TestResult.schema.json",
+  "title": "TestResult",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]{1,64}$",
+      "description": "파이프라인 실행 id. 영문·숫자·._- 만, 1~64자. 모든 파일이 같은 값을 가져야 한다"
+    },
+    "app": {
+      "type": "string",
+      "minLength": 1,
+      "description": "앱 이름"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "컨테이너 이미지 지문. 'sha256:' + 소문자 hex 64자. 테스트한 이미지 = 결정한 이미지 = 서명·배포할 이미지"
+    },
+    "source_revision": {
+      "description": "테스트한 소스의 커밋 SHA (선택). 소문자 hex 7~40자. \"unknown\" 은 없는 것으로 취급한다",
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[0-9a-f]{7,40}$",
+          "description": "테스트한 소스의 커밋 SHA. 소문자 hex 7~40자"
+        },
+        {
+          "type": "string",
+          "const": "unknown"
+        }
+      ]
+    },
+    "passed": {
+      "type": "boolean",
+      "description": "재생 테스트 통과 여부 (테스트 파트 원본의 종합값). facts.conditions 가 없으면 R1 이 이 값으로 차단하고, 있으면 조건별 사실로 판단한다"
+    },
+    "match": {
+      "type": "object",
+      "properties": {
+        "total": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "재생한 요청 수"
+        },
+        "matched": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "응답이 일치한 요청 수 (total 이하)"
+        }
+      },
+      "required": [
+        "total",
+        "matched"
+      ],
+      "description": "재생 결과 요약. facts.conditions 가 있으면 기준 조건 none 의 결과 (조건별 수치는 facts.conditions 에)"
+    },
+    "failures": {
+      "default": [],
+      "description": "실패한 요청 목록. 형식은 테스트 파트가 정한다 (정책 엔진은 내용을 보지 않음)",
+      "type": "array",
+      "items": {}
+    },
+    "facts": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "db": {
+          "description": "앱이 쓰는 DB. 소문자만. R5 가 읽는다. 관찰하지 못했으면 키를 생략한다 (none 은 'DB 없음' 을 확인했을 때만)",
+          "type": "string",
+          "enum": [
+            "sqlite",
+            "postgres",
+            "mysql",
+            "none"
+          ]
+        },
+        "writes_local_file": {
+          "description": "앱이 쓰는 로컬 파일 경로 목록. R6 가 읽는다",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "migration": {
+          "type": "object",
+          "properties": {
+            "destructive": {
+              "type": "boolean",
+              "description": "파괴적 변경이 하나라도 있는지. R7 이 읽는다"
+            },
+            "backward_compatible": {
+              "type": "boolean",
+              "description": "이전 버전과 호환되는지 = 파괴적 변경이 없을 때 true"
+            },
+            "findings": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "drop_table",
+                      "drop_column",
+                      "rename_table",
+                      "rename_column",
+                      "alter_column_type",
+                      "add_not_null_without_default",
+                      "set_not_null",
+                      "truncate"
+                    ],
+                    "description": "파괴적 변경의 종류"
+                  },
+                  "statement": {
+                    "type": "string",
+                    "description": "해당 SQL 문장 (한 줄로 줄임)"
+                  },
+                  "evidence": {
+                    "type": "string",
+                    "description": "위치 '파일:줄'"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "statement",
+                  "evidence"
+                ],
+                "description": "파괴적 변경 하나"
+              },
+              "description": "파괴적 변경 목록. 없으면 빈 배열"
+            }
+          },
+          "required": [
+            "destructive",
+            "backward_compatible",
+            "findings"
+          ],
+          "description": "파괴적 DB 마이그레이션 판정. 실행기(src/stage.ts)가 facts.migration 이 없으면 채운다"
+        },
+        "conditions": {
+          "minItems": 3,
+          "maxItems": 3,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "restart",
+                  "replace"
+                ],
+                "description": "조건 이름. none(기준선) / restart(재시작) / replace(컨테이너 교체)"
+              },
+              "total": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991,
+                "description": "이 조건에서 재생한 요청 수 (1 이상. 요청 0건은 판정이 아니다)"
+              },
+              "matched": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991,
+                "description": "응답이 일치한 요청 수 (total 이하)"
+              },
+              "failed": {
+                "type": "boolean",
+                "description": "이 조건에서 어긋난 요청이 하나라도 있는지. matched < total 과 같아야 한다. R1 / R1b / R1c 가 읽는다"
+              },
+              "mismatches": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "index": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991,
+                      "description": "기록 파일의 요청 번호 (1부터 그 조건의 total 까지)"
+                    },
+                    "request": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "요청 한 줄 (예: \"GET /posts\")"
+                    },
+                    "related_fact": {
+                      "description": "관련 있어 보이는 저장 사실의 path (테스트 파트의 힌트. 원인 증명이 아님). 없으면 키를 생략한다",
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "related_storage": {
+                      "description": "related_fact 가 가리키는 사실의 storage (예: container_layer). related_fact 가 없으면 생략. 있으면 facts.storage 에 같은 path·kind·storage 항목이 있어야 한다",
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "related_kind": {
+                      "description": "related_fact 가 가리키는 사실의 kind (sqlite, local_upload, local_file). R1c 가 읽는다. 없으면 생략. 있으면 facts.storage 에 같은 path·kind·storage 항목이 있어야 하고, sqlite 면 facts.db 가 sqlite, local_upload / local_file 이면 facts.writes_local_file 에 그 path 가 있어야 한다",
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "index",
+                    "request"
+                  ],
+                  "additionalProperties": {},
+                  "description": "한 조건에서 기록과 어긋난 요청 하나"
+                },
+                "description": "어긋난 요청 목록 (total - matched 개). 없으면 빈 배열"
+              }
+            },
+            "required": [
+              "name",
+              "total",
+              "matched",
+              "failed",
+              "mismatches"
+            ],
+            "additionalProperties": {},
+            "description": "조건 하나의 재생 결과"
+          },
+          "description": "조건별 재생 결과 (none / restart / replace 정확히 한 번씩). 있으면 R1 / R1b / R1c 가 이것으로 판단하고 passed 는 원본 종합값 보존용이다. 없으면 R1 이 passed 를 본다"
+        },
+        "storage": {
+          "description": "컨테이너 안에 남은 상태 목록 (테스트 파트 facts[] 원본의 kind, path, storage). 정책 판단에는 conditions[].mismatches[].related_kind 를 쓰고, 이 목록은 related_* 의 근거(같은 path·kind·storage 항목이 있어야 한다)와 설명용",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "minLength": 1,
+                "description": "sqlite(파일 헤더로 판별) / local_upload(업로드 폴더) / local_file(그 밖의 파일)"
+              },
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "description": "컨테이너 안의 경로"
+              },
+              "storage": {
+                "type": "string",
+                "minLength": 1,
+                "description": "저장 위치. container_layer = 재시작으로는 남지만 컨테이너를 새로 만들면 사라진다"
+              }
+            },
+            "required": [
+              "kind",
+              "path",
+              "storage"
+            ],
+            "additionalProperties": {},
+            "description": "컨테이너 안에 남은 상태 하나 (테스트 파트의 facts[] 원본에서 kind, path, storage 만)"
+          }
+        }
+      },
+      "additionalProperties": {},
+      "description": "테스트 중 관찰한 사실. 정의된 키(db, writes_local_file, migration, conditions, storage)는 타입이 고정되고, 그 밖의 키는 자유"
+    }
+  },
+  "required": [
+    "run_id",
+    "app",
+    "digest",
+    "passed",
+    "match"
+  ],
+  "description": "테스트 파트가 만드는 테스트 판정 결과"
+}
