@@ -56,7 +56,10 @@ export class HttpHealthChecker implements HealthProbe {
           ms: Math.round(performance.now() - started),
           status: response.status,
         });
-        if (passed) {
+        const versionPassed = passed
+          ? await this.checkVersion(job, candidate, result)
+          : false;
+        if (versionPassed) {
           successes += 1;
           failures = 0;
         } else {
@@ -84,5 +87,52 @@ export class HttpHealthChecker implements HealthProbe {
     }
     result.pass = successes >= job.health_check.success_threshold;
     return result;
+  }
+
+  private async checkVersion(
+    job: AgentJob,
+    candidate: ManagedContainer,
+    result: HealthCheckResult,
+  ): Promise<boolean> {
+    if (!job.health_check.version_path) return true;
+
+    const url = new URL(candidate.url);
+    url.pathname = job.health_check.version_path;
+    url.search = "";
+    url.hash = "";
+    const started = performance.now();
+    try {
+      const response = await fetch(url, {
+        method: "GET",
+        redirect: "manual",
+        signal: AbortSignal.timeout(job.health_check.timeout_seconds * 1_000),
+      });
+      const statusPassed =
+        response.status >= job.health_check.success_status_min &&
+        response.status <= job.health_check.success_status_max;
+      const payload = statusPassed
+        ? ((await response.json()) as Record<string, unknown>)
+        : undefined;
+      if (!statusPassed) await response.body?.cancel();
+      const passed = statusPassed && payload?.run_id === job.run_id;
+      result.checks.push({
+        name: "version",
+        pass: passed,
+        ms: Math.round(performance.now() - started),
+        status: response.status,
+        ...(!passed && statusPassed
+          ? { error: "Version run_id does not match deployment" }
+          : {}),
+      });
+      return passed;
+    } catch (error) {
+      result.checks.push({
+        name: "version",
+        pass: false,
+        ms: Math.round(performance.now() - started),
+        error: error instanceof Error ? error.message : "Version check failed",
+      });
+      return false;
+    }
   }
 }

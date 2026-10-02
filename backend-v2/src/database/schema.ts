@@ -31,6 +31,7 @@ export const applications = sqliteTable(
     id: text('id').primaryKey(),
     name: text('name').notNull(),
     slug: text('slug').notNull(),
+    publicHost: text('public_host'),
     sourcePath: text('source_path').notNull(),
     imageRepo: text('image_repo').notNull(),
     containerPort: integer('container_port').notNull().default(8080),
@@ -46,7 +47,10 @@ export const applications = sqliteTable(
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),
   },
-  (table) => [uniqueIndex('applications_slug_unique').on(table.slug)],
+  (table) => [
+    uniqueIndex('applications_slug_unique').on(table.slug),
+    uniqueIndex('applications_public_host_unique').on(table.publicHost),
+  ],
 );
 
 export const githubCredentials = sqliteTable('github_credentials', {
@@ -94,6 +98,7 @@ export const healthCheckConfigs = sqliteTable('health_check_configs', {
     .references(() => applications.id, { onDelete: 'cascade' }),
   enabled: integer('enabled', { mode: 'boolean' }).notNull(),
   path: text('path').notNull(),
+  versionPath: text('version_path'),
   method: text('method', { enum: ['GET', 'HEAD'] }).notNull(),
   intervalSeconds: integer('interval_seconds').notNull(),
   timeoutSeconds: integer('timeout_seconds').notNull(),
@@ -278,9 +283,7 @@ export const applicationRoutes = sqliteTable('application_routes', {
     .notNull()
     .references(() => routingTargets.id),
   revision: integer('revision').notNull(),
-  changedBy: text('changed_by')
-    .notNull()
-    .references(() => users.id),
+  changedBy: text('changed_by').notNull(),
   reason: text('reason'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
@@ -299,9 +302,7 @@ export const routingChanges = sqliteTable('routing_changes', {
     .references(() => routingTargets.id),
   previousRevision: integer('previous_revision').notNull(),
   revision: integer('revision').notNull(),
-  changedBy: text('changed_by')
-    .notNull()
-    .references(() => users.id),
+  changedBy: text('changed_by').notNull(),
   reason: text('reason'),
   createdAt: text('created_at').notNull(),
 });
@@ -319,6 +320,11 @@ export const routingTargetHealth = sqliteTable('routing_target_health', {
   observedAt: text('observed_at').notNull(),
   expiresAt: text('expires_at').notNull(),
   reason: text('reason'),
+  failureKind: text('failure_kind', {
+    enum: ['application', 'network'],
+  }),
+  consecutiveFailures: integer('consecutive_failures').notNull().default(0),
+  consecutiveSuccesses: integer('consecutive_successes').notNull().default(0),
   updatedAt: text('updated_at').notNull(),
 });
 

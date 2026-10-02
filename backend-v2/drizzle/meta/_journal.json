@@ -43,6 +43,34 @@
       "when": 1790882453358,
       "tag": "0005_safe_morbius",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1790917384433,
+      "tag": "0006_big_doctor_doom",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1790917733641,
+      "tag": "0007_mysterious_doctor_doom",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1790917946521,
+      "tag": "0008_magenta_lorna_dane",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1790918113296,
+      "tag": "0009_brainy_gabe_jones",
+      "breakpoints": true
     }
   ]
 }

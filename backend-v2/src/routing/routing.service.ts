@@ -35,6 +35,7 @@ export class RoutingService {
     if (!deployment || deployment.applicationId !== applicationId) {
       throw new NotFoundException('Deployment not found for application');
     }
+    this.requireAllowedTarget(deployment.id, input.kind);
 
     let agentId: string | null = null;
     let localPort: number | null = null;
@@ -119,6 +120,7 @@ export class RoutingService {
     if (!target.enabled) {
       throw new ConflictException('Routing target is disabled');
     }
+    this.requireAllowedTarget(target.deploymentId, target.kind);
     const route = this.repository.changeRoute(
       applicationId,
       target.id,
@@ -155,13 +157,40 @@ export class RoutingService {
         'Health expires_at must follow observed_at',
       );
     }
+    const healthConfig = this.applications.getView(
+      target.applicationId,
+    )!.healthCheck;
+    const current = this.repository.findHealth(target.id);
+    const consecutiveFailures =
+      input.status === 'unhealthy'
+        ? (current?.consecutiveFailures ?? 0) + 1
+        : 0;
+    const consecutiveSuccesses =
+      input.status === 'healthy' ? (current?.consecutiveSuccesses ?? 0) + 1 : 0;
+    let status: RoutingTargetHealth['status'] = 'unknown';
+    if (
+      input.status === 'healthy' &&
+      consecutiveSuccesses >= healthConfig.successThreshold
+    ) {
+      status = 'healthy';
+    } else if (
+      input.status === 'unhealthy' &&
+      consecutiveFailures >= healthConfig.failureThreshold
+    ) {
+      status = 'unhealthy';
+    } else if (input.status !== 'unknown' && current) {
+      status = current.status;
+    }
     return this.repository.saveHealth({
       targetId: target.id,
       deploymentId: target.deploymentId,
-      status: input.status,
+      status,
       observedAt,
       expiresAt,
       reason: input.reason ?? null,
+      failureKind: input.failureKind ?? null,
+      consecutiveFailures,
+      consecutiveSuccesses,
       updatedAt: new Date().toISOString(),
     });
   }
@@ -169,6 +198,26 @@ export class RoutingService {
   private requireApplication(id: string): void {
     if (!this.applications.find(id)) {
       throw new NotFoundException('Application not found');
+    }
+  }
+
+  private requireAllowedTarget(
+    deploymentId: string,
+    kind: 'onprem' | 'cloud_run',
+  ): void {
+    const policy = this.deployments.findPolicyResult(deploymentId);
+    if (
+      !policy ||
+      policy.decision === 'block' ||
+      !policy.targets.includes(kind)
+    ) {
+      throw new ConflictException('Deployment policy does not allow target');
+    }
+    if (
+      !policy.planHash ||
+      !this.deployments.hasSuccessfulSignResult(deploymentId)
+    ) {
+      throw new ConflictException('Deployment policy is not signed');
     }
   }
 

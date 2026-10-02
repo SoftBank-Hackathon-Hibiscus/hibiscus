@@ -1,6 +1,10 @@
 import { resolve } from "node:path";
 import { z } from "zod";
 
+const booleanString = z
+  .enum(["true", "false"])
+  .transform((value) => value === "true");
+
 const environmentSchema = z.object({
   BACKEND_TUNNEL_URL: z
     .string()
@@ -34,8 +38,8 @@ const environmentSchema = z.object({
     .default(10),
   DOCKER_COMMAND: z.string().min(1).default("docker"),
   COSIGN_COMMAND: z.string().min(1).default("cosign"),
-  COSIGN_ALLOW_INSECURE_REGISTRY: z.coerce.boolean().default(false),
-  COSIGN_INSECURE_IGNORE_TLOG: z.coerce.boolean().default(false),
+  COSIGN_ALLOW_INSECURE_REGISTRY: booleanString.default(false),
+  COSIGN_INSECURE_IGNORE_TLOG: booleanString.default(false),
   TUNNEL_RECONNECT_MIN_MS: z.coerce.number().int().min(100).default(1_000),
   TUNNEL_RECONNECT_MAX_MS: z.coerce.number().int().min(1_000).default(30_000),
   TUNNEL_HANDSHAKE_TIMEOUT_MS: z.coerce

@@ -215,6 +215,7 @@ export class AgentJobService {
       health_check: {
         enabled: health.enabled,
         path: health.path,
+        ...(health.versionPath ? { version_path: health.versionPath } : {}),
         method: health.method,
         interval_seconds: health.intervalSeconds,
         timeout_seconds: health.timeoutSeconds,

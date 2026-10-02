@@ -8,19 +8,24 @@ import { JobExecutor } from "./job-executor.js";
 import { JobRunner } from "./job-runner.js";
 import { StateStore } from "./state-store.js";
 import { TunnelClient } from "./tunnel-client.js";
+import { ManagedTunnelTargetAuthorizer } from "./tunnel-target-authorizer.js";
 
 const config = loadConfig();
 const commands = new CommandRunner(config.commandTimeoutMs);
 const backend = new BackendClient(config);
+const state = new StateStore(config.stateFile);
 const executor = new JobExecutor(
   config.agentId,
-  new StateStore(config.stateFile),
+  state,
   new DockerRuntime(config, commands),
   new CosignImageVerifier(config, commands),
   new HttpHealthChecker(),
 );
 const jobs = new JobRunner(config, backend, executor);
-const tunnel = new TunnelClient(config);
+const tunnel = new TunnelClient(
+  config,
+  new ManagedTunnelTargetAuthorizer(state),
+);
 
 const stop = () => {
   jobs.stop();

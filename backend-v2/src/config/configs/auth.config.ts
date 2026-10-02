@@ -19,6 +19,20 @@ export const authEnvironmentSchema = z
     GITHUB_APP_CALLBACK_URL: z
       .url()
       .default('http://localhost:8080/auth/github/callback'),
+    ALLOWED_GITHUB_IDS: z
+      .string()
+      .transform((value) =>
+        value
+          .split(',')
+          .map((id) => id.trim())
+          .filter(Boolean),
+      )
+      .pipe(
+        z
+          .array(z.string().regex(/^[1-9]\d*$/))
+          .min(1, 'At least one allowed GitHub user ID is required'),
+      )
+      .transform((ids) => [...new Set(ids)]),
     JWT_ACCESS_SECRET: z.string().min(32),
     JWT_REFRESH_SECRET: z.string().min(32),
     JWT_ACCESS_TTL_SECONDS: z.coerce
@@ -58,6 +72,7 @@ export const authConfig = registerAs('auth', () => {
             32,
           ),
         ).toString('hex'),
+      allowedUserIds: env.ALLOWED_GITHUB_IDS,
     },
     jwt: {
       accessSecret: env.JWT_ACCESS_SECRET,
