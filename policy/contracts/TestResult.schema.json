@@ -50,7 +50,7 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991,
-          "description": "응답이 일치한 요청 수"
+          "description": "응답이 일치한 요청 수 (total 이하)"
         }
       },
       "required": [
@@ -183,7 +183,7 @@
                       "type": "integer",
                       "exclusiveMinimum": 0,
                       "maximum": 9007199254740991,
-                      "description": "기록 파일의 요청 번호 (1부터)"
+                      "description": "기록 파일의 요청 번호 (1부터 그 조건의 total 까지)"
                     },
                     "request": {
                       "type": "string",
