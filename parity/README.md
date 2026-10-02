@@ -8,6 +8,8 @@
 
 환경 실행기 연결, 컨테이너 교체 시험, 정책 담당자에게 원본 결과를 전달하는 방법은
 [INTEGRATION.md](INTEGRATION.md)에 있습니다. 기존 `test`/`verify` 명령과 결과 JSON 형식은 그대로입니다.
+커밋된 앱을 레지스트리에 빌드·업로드하고 index digest를 기록하는 방법은
+[premortem의 레지스트리 빌드](premortem/README.md#레지스트리-빌드)에 있습니다.
 
 ---
 
