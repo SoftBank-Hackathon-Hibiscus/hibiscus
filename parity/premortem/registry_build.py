@@ -15,7 +15,7 @@ from .jsonio import load_json, loads_strict, write_json_atomic
 from .paths import safe_relative, validate_run_id
 from .process import CommandRunner
 from .redact import redact
-from .snapshot import EXCLUDED_DIRS, EXCLUDED_FILES, tree_hash, tree_listing
+from .snapshot import EXCLUDED_DIRS, EXCLUDED_FILES, tree_hash, tree_listing, verify_source_tree
 
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _REPO = re.compile(r"(?:localhost|[a-z0-9][a-z0-9.-]*)(?::[0-9]{1,5})?/"
@@ -163,9 +163,7 @@ def build_and_push(*, app: Path, image_repo: str, out_dir: Path, runner: Command
             args += ["--label", f"{key}={value}"]
         args.append(str(out_dir / "source"))
         _command(runner, args, timeout)
-        files, _ = tree_listing(out_dir / "source")
-        if tree_hash(files) != source["tree_sha256"]:
-            raise PremortemError("SOURCE_CHANGED", "빌드 중 소스 복사본이 바뀜")
+        verify_source_tree(out_dir / "source", source["tree_sha256"])
         metadata = load_json(metadata_path)
         digest = _digest(metadata.get("containerimage.digest") if isinstance(metadata, dict) else None)
         # 태그는 다른 빌드가 바꿀 수 있으므로 이후 조회와 pull은 digest만 쓴다.
@@ -188,6 +186,8 @@ def build_and_push(*, app: Path, image_repo: str, out_dir: Path, runner: Command
                   "image": {"reference": reference, "build_tag": tag, "registry_digest": digest,
                             "platforms": children, "platform": native, "local_image_id": local["Id"],
                             "source_build_link_verified": True, "registry_link_verified": True}}
+        # 레지스트리 조회와 pull 동안 보관된 소스가 바뀌어도 성공 기록을 남기지 않는다.
+        verify_source_tree(out_dir / "source", source["tree_sha256"])
         write_json_atomic(out_dir / "build_manifest.json", result)
         return result
     except (OSError, tarfile.TarError) as error:
