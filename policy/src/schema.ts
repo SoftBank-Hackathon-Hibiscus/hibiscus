@@ -78,7 +78,7 @@ export type MigrationReport = z.infer<typeof MigrationReportSchema>;
 // ---------------------------------------------------------------------------
 export const ConditionMismatchSchema = z
   .looseObject({
-    index: z.number().int().positive().describe("기록 파일의 요청 번호 (1부터)"),
+    index: z.number().int().positive().describe("기록 파일의 요청 번호 (1부터 그 조건의 total 까지)"),
     request: z.string().min(1).describe('요청 한 줄 (예: "GET /posts")'),
     related_fact: z.string().min(1).optional().describe("관련 있어 보이는 저장 사실의 path (테스트 파트의 힌트. 원인 증명이 아님). 없으면 키를 생략한다"),
     related_storage: z.string().min(1).optional().describe("related_fact 가 가리키는 사실의 storage (예: container_layer). related_fact 가 없으면 생략. 있으면 facts.storage 에 같은 path·kind·storage 항목이 있어야 한다"),
@@ -111,9 +111,11 @@ export const ConditionFactSchema = z
     if (c.mismatches.length !== c.total - c.matched) {
       ctx.addIssue({ code: "custom", path: ["mismatches"], message: `mismatches 는 total - matched (${c.total - c.matched})개여야 하는데 ${c.mismatches.length}개입니다` });
     }
-    // 같은 조건 안에서 요청 번호는 한 번씩이다 (다른 조건과 같은 번호는 정상: 같은 기록을 조건마다 재생한다)
+    // 요청 번호는 1 이상(ConditionMismatchSchema 의 positive) total 이하이고, 같은 조건 안에서 한 번씩이다
+    // (다른 조건과 같은 번호는 정상: 같은 기록을 조건마다 재생한다). 변환기(adapters/parity.ts)와 같은 범위다
     const seen = new Set<number>();
     for (const [j, m] of c.mismatches.entries()) {
+      if (m.index > c.total) ctx.addIssue({ code: "custom", path: ["mismatches", j, "index"], message: `요청 번호 ${m.index} 가 total(${c.total})을 넘습니다` });
       if (seen.has(m.index)) ctx.addIssue({ code: "custom", path: ["mismatches", j, "index"], message: `같은 조건 안에 요청 번호 ${m.index} 가 두 번 있습니다` });
       seen.add(m.index);
     }

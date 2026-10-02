@@ -150,7 +150,7 @@ flowchart LR
 | `facts.conditions[].matched` | integer | 필수 | 응답이 일치한 요청 수 (total 이하) |
 | `facts.conditions[].failed` | boolean | 필수 | 이 조건에서 어긋난 요청이 하나라도 있는지. matched < total 과 같아야 한다. R1 / R1b / R1c 가 읽는다 |
 | `facts.conditions[].mismatches` | object[] | 필수 | 어긋난 요청 목록 (total - matched 개). 없으면 빈 배열 |
-| `facts.conditions[].mismatches[].index` | integer | 필수 | 기록 파일의 요청 번호 (1부터) |
+| `facts.conditions[].mismatches[].index` | integer | 필수 | 기록 파일의 요청 번호 (1부터 그 조건의 total 까지) |
 | `facts.conditions[].mismatches[].request` | string | 필수 | 요청 한 줄 (예: "GET /posts") |
 | `facts.conditions[].mismatches[].related_fact` | string | 선택 | 관련 있어 보이는 저장 사실의 path (테스트 파트의 힌트. 원인 증명이 아님). 없으면 키를 생략한다 |
 | `facts.conditions[].mismatches[].related_storage` | string | 선택 | related_fact 가 가리키는 사실의 storage (예: container_layer). related_fact 가 없으면 생략. 있으면 facts.storage 에 같은 path·kind·storage 항목이 있어야 한다 |

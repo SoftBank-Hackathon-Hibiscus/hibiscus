@@ -86,6 +86,25 @@ describe("test_result.facts: 정책이 읽는 키만 타입 고정", () => {
       expect(issues({ conditions: trio({ ...dup, mismatches: [me(11)] }) }).join("\n")).toMatch(/mismatches 는 total - matched \(2\)개여야 하는데 1개/);
     });
 
+    it("mismatches[].index 는 1 이상 total 이하 (--test 직접 입력도 --handoff 변환기와 같은 범위)", () => {
+      const me = (index: number) => ({ index, request: "GET /me" });
+      const replaceAt = (total: number, index: number) => ({ name: "replace", total, matched: total - 1, failed: true, mismatches: [me(index)] });
+      // index == total 은 마지막 요청이라 허용
+      expect(TestResultSchema.safeParse(withFacts({ conditions: trio(replaceAt(20, 20)) })).success).toBe(true);
+      expect(TestResultSchema.safeParse(withFacts({ conditions: trio(replaceAt(2, 2)) })).success).toBe(true);
+      // index > total 거부 (재현: total=2, matched=1, index=3. 수는 total - matched 와 맞아서 수 검사로는 잡히지 않는다)
+      expect(issues({ conditions: trio(replaceAt(2, 3)) }).join("\n")).toMatch(/facts\.conditions\.2\.mismatches\.0\.index: 요청 번호 3 가 total\(2\)을 넘습니다/);
+      expect(issues({ conditions: trio(replaceAt(20, 21)) }).join("\n")).toMatch(/mismatches\.0\.index: 요청 번호 21 가 total\(20\)을 넘습니다/);
+      // 두 번째 항목이 넘으면 그 항목의 path 로 잡는다
+      const second = { name: "replace", total: 20, matched: 18, failed: true, mismatches: [me(5), me(99)] };
+      expect(issues({ conditions: trio(second) }).join("\n")).toMatch(/facts\.conditions\.2\.mismatches\.1\.index: 요청 번호 99 가 total\(20\)을 넘습니다/);
+      // 하한: 0 이하는 ConditionMismatchSchema 의 positive 가 거부한다 (변환기 ParityMismatchSchema 도 positive)
+      expect(issues({ conditions: trio(replaceAt(20, 0)) }).join("\n")).toMatch(/facts\.conditions\.2\.mismatches\.0\.index/);
+      expect(issues({ conditions: trio(replaceAt(20, -1)) }).join("\n")).toMatch(/facts\.conditions\.2\.mismatches\.0\.index/);
+      // none 조건도 독립적으로 잡는다
+      expect(issues({ conditions: [{ ...replaceAt(2, 3), name: "none" }, passAll("restart"), passAll("replace")] }).join("\n")).toMatch(/facts\.conditions\.0\.mismatches\.0\.index: 요청 번호 3 가 total\(2\)을 넘습니다/);
+    });
+
     describe("mismatches[].related_* 는 facts.storage 와 facts.db / facts.writes_local_file 로 뒷받침돼야 한다 (R1c 가 맡긴 것을 R5 / R6 가 읽을 수 있게)", () => {
       const pii = PiiReportSchema.parse({ run_id: base.run_id, pii: [] });
 
