@@ -1,0 +1,138 @@
+{
+  "$id": "AuditLine.schema.json",
+  "title": "AuditLine",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "seq": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991,
+      "description": "줄 번호. 1 부터 빈 번호 없이"
+    },
+    "prev_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "앞 줄 hash. 첫 줄은 0 이 64개"
+    },
+    "entry": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "sign",
+          "description": "서명 결정"
+        },
+        "time": {
+          "type": "string",
+          "description": "ISO 8601 시각"
+        },
+        "run_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._-]{1,64}$",
+          "description": "파이프라인 실행 id (plan.run_id 그대로)"
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "컨테이너 이미지 지문. 'sha256:' + 소문자 hex 64자 (plan.digest 그대로)"
+        },
+        "source_revision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{7,40}$",
+          "description": "커밋 SHA. plan 에 있을 때만"
+        },
+        "plan_hash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "plan.plan_hash 그대로. 접두어 없이 소문자 hex 64자"
+        },
+        "result": {
+          "type": "string",
+          "enum": [
+            "signed",
+            "refused"
+          ]
+        },
+        "requester": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._-]{1,64}$",
+          "description": "GitHub 아이디 등 사람 id"
+        },
+        "approver": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._-]{1,64}$",
+              "description": "GitHub 아이디 등 사람 id"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "서명했거나 승인 기록이 있으면 그 사람, 없으면 null"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "policy_block",
+                "no_targets",
+                "approval_missing",
+                "approval_mismatch",
+                "requester_mismatch",
+                "self_approval",
+                "approval_expired",
+                "sign_failed"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "refused 일 때 이유, signed 면 null"
+        },
+        "signature_ref": {
+          "description": "signed 일 때 sign_result.signature_ref, refused 면 null",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "time",
+        "run_id",
+        "digest",
+        "plan_hash",
+        "result",
+        "requester",
+        "approver",
+        "reason",
+        "signature_ref"
+      ],
+      "additionalProperties": false,
+      "description": "decisions.jsonl 의 kind: sign 한 줄"
+    },
+    "anchor": {
+      "description": "signed 줄에만. 서명 직전 체인 끝 hash (이미지 서명 주석 audit_head 와 같은 값)",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "이 줄 hash. sha256(키 정렬 JSON {seq, prev_hash, entry, anchor})"
+    }
+  },
+  "required": [
+    "seq",
+    "prev_hash",
+    "entry",
+    "hash"
+  ],
+  "additionalProperties": false,
+  "description": "서명 감사 로그(해시 체인) 한 줄. signer 안에서만 씀"
+}

@@ -65,10 +65,13 @@ export function writeJson(path: string, value: unknown): void {
   writeFileSync(path, JSON.stringify(value, null, 2) + "\n", "utf8");
 }
 
+/** decisions.jsonl 의 kind: sign 한 줄. 감사 로그에도 같은 내용을 씀 */
+export function signLogLine(entry: Omit<SignLog, "time" | "kind">, now: Date): SignLog {
+  return SignLogSchema.parse({ kind: "sign", time: now.toISOString(), ...entry });
+}
+
 /** decisions.jsonl 에 한 줄 추가 */
-export function appendSignLog(path: string, entry: Omit<SignLog, "time" | "kind">, now: Date): SignLog {
-  const line = SignLogSchema.parse({ kind: "sign", time: now.toISOString(), ...entry });
+export function appendSignLog(path: string, line: SignLog): void {
   mkdirSync(dirname(resolve(path)), { recursive: true });
   appendFileSync(path, JSON.stringify(line) + "\n", "utf8");
-  return line;
 }
