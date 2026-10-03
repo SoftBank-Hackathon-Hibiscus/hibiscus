@@ -4,7 +4,7 @@ import { readToken } from '../api/token';
 import type { ConnectionState } from '../hooks/useConnection';
 import type { Tone } from '../lib/deployState';
 import { useLang, type Lang } from '../lib/i18n';
-import { CONNECT_PATH, DEMOS_PATH, HOME_PATH, realHref, type Route } from '../lib/router';
+import { AGENTS_PATH, APPLICATIONS_PATH, CONNECT_PATH, DEMOS_PATH, HOME_PATH, realHref, type Route } from '../lib/router';
 import { signOut } from '../lib/session';
 
 interface TopBarProps {
@@ -42,6 +42,16 @@ export function TopBar({ isReal, connection, route, onTokenChange, onReconnect }
           </span>
           Hibiscus
         </a>
+        {isReal && tokenPresent && (
+          <nav className="topbar-nav" aria-label={t('mainNavigation')}>
+            <a className={route.page === 'applications' || route.page === 'application' || route.page === 'deployment' || route.page === 'register' ? 'topbar-nav-active' : ''} href={realHref(APPLICATIONS_PATH)}>
+              {t('menuApplications')}
+            </a>
+            <a className={route.page === 'agents' ? 'topbar-nav-active' : ''} href={realHref(AGENTS_PATH)}>
+              {t('menuAgents')}
+            </a>
+          </nav>
+        )}
         <div className="topbar-right">
           {!isReal && (
             <a className={`status-pill status-warning status-link ${route.page === 'demos' ? 'status-on' : ''}`} href={realHref(DEMOS_PATH)} title={t('statusDemoTitle')}>
@@ -144,6 +154,12 @@ function UserMenu({ connection, onReconnect, onLogout }: { connection: Connectio
               <span className="small muted">{t('menuNotVerified')}</span>
             )}
           </div>
+          <a className="menu-item" role="menuitem" href={realHref(APPLICATIONS_PATH)} onClick={() => setOpen(false)}>
+            {t('menuApplications')}
+          </a>
+          <a className="menu-item" role="menuitem" href={realHref(AGENTS_PATH)} onClick={() => setOpen(false)}>
+            {t('menuAgents')}
+          </a>
           <button
             type="button"
             className="menu-item"

@@ -5,11 +5,16 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard.js';
 import { JwtModule } from '@nestjs/jwt';
 import { APP_GUARD } from '@nestjs/core';
 import { UserModule } from '../user/user.module.js';
+import { AuthRedirectService } from './auth-redirect.service.js';
 
 @Module({
   imports: [JwtModule.register({}), UserModule],
   controllers: [AuthController],
-  providers: [AuthService, { provide: APP_GUARD, useClass: JwtAuthGuard }],
+  providers: [
+    AuthService,
+    AuthRedirectService,
+    { provide: APP_GUARD, useClass: JwtAuthGuard },
+  ],
   exports: [AuthService],
 })
 export class AuthModule {}

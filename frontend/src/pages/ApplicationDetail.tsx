@@ -4,6 +4,7 @@ import { ApiError, type DataSource } from '../api/client';
 import { MockDataSource } from '../api/mock';
 import type { AgentStatusResponse, ApplicationAgentSummary, ApplicationView, Deployment, DeploymentStatus, PolicyResult, RouteSnapshot, RoutingTargetHealth, RoutingTargetView, TargetKind } from '../api/types';
 import { ErrorNotice, describeError } from '../components/ErrorNotice';
+import { HealthCheckModal } from '../components/HealthCheckModal';
 import { NewDeploymentModal } from '../components/NewDeploymentModal';
 import { isGithubSource } from '../lib/forms';
 import { PageError } from '../components/PageError';
@@ -109,6 +110,7 @@ export function ApplicationDetail({ id, source }: { id: string; source: DataSour
   // route 변화 감지는 lib/failover.ts 의 순수 함수. 첫 관측·같은 revision·route 사라짐은 변화로 치지 않는다.
   const [events, setEvents] = useState<SeenChange[]>([]);
   const [deployOpen, setDeployOpen] = useState(false);
+  const [healthOpen, setHealthOpen] = useState(false);
   const previousRoute = useRef<RouteMark | null>(null);
   useEffect(() => {
     if (!poll.data) return;
@@ -162,6 +164,7 @@ export function ApplicationDetail({ id, source }: { id: string; source: DataSour
         }
       />
       {deployOpen && <NewDeploymentModal source={source} applicationId={a.id} requireFullSha={isGithubSource(a.sourcePath)} onClose={() => setDeployOpen(false)} />}
+      {healthOpen && <HealthCheckModal source={source} applicationId={a.id} config={h} onClose={() => setHealthOpen(false)} onSaved={poll.refresh} />}
       {(mockCaption || (source instanceof MockDataSource && source.actions().length > 0)) && (
         <div className="mock-row">
           {mockCaption && (
@@ -202,7 +205,10 @@ export function ApplicationDetail({ id, source }: { id: string; source: DataSour
       <section className="card">
         <div className="card-head">
           <h2 className="card-title">{t('deployHistory')}</h2>
-          <span className="small muted">{h.enabled ? t('healthConfig', { interval: h.intervalSeconds, threshold: h.failureThreshold }) : t('healthOff')}</span>
+          <div className="row">
+            <span className="small muted">{h.enabled ? t('healthConfig', { interval: h.intervalSeconds, threshold: h.failureThreshold }) : t('healthOff')}</span>
+            <button type="button" className="btn btn-small" onClick={() => setHealthOpen(true)}>{t('editHealthCheck')}</button>
+          </div>
         </div>
         <DeploymentTimeline deployments={snap.deployments} activeDeploymentId={route?.target.deploymentId ?? null} />
       </section>

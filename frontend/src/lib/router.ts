@@ -4,6 +4,7 @@ export type Route =
   | { page: 'deployment'; id: string }
   | { page: 'application'; id: string }
   | { page: 'applications' }
+  | { page: 'agents' }
   | { page: 'register' }
   | { page: 'connect' }
   /** 데모 시나리오 선택 화면 */
@@ -18,6 +19,7 @@ export function parseHash(hash: string = window.location.hash): Route {
   match = /^\/applications\/([^/?#]+)/.exec(path);
   if (match?.[1]) return { page: 'application', id: decodeURIComponent(match[1]) };
   if (/^\/applications\/?$/.test(path)) return { page: 'applications' };
+  if (/^\/agents\/?$/.test(path)) return { page: 'agents' };
   if (/^\/connect\/?$/.test(path)) return { page: 'connect' };
   if (/^\/demos\/?$/.test(path)) return { page: 'demos' };
   return { page: 'home' };
@@ -27,6 +29,7 @@ export const HOME_PATH = '/';
 export const DEMOS_PATH = '/demos';
 export const CONNECT_PATH = '/connect';
 export const APPLICATIONS_PATH = '/applications';
+export const AGENTS_PATH = '/agents';
 export const REGISTER_PATH = '/applications/new';
 
 export function useHashRoute(): Route {

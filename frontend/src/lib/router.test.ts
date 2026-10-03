@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CONNECT_PATH, DEMOS_PATH, REGISTER_PATH, applicationPath, deploymentPath, hrefFor, parseHash } from './router';
+import { AGENTS_PATH, CONNECT_PATH, DEMOS_PATH, REGISTER_PATH, applicationPath, deploymentPath, hrefFor, parseHash } from './router';
 
 describe('parseHash', () => {
   it('등록 화면은 앱 상세보다 먼저 잡힌다 (/applications/new 가 id 로 읽히지 않음)', () => {
@@ -10,6 +10,10 @@ describe('parseHash', () => {
     expect(parseHash('#/applications')).toEqual({ page: 'applications' });
     expect(parseHash(`#${applicationPath('a4f3')}`)).toEqual({ page: 'application', id: 'a4f3' });
     expect(parseHash(`#${deploymentPath('dep 1')}`)).toEqual({ page: 'deployment', id: 'dep 1' });
+  });
+  it('Agent 관리 화면', () => {
+    expect(parseHash(`#${AGENTS_PATH}`)).toEqual({ page: 'agents' });
+    expect(parseHash('#/agents/')).toEqual({ page: 'agents' });
   });
   it('홈 / 데모 목록 / 로그인 화면', () => {
     expect(parseHash('#')).toEqual({ page: 'home' });

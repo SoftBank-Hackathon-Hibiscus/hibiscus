@@ -1,24 +1,21 @@
 import { Check, ExternalLink, Minus, X } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
-import { ApiError, type DataSource } from '../api/client';
-import { parsePastedToken, writeToken, writeTokens } from '../api/token';
 import { Collapsible, PageTitle } from '../components/ui';
 import type { ConnectionState } from '../hooks/useConnection';
 import { backendBaseUrl, isLocalBackend, oauthStartUrl } from '../lib/backendUrl';
 import type { Tone } from '../lib/deployState';
 import { useLang } from '../lib/i18n';
 import { APPLICATIONS_PATH, REGISTER_PATH, applicationPath, deploymentPath, navigate, realHref } from '../lib/router';
-import { finishSignIn } from '../lib/session';
 
 type StepState = 'idle' | 'checking' | 'ok' | 'warn' | 'fail';
 
 /**
  * 실제 환경 연결. ① 서버 연결 → ② GitHub 인증 → ③ 시작.
- * backend 계약은 그대로다: GET /auth/github 는 { authorization_url } JSON 을 돌려주고, state 쿠키는 backend 호스트에 붙는다.
- * 그래서 로그인 시작은 backend 주소를 새 탭으로 직접 열고, 콜백 JSON 을 붙여넣어 토큰을 저장한다.
+ * Backend에서 로그인하고, Callback이 토큰 Fragment와 함께 이 화면으로 돌아온다.
+ * main.tsx가 React 실행 전에 토큰을 저장하고 민감한 Fragment를 제거한다.
  * 실패해도 mock 으로 돌아가지 않는다.
  */
-export function Connect({ source, connection, onTokenChange, onRecheck }: { source: DataSource; connection: ConnectionState; onTokenChange: () => void; onRecheck: () => void }) {
+export function Connect({ connection, onRecheck }: { connection: ConnectionState; onRecheck: () => void }) {
   const { t } = useLang();
   const base = backendBaseUrl();
   const local = isLocalBackend(base);
@@ -52,13 +49,8 @@ export function Connect({ source, connection, onTokenChange, onRecheck }: { sour
           )}
         </StepCard>
 
-        <StepCard
-          n={2}
-          state={authState}
-          title={t('stepGithubAuth')}
-          status={!serverOk ? t('serverFirst') : signedIn ? `@${connection.user.login}` : connection.level === 'login' && connection.tokenPresent ? t('tokenInvalid') : t('loginNeeded')}
-        >
-          {serverOk && !signedIn && <SignIn source={source} connection={connection} base={base} onTokenChange={onTokenChange} />}
+        <StepCard n={2} state={authState} title={t('stepGithubAuth')} status={!serverOk ? t('serverFirst') : signedIn ? `@${connection.user.login}` : connection.level === 'login' && connection.tokenPresent ? t('tokenInvalid') : t('loginNeeded')}>
+          {serverOk && !signedIn && <SignIn connection={connection} base={base} />}
           {signedIn && <p className="step-help">{t('signedInNote')}</p>}
         </StepCard>
 
@@ -85,7 +77,13 @@ export function Connect({ source, connection, onTokenChange, onRecheck }: { sour
   );
 }
 
-const STATE_TONE: Record<StepState, Tone> = { idle: 'muted', checking: 'muted', ok: 'success', warn: 'warning', fail: 'danger' };
+const STATE_TONE: Record<StepState, Tone> = {
+  idle: 'muted',
+  checking: 'muted',
+  ok: 'success',
+  warn: 'warning',
+  fail: 'danger',
+};
 
 function StepCard({ n, state, title, status, children }: { n: number; state: StepState; title: string; status: string; children?: ReactNode }) {
   const tone = STATE_TONE[state];
@@ -104,103 +102,20 @@ function StepCard({ n, state, title, status, children }: { n: number; state: Ste
   );
 }
 
-/** GitHub 로그인 시작 + 콜백 JSON 붙여넣기. 저장 즉시 /users/me 로 확인하고, 되면 앱 목록으로 간다. */
-function SignIn({ source, connection, base, onTokenChange }: { source: DataSource; connection: ConnectionState; base: string; onTokenChange: () => void }) {
+/** Backend에서 GitHub 로그인을 시작한다. 성공하면 Callback이 이 화면으로 자동 복귀한다. */
+function SignIn({ connection, base }: { connection: ConnectionState; base: string }) {
   const { t } = useLang();
-  const [draft, setDraft] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const startUrl = oauthStartUrl(base);
-
-  const submit = async () => {
-    const parsed = parsePastedToken(draft);
-    if (!parsed.ok) {
-      setError(parsed.reason === 'invalid_json' ? t('tokenInvalidJson') : parsed.reason === 'no_access_token' ? t('tokenNoAccess') : t('tokenEmpty'));
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    writeTokens({ accessToken: parsed.accessToken, refreshToken: parsed.refreshToken });
-    try {
-      await source.me();
-      setDraft('');
-      onTokenChange();
-      finishSignIn();
-    } catch (e) {
-      // 확인에 실패한 토큰은 두지 않는다. 상단 상태도 "로그인 필요"로 돌아간다.
-      writeToken(null);
-      onTokenChange();
-      setError(describeAuthError(e, t));
-    } finally {
-      setBusy(false);
-    }
-  };
 
   return (
     <div className="step-body">
       {connection.level === 'login' && connection.tokenPresent && <p className="step-help tone-warning">{t('savedTokenInvalid')}</p>}
-      <ol className="signin-steps">
-        <li>
-          <a className="btn btn-primary" href={startUrl} target="_blank" rel="noopener noreferrer">
-            {t('startGithubLogin')} <ExternalLink size={14} aria-hidden />
-          </a>
-          <span className="step-help">{t('signinHelp1')}</span>
-        </li>
-        <li>
-          <span className="step-help">{t('signinHelp2')}</span>
-        </li>
-        <li>
-          <form
-            className="signin-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void submit();
-            }}
-          >
-            <label className="field-label" htmlFor="callback-json">
-              {t('pasteLabel')}
-            </label>
-            <textarea
-              id="callback-json"
-              className="input signin-input"
-              rows={3}
-              placeholder='{"access_token": "...", "refresh_token": "..."}'
-              value={draft}
-              onChange={(event) => {
-                setDraft(event.target.value);
-                setError(null);
-              }}
-              autoComplete="off"
-              spellCheck={false}
-              aria-invalid={error ? true : undefined}
-              aria-describedby={error ? 'callback-error' : undefined}
-            />
-            <div className="row">
-              <button type="submit" className="btn btn-primary" disabled={busy || !draft.trim()}>
-                {busy ? t('verifying') : t('saveAndVerify')}
-              </button>
-              <span className="small muted">{t('pasteNote')}</span>
-            </div>
-            {error && (
-              <p id="callback-error" className="small tone-danger" role="alert">
-                {error}
-              </p>
-            )}
-          </form>
-        </li>
-      </ol>
+      <a className="btn btn-primary" href={startUrl}>
+        {t('startGithubLogin')} <ExternalLink size={14} aria-hidden />
+      </a>
+      <p className="step-help">{t('signinHelp1')}</p>
     </div>
   );
-}
-
-function describeAuthError(error: unknown, t: ReturnType<typeof useLang>['t']): string {
-  if (error instanceof ApiError) {
-    if (error.status === 403) return t('authForbidden');
-    if (error.status === 401) return t('authExpired');
-    if (error.status === 0) return t('backendUnreachable');
-    return `${t('requestFailed')} (${error.status})`;
-  }
-  return error instanceof Error ? error.message : String(error);
 }
 
 function GoTo() {

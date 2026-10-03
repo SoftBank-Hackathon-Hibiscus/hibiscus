@@ -1,9 +1,10 @@
 # frontend
 
-데모용 최소 UI. 화면은 두 개다.
+하이브리드 배포 관리 UI.
 
 - **Deployment Detail** `#/deployments/<id>`: test → policy → sign → deploy 타임라인, 정책 결정과 고칠 것(requires), 서명, 배포 결과, 감사 기록, 산출물
 - **Application Detail** `#/applications/<id>`: 현재 route, On-Prem / Cloud Run target 과 health, failover 감지, 에이전트 상태, 배포 목록
+- **Agent Management** `#/agents`: Agent 목록과 연결 상태, 신규 등록, Agent Token 재발급·폐기, SSH 등록 토큰 발급
 
 Vite + React + TypeScript. 상태관리·UI 라이브러리 없음. 화면 명세는 [SPEC.md](SPEC.md).
 
@@ -49,15 +50,13 @@ mock 데이터는 `src/mocks/` 에 있고 실제 API 응답과 같은 구조다.
    npm run dev
    ```
 2. `http://127.0.0.1:5173/?mode=real` 로 연다. 백엔드 → 토큰 → 앱 선택 체크리스트가 뜨고, 상단 표시는 `/healthz` 가 `{ok:true}` 를 돌려주지 않으면 빨강 "백엔드 연결 안 됨", 토큰이 없거나 401 이면 주황 "로그인 필요", `/users/me` 가 성공할 때만 초록 "실제 백엔드 연결됨"이다. 실패해도 mock 으로 되돌아가지 않는다.
-3. access token 을 구한다: 브라우저로 OAuth 시작 주소를 연다 → `authorization_url` 로 이동 → GitHub 로그인 → 콜백이 JSON 을 돌려주는데 그 안의 `access_token` 을 복사한다. (콜백은 리다이렉트하지 않는다.)
-   - 로컬 backend-v2: `http://127.0.0.1:8080/auth/github`
-   - 팀 VM: 반드시 `https://api.hibiscus.lth.so/auth/github` 에서 시작한다. GitHub App 콜백이 `api.hibiscus.lth.so` 로 등록돼 있고 state 쿠키도 그 호스트의 `/auth/github` 경로에 붙는다. 5173 프록시나 `127.0.0.1` 에서 시작하면 쿠키가 콜백 호스트로 가지 않아 콜백에서 401 이 난다.
-4. 상단 입력칸에 콜백 JSON 전체 또는 access token을 붙여 저장한다. JSON 전체를 넣으면 refresh token도 저장된다. `localStorage`에 보관하며 API 요청은 `Authorization: Bearer`로 보낸다.
-5. 토큰이 유효하면 `GET /applications` 목록이 보이고 클릭하면 이동한다. id 직접 입력은 "고급"에 있다.
+3. 로그인 버튼을 누르면 Backend가 OAuth state Cookie를 설정하고 GitHub로 이동시킨다.
+4. GitHub 인증이 끝나면 Backend가 `AUTH_FRONTEND_URL`로 돌아온다. 프론트는 URL Fragment에서 토큰을 저장하고 Fragment를 즉시 제거한다.
+5. 프론트는 `/users/me`로 인증을 확인한다. 토큰이 유효하면 `GET /applications` 목록이 보인다.
 
 access token은 기본 15분 만료다. refresh token이 있으면 401 응답 시 한 번 갱신하고 원 요청을 한 번 재시도한다. refresh token이 없거나 갱신에 실패하면 다시 로그인한다.
 
-CORS: backend-v2 는 CORS 를 켜지 않는다. `vite.config.ts` 의 프록시가 `/auth, /applications, /deployments, /agents, /users, /healthz` 를 백엔드로 넘겨 같은 origin 으로 보이게 한다. `npm run preview` 도 같은 프록시를 쓴다. 원격 HTTPS 연결은 인증서를 검증한다. OAuth 로그인 시작은 위 안내대로 backend 주소를 직접 사용한다.
+CORS: backend-v2 는 CORS 를 켜지 않는다. `vite.config.ts` 의 프록시가 `/auth, /applications, /deployments, /agents, /users, /healthz` 를 백엔드로 넘겨 같은 origin 으로 보이게 한다. `npm run preview` 도 같은 프록시를 쓴다. 원격 HTTPS 연결은 인증서를 검증한다. OAuth 로그인은 Backend의 `/auth/github/redirect`에서 시작한다. GitHub App Callback URL은 계속 Backend의 `/auth/github/callback`이다.
 
 ## 쓰는 API
 
@@ -70,6 +69,11 @@ CORS: backend-v2 는 CORS 를 켜지 않는다. `vite.config.ts` 의 프록시�
 | GET | `/applications/:id/routing` | 현재 route (첫 전환 전 404 → "경로 없음") |
 | GET | `/applications/:id/targets` | target 과 health |
 | GET | `/agents/:id/status` | 에이전트 online/offline, 서빙 중 컨테이너 (앱에 에이전트가 없으면 호출 안 함) |
+| GET | `/agents` | Agent 관리 목록 |
+| POST | `/agents` | Agent 신규 등록과 초기 환경 변수 발급 |
+| POST | `/agents/:id/token/rotate` | Agent Token 재발급 |
+| DELETE | `/agents/:id/token` | Agent Token과 SSH 연결 폐기 |
+| POST | `/agents/:id/ssh/enrollment` | 일회용 SSH 등록 토큰 발급 |
 
 폴링: Deployment Detail 은 queued/running/awaiting_approval 일 때만 2초, Application Detail 은 5초.
 
@@ -82,5 +86,5 @@ src/
   lib/        산출물 선택·parse, deploy 상태 판정, 포맷, 해시 라우터
   hooks/      usePolling
   components/ Badge, Hash(클릭 복사), Kv, Notice, Collapsible, TokenBar
-  pages/      DeploymentDetail, ApplicationDetail
+  pages/      DeploymentDetail, ApplicationDetail, AgentList
 ```

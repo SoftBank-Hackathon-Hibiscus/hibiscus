@@ -1,6 +1,10 @@
 import { ApiError, type DataSource } from './client';
 import type {
+  AgentRegistration,
+  AgentSshEnrollment,
   AgentStatusResponse,
+  AgentSummary,
+  AgentTokenRotation,
   ApplicationView,
   CreateDeploymentInput,
   CurrentUser,
@@ -13,9 +17,11 @@ import type {
   GithubConnection,
   GithubInstallationsPage,
   GithubRepositoriesPage,
+  HealthCheckConfig,
   RouteSnapshot,
   RoutingTargetView,
   Trigger,
+  UpdateHealthCheckInput,
 } from './types';
 import type { MockScenario } from '../mocks';
 import { MOCK_BRANCHES, MOCK_GATEWAY_DOMAIN, MOCK_GITHUB_CONNECTION, MOCK_INSTALLATIONS, MOCK_REPOSITORIES } from '../mocks/github';
@@ -70,6 +76,7 @@ export class MockDataSource implements DataSource {
   readonly kind = 'mock' as const;
   private readonly startedAt: number;
   private readonly created: CreatedApplication[] = [];
+  private readonly agents: AgentSummary[];
 
   constructor(
     readonly scenario: MockScenario,
@@ -77,6 +84,10 @@ export class MockDataSource implements DataSource {
     private readonly latencyMs: number = LATENCY_MS,
   ) {
     this.startedAt = now();
+    this.agents = scenario.application.agents.map((agent) => ({
+      ...structuredClone(agent),
+      sshEnrolledAt: agent.status === 'registered' ? null : agent.updatedAt,
+    }));
   }
 
   /** 실제 API 처럼 매번 새 객체를 돌려준다 (시나리오 상태를 제자리에서 바꿔도 화면이 변화를 알아채도록). */
@@ -148,6 +159,28 @@ export class MockDataSource implements DataSource {
     return this.fail(404, 'Application not found');
   }
 
+  async updateHealthCheck(applicationId: string, input: UpdateHealthCheckInput): Promise<HealthCheckConfig> {
+    this.tick();
+    const view = this.isScenarioApp(applicationId) ? this.scenario.application : this.createdApp(applicationId)?.view;
+    if (!view) return this.fail(404, 'Application not found');
+    const updated: HealthCheckConfig = {
+      ...view.healthCheck,
+      enabled: input.enabled,
+      path: input.path,
+      versionPath: input.version_path,
+      method: input.method,
+      intervalSeconds: input.interval_seconds,
+      timeoutSeconds: input.timeout_seconds,
+      successStatusMin: input.success_status_min,
+      successStatusMax: input.success_status_max,
+      successThreshold: input.success_threshold,
+      failureThreshold: input.failure_threshold,
+      updatedAt: new Date(this.now()).toISOString(),
+    };
+    view.healthCheck = updated;
+    return this.delay(updated);
+  }
+
   async listDeployments(applicationId: string): Promise<Deployment[]> {
     this.tick();
     const views = this.isScenarioApp(applicationId) ? this.scenario.deployments : this.createdApp(applicationId)?.deployments;
@@ -196,8 +229,75 @@ export class MockDataSource implements DataSource {
   async getAgentStatus(agentId: string): Promise<AgentStatusResponse> {
     this.tick();
     const status = this.frame().agents[agentId];
-    if (!status) return this.fail(404, 'Agent not found');
+    if (!status) {
+      const agent = this.agents.find((item) => item.id === agentId);
+      if (!agent) return this.fail(404, 'Agent not found');
+      return this.delay({
+        schema_version: 1,
+        agent_id: agent.id,
+        status: agent.status,
+        last_seen_at: agent.lastSeenAt,
+        updated_at: agent.lastSeenAt,
+        received_at: agent.lastSeenAt,
+        serving: null,
+        public_url: null,
+      });
+    }
     return this.delay(status);
+  }
+
+  async listAgents(): Promise<AgentSummary[]> {
+    return this.delay(this.agents);
+  }
+
+  async createAgent(name: string): Promise<AgentRegistration> {
+    const timestamp = new Date(this.now()).toISOString();
+    const agent: AgentSummary = {
+      id: randomId(),
+      name,
+      status: 'registered',
+      lastSeenAt: null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      sshEnrolledAt: null,
+    };
+    this.agents.push(agent);
+    return this.delay({
+      agent,
+      token: `mock-agent-token-${agent.id}`,
+      agent_id: agent.id,
+      ssh_enrollment_token: `mock-ssh-enrollment-${agent.id}`,
+      expires_at: new Date(this.now() + 600_000).toISOString(),
+      ssh: { host: 'gateway.example.test', port: 2222, user: 'hibiscus-agent', host_key_sha256: 'SHA256:mock' },
+    });
+  }
+
+  async rotateAgentToken(agentId: string): Promise<AgentTokenRotation> {
+    const agent = this.agents.find((item) => item.id === agentId);
+    if (!agent) return this.fail(404, 'Agent not found');
+    agent.status = 'registered';
+    agent.lastSeenAt = null;
+    agent.updatedAt = new Date(this.now()).toISOString();
+    return this.delay({ agent, token: `mock-rotated-token-${agent.id}` });
+  }
+
+  async revokeAgentToken(agentId: string): Promise<AgentSummary> {
+    const agent = this.agents.find((item) => item.id === agentId);
+    if (!agent) return this.fail(404, 'Agent not found');
+    agent.status = 'revoked';
+    agent.updatedAt = new Date(this.now()).toISOString();
+    return this.delay(agent);
+  }
+
+  async createAgentSshEnrollment(agentId: string): Promise<AgentSshEnrollment> {
+    const agent = this.agents.find((item) => item.id === agentId);
+    if (!agent) return this.fail(404, 'Agent not found');
+    return this.delay({
+      agent_id: agent.id,
+      ssh_enrollment_token: `mock-ssh-enrollment-${agent.id}`,
+      expires_at: new Date(this.now() + 600_000).toISOString(),
+      ssh: { host: 'gateway.example.test', port: 2222, user: 'hibiscus-agent', host_key_sha256: 'SHA256:mock' },
+    });
   }
 
   // ---------------------------------------------------------------- GitHub 연동 (in-memory)
