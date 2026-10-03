@@ -88,6 +88,9 @@ export class GithubBranchResponseDto {
   @IsString()
   @IsNotEmpty()
   name: string;
+  commit: {
+    sha: string;
+  };
 }
 export class GithubPushDto {
   @IsString()

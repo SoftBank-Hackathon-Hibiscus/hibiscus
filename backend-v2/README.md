@@ -228,6 +228,8 @@ GitHub App 사용자 토큰과 GitHub refresh token은 AES-256-GCM으로 암호�
 
 실제 저장소와 브랜치 접근을 확인한 뒤 앱과 연결 정보를 함께 저장합니다. 브랜치 변경 본문은 `{ "branch": "develop", "auto_deploy": true }`입니다. `source_path`를 생략하면 저장소 URL을 저장합니다.
 
+GitHub Application을 등록하면 선택한 브랜치의 최신 Commit SHA로 최초 Deployment도 함께 생성합니다. 응답의 `initial_deployment`에서 생성된 Deployment를 확인할 수 있습니다. 최초 Deployment는 `registration` trigger와 `queued` 상태로 시작하며 Worker가 기존 Pipeline을 실행합니다. `auto_deploy`는 등록 이후의 push 자동 배포 여부만 제어합니다.
+
 Registry Parity 실행에서 Deployment에 실제 Registry Digest가 아직 없으면 Backend가 다음 작업을 수행합니다.
 
 1. 저장된 GitHub 연결과 암호화된 사용자 token으로 요청된 40자리 Commit SHA만 임시 폴더에 checkout합니다.
