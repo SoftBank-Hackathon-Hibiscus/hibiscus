@@ -32,12 +32,13 @@ describe('mock 새 배포 (POST /applications/:id/deployments 흉내)', () => {
     expect(created.imageDigest).toBe(digest);
     expect(created.digestSource).toBe('registry');
   });
-  it('mock 으로 등록한 앱에도 배포를 만들 수 있고(v1), 모르는 앱은 404', async () => {
+  it('mock 으로 등록한 앱에도 배포를 만들 수 있고(최초 배포 다음 v2), 모르는 앱은 404', async () => {
     const s = source();
     const app = await s.createGithubApplication({ name: 'Guestbook 2', slug: 'guestbook-2', image_repo: 'repo/x', installation_id: MOCK_INSTALLATION_ID, repository_id: MOCK_REPO_GUESTBOOK_ID, branch: 'main' });
     const created = await s.createDeployment(app.application.id, { source_revision: COMMIT });
-    expect(created.version).toBe(1);
-    expect((await s.listDeployments(app.application.id)).map((d) => d.id)).toEqual([created.id]);
+    expect(created.version).toBe(2);
+    expect(created.trigger).toBe('manual');
+    expect((await s.listDeployments(app.application.id)).map((d) => d.id)).toEqual([created.id, app.initial_deployment!.id]);
     await expect(s.createDeployment('nope', { source_revision: COMMIT })).rejects.toMatchObject({ status: 404 });
   });
   it('기존 시나리오 route/target 조회는 새 배포와 무관하게 유지된다', async () => {

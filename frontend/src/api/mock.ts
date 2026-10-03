@@ -15,6 +15,7 @@ import type {
   GithubRepositoriesPage,
   RouteSnapshot,
   RoutingTargetView,
+  Trigger,
 } from './types';
 import type { MockScenario } from '../mocks';
 import { MOCK_BRANCHES, MOCK_GATEWAY_DOMAIN, MOCK_GITHUB_CONNECTION, MOCK_INSTALLATIONS, MOCK_REPOSITORIES } from '../mocks/github';
@@ -47,6 +48,11 @@ function placeholderDigest(seed: string): string {
     hex += h.toString(16).padStart(8, '0');
   }
   return `sha256:${hex.slice(0, 64)}`;
+}
+
+/** mock 브랜치의 최신 커밋. backend requireBranch 가 돌려주는 것처럼 40자리 소문자 16진수 */
+export function mockBranchHead(repoFullName: string, branch: string): string {
+  return placeholderDigest(`branch:${repoFullName}@${branch}`).slice('sha256:'.length, 'sha256:'.length + 40);
 }
 
 function randomId(): string {
@@ -274,8 +280,11 @@ export class MockDataSource implements DataSource {
       active: true,
       createdAt: timestamp,
     };
-    this.created.push({ view, github, deployments: [] });
-    return this.delay({ ...view, github });
+    const created: CreatedApplication = { view, github, deployments: [] };
+    this.created.push(created);
+    // backend 처럼 auto_deploy 와 상관없이 선택한 브랜치의 최신 커밋으로 최초 배포를 만든다
+    const initial = this.pushDeployment(created.deployments, id, { source_revision: mockBranchHead(repo.full_name, input.branch) }, 'registration', this.now());
+    return this.delay({ ...view, github, initial_deployment: initial });
   }
 
   // ---------------------------------------------------------------- 새 배포 (in-memory, 자동 진행 없음)
@@ -285,13 +294,17 @@ export class MockDataSource implements DataSource {
     const now = this.tick();
     const views = this.isScenarioApp(applicationId) ? this.scenario.deployments : this.createdApp(applicationId)?.deployments;
     if (!views) return this.fail(404, 'Application not found');
+    return this.delay(this.pushDeployment(views, applicationId, input, 'manual', now));
+  }
+
+  private pushDeployment(views: DeploymentView[], applicationId: string, input: CreateDeploymentInput, trigger: Trigger, now: number): Deployment {
     const id = randomId();
     const timestamp = new Date(now).toISOString();
     const deployment: Deployment = {
       id,
       applicationId,
       version: views.reduce((max, v) => Math.max(max, v.deployment.version), 0) + 1,
-      trigger: 'manual',
+      trigger,
       sourceRevision: input.source_revision,
       sourceRevisionVerified: false,
       imageDigest: input.image_digest ?? placeholderDigest(`placeholder:${id}`),
@@ -309,6 +322,6 @@ export class MockDataSource implements DataSource {
       updatedAt: timestamp,
     };
     views.push({ deployment, stages: [], policyResult: null, artifacts: [], auditLogs: [] });
-    return this.delay(deployment);
+    return deployment;
   }
 }
