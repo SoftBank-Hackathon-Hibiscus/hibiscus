@@ -12,6 +12,7 @@ import { ParityTestStage } from './stages/parity-test.stage.js';
 import { PolicyStage } from './stages/policy.stage.js';
 import { SignStage } from './stages/sign.stage.js';
 import { DeployStage } from './stages/deploy.stage.js';
+import { ParityInputService } from './parity-input.service.js';
 
 @Module({
   imports: [DatabaseModule, ApplicationModule],
@@ -24,10 +25,16 @@ import { DeployStage } from './stages/deploy.stage.js';
     CommandRunner,
     TestStage,
     ParityTestStage,
+    ParityInputService,
     PolicyStage,
     SignStage,
     DeployStage,
   ],
-  exports: [DeploymentRepository, DeploymentService, CommandRunner],
+  exports: [
+    DeploymentRepository,
+    DeploymentService,
+    CommandRunner,
+    ParityInputService,
+  ],
 })
 export class DeploymentModule {}

@@ -1,4 +1,8 @@
-import { ValidationPipe, type INestApplication } from '@nestjs/common';
+import {
+  UnprocessableEntityException,
+  ValidationPipe,
+  type INestApplication,
+} from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { randomBytes, randomUUID, createHmac } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -11,6 +15,7 @@ import { UserService } from '../src/user/user.service.js';
 import { GithubConnectionService } from '../src/github/github-connection.service.js';
 import { DatabaseService } from '../src/database/database.service.js';
 import { DeploymentService } from '../src/deployment/deployment.service.js';
+import { ParityInputService } from '../src/deployment/parity-input.service.js';
 import {
   applications,
   deployments,
@@ -291,6 +296,50 @@ describe('GitHub management and Webhook (e2e)', () => {
         .where(eq(applications.id, created.application.id))
         .get()?.defaultBranch,
     ).toBe('feature/test');
+  });
+
+  it('rejects registration before saving when registry parity inputs are missing', async () => {
+    const id = ++repoSequence;
+    const applicationCount = database.db
+      .select()
+      .from(applications)
+      .all().length;
+    const deploymentCount = database.db.select().from(deployments).all().length;
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          Response.json({ total_count: 1, repositories: [repository(id)] }),
+        )
+        .mockResolvedValueOnce(
+          Response.json({
+            name: 'main',
+            commit: { sha: initialRevision },
+          }),
+        ),
+    );
+    vi.spyOn(
+      app.get(ParityInputService),
+      'assertRegistrationReady',
+    ).mockImplementationOnce(() => {
+      throw new UnprocessableEntityException(
+        'Registry parity inputs are not configured for this application slug',
+      );
+    });
+
+    await request(app.getHttpServer())
+      .post('/github/applications')
+      .set('Authorization', bearer())
+      .send(applicationInput(id))
+      .expect(422);
+
+    expect(database.db.select().from(applications).all()).toHaveLength(
+      applicationCount,
+    );
+    expect(database.db.select().from(deployments).all()).toHaveLength(
+      deploymentCount,
+    );
   });
 
   it('validates webhook HMAC without claiming the source image has been tested', async () => {

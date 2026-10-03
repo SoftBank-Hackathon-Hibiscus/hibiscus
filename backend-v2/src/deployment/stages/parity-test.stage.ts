@@ -1,8 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ModuleRef } from '@nestjs/core';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { isAbsolute, join } from 'node:path';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { z } from 'zod';
 import type { BackendConfig } from '../../config/configs/backend.config.js';
 import { GithubSourceCheckoutService } from '../../github/github-source-checkout.service.js';
@@ -10,26 +10,8 @@ import {
   CommandRunner,
   type CommandSpec,
 } from '../../infrastructure/command-runner.js';
+import { ParityInputService } from '../parity-input.service.js';
 import type { StageContext, StageOutcome } from '../types/deployment.type.js';
-
-const absoluteFile = z
-  .string()
-  .min(1)
-  .refine(isAbsolute, 'An absolute path is required');
-const inputSchema = z
-  .object({
-    record: absoluteFile,
-    noise: absoluteFile,
-    after: z.array(z.number().int().positive()).default([]),
-    health_path: z
-      .string()
-      .regex(/^\/\S*$/)
-      .default('/healthz'),
-    health_timeout: z.number().positive().default(30),
-    // Prebuilt runs use <directory>/<deployment.id>/build_manifest.json.
-    build_manifest_directory: absoluteFile.optional(),
-  })
-  .strict();
 const buildSchema = z.object({
   schema_version: z.literal('premortem.build.v1'),
   run_id: z.string(),
@@ -63,6 +45,7 @@ export class ParityTestStage {
     private readonly config: ConfigService<BackendConfig, true>,
     private readonly runner: CommandRunner,
     private readonly moduleRef: ModuleRef,
+    private readonly inputs: ParityInputService,
   ) {}
 
   async run({
@@ -76,21 +59,10 @@ export class ParityTestStage {
           'Registry parity requires a full 40-character source SHA',
         );
       }
-      const inputFile = this.config.get('backend.parityInputsFile', {
-        infer: true,
-      });
-      if (!isAbsolute(inputFile))
-        throw new Error('PARITY_INPUTS_FILE must be an absolute path');
-      const inputs = z
-        .record(z.string(), inputSchema)
-        .parse(JSON.parse(readFileSync(inputFile, 'utf8')));
-      const input = inputs[application.slug];
-      if (!input)
-        throw new Error('Parity inputs are missing for this application slug');
-      for (const file of [input.record, input.noise]) {
-        if (!existsSync(file))
-          throw new Error('Parity baseline file is missing');
-      }
+      const input = this.inputs.get(application.slug);
+      const stageWork = join(paths.root, 'test-work');
+      rmSync(stageWork, { recursive: true, force: true });
+      mkdirSync(stageWork, { recursive: true });
       const repoRoot = this.config.get('backend.repoRoot', { infer: true });
       const python = this.config.get('backend.parityPythonCommand', {
         infer: true,
@@ -130,7 +102,7 @@ export class ParityTestStage {
           application.id,
           application.sourcePath,
           deployment.sourceRevision,
-          join(paths.root, 'source'),
+          join(stageWork, 'source'),
         );
         const revision = await run({
           command: 'git',
@@ -143,7 +115,7 @@ export class ParityTestStage {
             'App checkout does not match the requested source SHA',
           );
         }
-        const buildDir = join(paths.root, 'build');
+        const buildDir = join(stageWork, 'build');
         const args = [
           '-m',
           'premortem',
@@ -194,7 +166,7 @@ export class ParityTestStage {
         health_path: input.health_path,
         health_timeout: input.health_timeout,
       };
-      const requestPath = join(paths.root, 'parity-request.json');
+      const requestPath = join(stageWork, 'parity-request.json');
       writeFileSync(requestPath, JSON.stringify(request, null, 2) + '\n', {
         flag: 'wx',
       });

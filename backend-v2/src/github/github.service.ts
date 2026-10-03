@@ -23,6 +23,7 @@ import {
 } from '../database/schema.js';
 import { ApplicationService } from '../application/application.service.js';
 import { DeploymentService } from '../deployment/deployment.service.js';
+import { ParityInputService } from '../deployment/parity-input.service.js';
 import { GithubConnectionService } from './github-connection.service.js';
 import {
   GithubPushDto,
@@ -50,6 +51,7 @@ export class GithubService {
     private readonly connectionService: GithubConnectionService,
     private readonly applicationsService: ApplicationService,
     private readonly deployment: DeploymentService,
+    private readonly parityInputs: ParityInputService,
   ) {}
 
   connection(userId: string) {
@@ -127,6 +129,7 @@ export class GithubService {
       repo.full_name,
       input.branch,
     );
+    this.parityInputs.assertRegistrationReady(input.slug);
     try {
       return this.database.db.transaction(() => {
         const view = this.applicationsService.create({
