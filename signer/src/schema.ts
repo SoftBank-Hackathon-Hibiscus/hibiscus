@@ -124,7 +124,7 @@ export const RevokeSchema = z
     run_id: RunIdSchema.optional().describe("있으면 그 실행의 서명만, 없으면 이 이미지의 서명 전부 (이후 서명도 거부)"),
     reason: RevokeReasonSchema,
     by: PersonSchema.describe("철회한 사람"),
-    note: z.string().max(200).optional(),
+    note: z.string().max(200).regex(/^[^\u0000-\u001f\u007f-\u009f]*$/, "note 에 제어 문자는 쓸 수 없음").optional(),
   })
   .describe("이미 한 서명을 더는 배포에 쓰지 않게 막는 기록. 감사 로그에만 남김 (decisions.jsonl 계약은 그대로)");
 export type Revoke = z.infer<typeof RevokeSchema>;

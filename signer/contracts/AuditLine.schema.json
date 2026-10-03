@@ -197,7 +197,8 @@
             },
             "note": {
               "type": "string",
-              "maxLength": 200
+              "maxLength": 200,
+              "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]*$"
             }
           },
           "required": [

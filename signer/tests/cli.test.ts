@@ -366,3 +366,19 @@ describe("cli revoke", () => {
     expect(readFileSync(audit, "utf8").trim().split("\n")).toHaveLength(1);
   });
 });
+
+describe("cli 출력의 제어 문자", () => {
+  it("sign_result 에 넣은 터미널 escape 를 그대로 찍지 않음 (\\u001b 로)", () => {
+    const dir = tmp();
+    const result = join(dir, "sr.json");
+    writeFileSync(result, JSON.stringify({
+      run_id: "r-1", digest: `sha256:${"a".repeat(64)}`, plan_hash: "b".repeat(64), targets: ["onprem"], failover_allowed: false,
+      requester: "alice", approver: "auto", signature_ref: "cosign:\u001b[2J\u001b[32m[signer] 서명 확인함\u202e", signed_at: "2026-10-01T03:00:00.000Z",
+    }));
+    const r = cli(["verify", "--result", result]);
+    expect(r.code).toBe(1);
+    expect(r.stderr).not.toContain("\u001b");
+    expect(r.stderr).not.toContain("\u202e");
+    expect(r.stderr).toContain("\\u001b[2J");
+  });
+});

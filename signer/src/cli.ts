@@ -16,6 +16,14 @@ import { DEFAULT_POLICY } from "./attestation.js";
 import { runSign } from "./sign.js";
 import { DEFAULT_PUBLIC_KEY, runAuditVerify, runVerify } from "./verify.js";
 
+// 화면에 찍는 문자열의 제어 문자(터미널 escape, 방향 바꾸는 유니코드 등)를 \uXXXX 로. sign_result·감사 로그·cosign 출력처럼
+// 남이 쓴 값이 detail 에 섞여도 화면을 속이지 못하게 (줄바꿈은 그대로). JSON 출력은 원래 escape 됨
+function printable(text: string): string {
+  return text.replace(/[\u0000-\u0009\u000b-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`);
+}
+const say = (text: string): void => console.log(printable(text));
+const warn = (text: string): void => console.error(printable(text));
+
 const USAGE = `사용법
   npx tsx src/cli.ts approve --plan <plan.json> --requester <id> --approver <id> [--out approval.json] [--ssh-key <승인자 SSH 키>]
   npx tsx src/cli.ts sign --plan <plan.json> --requester <id> [--approval <approval.json>]
@@ -160,7 +168,7 @@ async function main(argv: string[]): Promise<number> {
     if (command === "sign") rmSync(typeof loose.out === "string" && loose.out !== "" ? loose.out : "sign_result.json", { force: true });
     // --json 이면 인자 오류도 JSON 한 줄로
     if (loose.json === true && (command === "verify" || command === "audit" || command === "reconcile")) {
-      console.log(JSON.stringify({ ok: false, code: 2, error: "ARG_INVALID", message }));
+      say(JSON.stringify({ ok: false, code: 2, error: "ARG_INVALID", message }));
       return 2;
     }
     throw new SignerError("ARG_INVALID", `${message}\n\n${USAGE}`);
@@ -204,10 +212,10 @@ async function main(argv: string[]): Promise<number> {
     const approval = createApproval(loaded, required(values.requester, "requester"), required(values.approver, "approver"), new Date());
     const out = values.out ?? "approval.json";
     writeJson(out, approval);
-    console.log(`[signer] 승인 기록 저장: ${out} (run_id=${approval.run_id}, approver=${approval.approver})`);
+    say(`[signer] 승인 기록 저장: ${out} (run_id=${approval.run_id}, approver=${approval.approver})`);
     // 승인자 SSH 키로 서명 (sign --approvers 로 확인). 이전 서명 파일은 먼저 지움
     rmSync(`${out}.sig`, { force: true });
-    if (values["ssh-key"]) console.log(`  승인자 서명: ${await signApprovalFile(out, values["ssh-key"])}`);
+    if (values["ssh-key"]) say(`  승인자 서명: ${await signApprovalFile(out, values["ssh-key"])}`);
     return 0;
   }
 
@@ -223,7 +231,7 @@ async function main(argv: string[]): Promise<number> {
     if (loose !== undefined) {
       const message = `개인키 파일 권한이 ${loose} 라서 다른 사용자도 읽을 수 있음 (chmod 600 권장): ${keyPath}`;
       if (process.env.SIGNER_STRICT_KEY_PERMS === "1") throw new SignerError("KEY_PERMISSIONS", message);
-      console.error(`[signer] 경고: ${message}`);
+      warn(`[signer] 경고: ${message}`);
     }
     const signer = keyPath === undefined ? new DryRunSigner() : new CosignSigner(keyPath, "cosign", cosignOptions);
     // 시험 실행은 실제 서명이 없어서 자기 확인을 안 함. 지문 확인은 서명 전에 끝냄
@@ -259,16 +267,16 @@ async function main(argv: string[]): Promise<number> {
     }
     if (outcome.code === 0) {
       const r = outcome.result;
-      console.log(`[signer] 서명함 run_id=${r.run_id} digest=${r.digest}`);
-      console.log(`  targets  : ${r.targets.join(", ")}`);
-      console.log(`  approver : ${r.approver}`);
-      console.log(`  signature: ${r.signature_ref}${dryRun ? "  (시험 실행)" : noTlog ? "  (Rekor 없이)" : ""}`);
-      console.log(`  저장     : ${out}`);
-      if (auditPath !== undefined) console.log(`  감사 로그: ${auditPath}`);
-      if (selfVerifier !== undefined) console.log(`  자기 확인: 통과 (${pubs.join(", ")})`);
-      if (attest) console.log(`  배포 증명서: 붙임 (in-toto)`);
+      say(`[signer] 서명함 run_id=${r.run_id} digest=${r.digest}`);
+      say(`  targets  : ${r.targets.join(", ")}`);
+      say(`  approver : ${r.approver}`);
+      say(`  signature: ${r.signature_ref}${dryRun ? "  (시험 실행)" : noTlog ? "  (Rekor 없이)" : ""}`);
+      say(`  저장     : ${out}`);
+      if (auditPath !== undefined) say(`  감사 로그: ${auditPath}`);
+      if (selfVerifier !== undefined) say(`  자기 확인: 통과 (${pubs.join(", ")})`);
+      if (attest) say(`  배포 증명서: 붙임 (in-toto)`);
     } else {
-      console.error(`[signer] 서명 안 함 (${outcome.reason}): ${outcome.detail}`);
+      warn(`[signer] 서명 안 함 (${outcome.reason}): ${outcome.detail}`);
     }
     return outcome.code;
   }
@@ -282,6 +290,7 @@ async function main(argv: string[]): Promise<number> {
     let keys: ReturnType<typeof fingerprints>;
     let policySha256: string | undefined;
     const cleanups: Array<() => void> = [];
+    let approvers: string | undefined;
     const verifyAnchors = auditPath !== undefined ? anchorsPath : values.anchors || undefined;
     try {
       if (values["test-result"] !== undefined && values.attestation !== true) throw new SignerError("ARG_INVALID", "--test-result 는 --attestation 과 같이 써야 함 (시험 결과는 증명서에 들어 있음)");
@@ -298,7 +307,7 @@ async function main(argv: string[]): Promise<number> {
       }
       // 승인자 명부: 플래그는 항상, 환경변수(SIGNER_APPROVERS)는 승인 기록을 줄 때만
       const approversFile = values.approvers || (values.approval ? process.env.SIGNER_APPROVERS || undefined : undefined);
-      const approvers = approversFile !== undefined ? checkedApprovers(approversFile, cleanups) : undefined;
+      approvers = approversFile !== undefined ? checkedApprovers(approversFile, cleanups) : undefined;
       maxAgeMs = minutes(values["max-age"] || process.env.SIGNER_MAX_AGE_MIN, "max-age");
       outcome = await runVerify({
         resultPath: required(values.result, "result"),
@@ -322,7 +331,7 @@ async function main(argv: string[]): Promise<number> {
       // --json 이면 실행 오류도 JSON 한 줄로 (콘솔·backend 가 그대로 읽게). 예상 못 한 오류도 INTERNAL 로
       if (json) {
         const error = e instanceof SignerError ? e.code : "INTERNAL";
-        console.log(JSON.stringify({ ok: false, code: 2, error, message: e instanceof Error ? e.message : String(e) }));
+        say(JSON.stringify({ ok: false, code: 2, error, message: e instanceof Error ? e.message : String(e) }));
         return 2;
       }
       throw e;
@@ -330,7 +339,7 @@ async function main(argv: string[]): Promise<number> {
       for (const c of cleanups) c();
     }
     if (json) {
-      console.log(
+      say(
         JSON.stringify(
           outcome.code === 0
             ? {
@@ -348,6 +357,7 @@ async function main(argv: string[]): Promise<number> {
                   annotations: Object.keys(outcome.annotations),
                   plan: values.plan !== undefined,
                   approval: Boolean(values.approval),
+                  approval_signature: approvers !== undefined,
                   audit: auditPath !== undefined,
                   anchors: auditPath !== undefined && verifyAnchors !== undefined,
                   attestation: values.attestation === true ? { policy: policyPath, policy_sha256: `sha256:${policySha256}`, policy_pinned: policyPins.length > 0 } : false,
@@ -363,19 +373,19 @@ async function main(argv: string[]): Promise<number> {
     }
     if (outcome.code === 0) {
       const r = outcome.result;
-      console.log(`[signer] 서명 확인함 run_id=${r.run_id} digest=${r.digest}`);
-      console.log(`  targets  : ${r.targets.join(", ")}`);
-      console.log(`  approver : ${r.approver}`);
-      console.log(`  확인한 주석: ${Object.keys(outcome.annotations).join(", ")}`);
+      say(`[signer] 서명 확인함 run_id=${r.run_id} digest=${r.digest}`);
+      say(`  targets  : ${r.targets.join(", ")}`);
+      say(`  approver : ${r.approver}`);
+      say(`  확인한 주석: ${Object.keys(outcome.annotations).join(", ")}`);
       if (values.attestation === true) {
-        console.log(`  배포 증명서: 서명·내용 일치, 정책 통과 (${policyPath})`);
-        console.log(`  정책 지문: sha256:${policySha256}${policyPins.length > 0 ? " (고정값에 있음)" : ""}`);
+        say(`  배포 증명서: 서명·내용 일치, 정책 통과 (${policyPath})`);
+        say(`  정책 지문: sha256:${policySha256}${policyPins.length > 0 ? " (고정값에 있음)" : ""}`);
       }
-      if (maxAgeMs !== undefined) console.log(`  유효기간: ${maxAgeMs / 60_000}분 안에 서명함`);
-      if (auditPath !== undefined) console.log(`  감사 로그: signed 줄 일치${verifyAnchors !== undefined ? ", 끝 고정값 일치" : " (끝 고정값은 안 봄, --anchors 로 같이 확인 권장)"}`);
-      for (const k of keys) console.log(`  공개키 지문: ${k.sha256}${pinnedPub !== undefined ? " (고정값에 있음)" : ""}  ${k.path}`);
+      if (maxAgeMs !== undefined) say(`  유효기간: ${maxAgeMs / 60_000}분 안에 서명함`);
+      if (auditPath !== undefined) say(`  감사 로그: signed 줄 일치${verifyAnchors !== undefined ? ", 끝 고정값 일치" : " (끝 고정값은 안 봄, --anchors 로 같이 확인 권장)"}`);
+      for (const k of keys) say(`  공개키 지문: ${k.sha256}${pinnedPub !== undefined ? " (고정값에 있음)" : ""}  ${k.path}`);
     } else {
-      console.error(`[signer] 서명 확인 실패 (${outcome.reason}): ${outcome.detail}`);
+      warn(`[signer] 서명 확인 실패 (${outcome.reason}): ${outcome.detail}`);
     }
     return outcome.code;
   }
@@ -384,8 +394,8 @@ async function main(argv: string[]): Promise<number> {
     const log = required(auditPath, "audit");
     const out = anchorsPath ?? `${log}.anchors.jsonl`;
     const anchor = await runAnchor({ auditPath: log, anchorsPath: out, signer: new CosignSigner(required(values.key ?? process.env.SIGNER_COSIGN_KEY, "key"), "cosign", cosignOptions) });
-    console.log(`[signer] 감사 로그 끝 고정: ${anchor.seq}줄, head=${anchor.head}${noTlog ? " (Rekor 없이)" : " (Rekor 기록)"}`);
-    console.log(`  저장: ${out} (감사 로그와 다른 곳에도 복사해 둘 것)`);
+    say(`[signer] 감사 로그 끝 고정: ${anchor.seq}줄, head=${anchor.head}${noTlog ? " (Rekor 없이)" : " (Rekor 기록)"}`);
+    say(`  저장: ${out} (감사 로그와 다른 곳에도 복사해 둘 것)`);
     return 0;
   }
 
@@ -403,16 +413,16 @@ async function main(argv: string[]): Promise<number> {
     });
     const e = r.line.entry;
     if (e.kind === "revoke") {
-      console.log(`[signer] 서명 철회${r.existing ? " (이미 철회돼 있음)" : ""}: 감사 로그 ${r.line.seq}번째 줄, ${e.run_id !== undefined ? `run_id=${e.run_id} ` : "이미지 전체 "}${e.digest} (${e.reason}, ${e.by})`);
+      say(`[signer] 서명 철회${r.existing ? " (이미 철회돼 있음)" : ""}: 감사 로그 ${r.line.seq}번째 줄, ${e.run_id !== undefined ? `run_id=${e.run_id} ` : "이미지 전체 "}${e.digest} (${e.reason}, ${e.by})`);
     }
-    if (r.signed === 0) console.error("[signer] 경고: 감사 로그에 이 이미지(실행)의 signed 줄이 아직 없음 (미리 철회함)");
+    if (r.signed === 0) warn("[signer] 경고: 감사 로그에 이 이미지(실행)의 signed 줄이 아직 없음 (미리 철회함)");
     // 고정값 파일을 주면 바로 끝 고정 (철회 줄을 잘라내면 anchor_truncated)
     if (anchorSigner !== undefined && anchorsPath !== undefined) {
       try {
         const anchor = await runAnchor({ auditPath: log, anchorsPath, signer: anchorSigner });
-        console.log(`  끝 고정: ${anchor.seq}줄 (${anchorsPath})`);
+        say(`  끝 고정: ${anchor.seq}줄 (${anchorsPath})`);
       } catch (err) {
-        console.error(`[signer] 철회는 ${r.line.seq}번째 줄에 기록됨. 끝 고정만 실패해서 signer anchor 로 다시 고정할 것: ${err instanceof Error ? err.message : String(err)}`);
+        warn(`[signer] 철회는 ${r.line.seq}번째 줄에 기록됨. 끝 고정만 실패해서 signer anchor 로 다시 고정할 것: ${err instanceof Error ? err.message : String(err)}`);
         return 2;
       }
     }
@@ -423,7 +433,7 @@ async function main(argv: string[]): Promise<number> {
     const json = values.json === true;
     const sweep = values.sweep === true || process.env.SIGNER_AUDIT_SWEEP === "1";
     const jsonError = (e: unknown): number => {
-      console.log(JSON.stringify({ ok: false, code: 2, error: e instanceof SignerError ? e.code : "INTERNAL", message: e instanceof Error ? e.message : String(e) }));
+      say(JSON.stringify({ ok: false, code: 2, error: e instanceof SignerError ? e.code : "INTERNAL", message: e instanceof Error ? e.message : String(e) }));
       return 2;
     };
     let outcome: Awaited<ReturnType<typeof runAuditVerify>>;
@@ -457,20 +467,20 @@ async function main(argv: string[]): Promise<number> {
       throw e;
     }
     if (json) {
-      console.log(JSON.stringify(outcome.code === 0 ? { ok: true, ...outcome } : { ok: false, ...outcome }));
+      say(JSON.stringify(outcome.code === 0 ? { ok: true, ...outcome } : { ok: false, ...outcome }));
       return outcome.code;
     }
     if (outcome.code === 0) {
-      console.log(`[signer] 감사 로그 이상 없음: ${outcome.lines}줄, head=${outcome.head}${outcome.revoked > 0 ? `, 철회 ${outcome.revoked}건` : ""}`);
-      if (outcome.anchors !== undefined) console.log(`  끝 고정값 ${outcome.anchors}개와 일치 (잘리거나 다시 쓴 흔적 없음)`);
-      if (values.images === true) console.log(`  이미지 ${outcome.images}개 확인: signed 줄 ${outcome.signed}개 모두 서명과 일치, 로그에 없는 서명 없음`);
-      if (outcome.swept !== undefined) console.log(`  레지스트리 훑기: 태그 ${outcome.swept.tags}개(서명 태그 ${outcome.swept.signature_tags}개), 목록 파일 ${outcome.swept.file}개, 로그에 없던 이미지 ${outcome.swept.added}개 더 확인`);
+      say(`[signer] 감사 로그 이상 없음: ${outcome.lines}줄, head=${outcome.head}${outcome.revoked > 0 ? `, 철회 ${outcome.revoked}건` : ""}`);
+      if (outcome.anchors !== undefined) say(`  끝 고정값 ${outcome.anchors}개와 일치 (잘리거나 다시 쓴 흔적 없음)`);
+      if (values.images === true) say(`  이미지 ${outcome.images}개 확인: signed 줄 ${outcome.signed}개 모두 서명과 일치, 로그에 없는 서명 없음`);
+      if (outcome.swept !== undefined) say(`  레지스트리 훑기: 태그 ${outcome.swept.tags}개(서명 태그 ${outcome.swept.signature_tags}개), 목록 파일 ${outcome.swept.file}개, 로그에 없던 이미지 ${outcome.swept.added}개 더 확인`);
     } else if (outcome.findings !== undefined && outcome.findings.length > 0) {
-      console.error(`[signer] 감사 로그 문제 ${outcome.findings.length}건 (이미지 ${outcome.images ?? 0}개 확인)`);
-      for (const f of outcome.findings) console.error(`  ${f.line > 0 ? `${f.line}번째 줄 ` : ""}(${f.reason}): ${f.detail}`);
+      warn(`[signer] 감사 로그 문제 ${outcome.findings.length}건 (이미지 ${outcome.images ?? 0}개 확인)`);
+      for (const f of outcome.findings) warn(`  ${f.line > 0 ? `${f.line}번째 줄 ` : ""}(${f.reason}): ${f.detail}`);
     } else {
       const where = outcome.line > 0 ? `${outcome.line}번째 줄` : "";
-      console.error(`[signer] 감사 로그 ${where}${where ? " " : ""}문제 (${outcome.reason}): ${outcome.detail}`);
+      warn(`[signer] 감사 로그 ${where}${where ? " " : ""}문제 (${outcome.reason}): ${outcome.detail}`);
     }
     return outcome.code;
   }
@@ -487,23 +497,23 @@ async function main(argv: string[]): Promise<number> {
       });
     } catch (e) {
       if (json) {
-        console.log(JSON.stringify({ ok: false, code: 2, error: e instanceof SignerError ? e.code : "INTERNAL", message: e instanceof Error ? e.message : String(e) }));
+        say(JSON.stringify({ ok: false, code: 2, error: e instanceof SignerError ? e.code : "INTERNAL", message: e instanceof Error ? e.message : String(e) }));
         return 2;
       }
       throw e;
     }
     if (json) {
-      console.log(JSON.stringify({ ok: outcome.code === 0, ...outcome }));
+      say(JSON.stringify({ ok: outcome.code === 0, ...outcome }));
       return outcome.code;
     }
     if (!("failures" in outcome)) {
-      console.error(`[signer] 감사 로그 ${outcome.line > 0 ? `${outcome.line}번째 줄 ` : ""}문제 (${outcome.reason}): ${outcome.detail}`);
+      warn(`[signer] 감사 로그 ${outcome.line > 0 ? `${outcome.line}번째 줄 ` : ""}문제 (${outcome.reason}): ${outcome.detail}`);
       return outcome.code;
     }
-    if (outcome.code === 0) console.log(`[signer] 실제 배포 ${outcome.checked}건 모두 서명된 그대로`);
+    if (outcome.code === 0) say(`[signer] 실제 배포 ${outcome.checked}건 모두 서명된 그대로`);
     else {
-      console.error(`[signer] 실제 배포 ${outcome.checked}건 중 ${outcome.failures.length}건이 서명과 다름`);
-      for (const f of outcome.failures) console.error(`  ${f.line}번째 줄 (${f.reason}): ${f.target} ${f.image} — ${f.detail}`);
+      warn(`[signer] 실제 배포 ${outcome.checked}건 중 ${outcome.failures.length}건이 서명과 다름`);
+      for (const f of outcome.failures) warn(`  ${f.line}번째 줄 (${f.reason}): ${f.target} ${f.image} — ${f.detail}`);
     }
     return outcome.code;
   }
@@ -512,31 +522,31 @@ async function main(argv: string[]): Promise<number> {
     // --approvers 면 승인자 명부 지문 (--approvers-sha256 고정값으로 쓸 값)
     if (values.approvers) {
       const approvers = readApprovers(values.approvers, approversPins);
-      console.log(`sha256:${approvers.sha256}  ${values.approvers}${approversPins.length > 0 ? "  (고정값에 있음)" : ""}`);
+      say(`sha256:${approvers.sha256}  ${values.approvers}${approversPins.length > 0 ? "  (고정값에 있음)" : ""}`);
       return 0;
     }
     // --policy 면 Rego 정책 파일 지문 (--policy-sha256 고정값으로 쓸 값)
     if (values.policy) {
       const policy = readPolicy(values.policy, policyPins);
-      console.log(`sha256:${policy.sha256}  ${values.policy}${policyPins.length > 0 ? "  (고정값에 있음)" : ""}`);
+      say(`sha256:${policy.sha256}  ${values.policy}${policyPins.length > 0 ? "  (고정값에 있음)" : ""}`);
       return 0;
     }
     for (const p of pubs) {
       const fingerprint = pinnedPub !== undefined ? checkPublicKeyPins(p, pinnedPub) : publicKeyFingerprint(p);
-      console.log(`sha256:${fingerprint}  ${p}${pinnedPub !== undefined ? "  (고정값에 있음)" : ""}`);
+      say(`sha256:${fingerprint}  ${p}${pinnedPub !== undefined ? "  (고정값에 있음)" : ""}`);
     }
     return 0;
   }
 
-  console.error(USAGE);
+  warn(USAGE);
   return 2;
 }
 
 main(process.argv.slice(2)).then(
   (code) => process.exit(code),
   (e: unknown) => {
-    if (e instanceof SignerError) console.error(`[signer] 오류 ${e.code}: ${e.message}`);
-    else console.error(`[signer] 오류: ${e instanceof Error ? e.message : String(e)}`);
+    if (e instanceof SignerError) warn(`[signer] 오류 ${e.code}: ${e.message}`);
+    else warn(`[signer] 오류: ${e instanceof Error ? e.message : String(e)}`);
     process.exit(2);
   },
 );

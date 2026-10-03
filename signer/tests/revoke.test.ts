@@ -104,6 +104,7 @@ describe("signer revoke", () => {
     ["reason", { reason: "because" }],
     ["by 형식", { by: "carol smith" }],
     ["note 길이", { note: "x".repeat(201) }],
+    ["note 에 터미널 escape", { note: "ok\u001b[2J" }],
   ])("철회 기록 형식이 틀리면 ARG_INVALID (%s), 감사 로그는 그대로", async (_name, patch) => {
     const p = pipeline();
     await p.sign(plan("allow-onprem"));
