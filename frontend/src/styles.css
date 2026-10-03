@@ -93,10 +93,10 @@ p {
   margin: 0;
 }
 h1 {
-  font-size: 26px;
+  font-size: 30px;
   font-weight: 700;
-  letter-spacing: -0.02em;
-  line-height: 1.4;
+  letter-spacing: -0.025em;
+  line-height: 1.35;
 }
 .mono {
   font-family: var(--mono);
@@ -497,13 +497,13 @@ main {
 .headline-card {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 16px 22px;
+  gap: 14px;
+  padding: 18px 22px;
 }
 .headline-icon {
   flex: none;
-  width: 26px;
-  height: 26px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   display: inline-flex;
   align-items: center;
@@ -523,8 +523,10 @@ main {
   background: var(--info-soft);
 }
 .headline-text {
-  font-size: 16px;
-  font-weight: 650;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 1.45;
 }
 .mock-row {
   display: flex;
@@ -745,8 +747,9 @@ main {
   min-width: 0;
 }
 .banner-route {
-  font-weight: 600;
-  font-size: 15px;
+  font-weight: 650;
+  font-size: 17px;
+  letter-spacing: -0.01em;
   overflow-wrap: anywhere;
 }
 .banner-warning .banner-mark {
@@ -1500,13 +1503,22 @@ textarea.input {
 }
 .condition-head {
   display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
   justify-content: space-between;
   align-items: baseline;
   margin-bottom: 6px;
   font-size: 13px;
 }
+/* 좁은 칸에서 "13/2 0" 처럼 쪼개지지 않게 숫자는 통째로 내려간다 */
+.condition-head .num {
+  white-space: nowrap;
+}
 .condition-head strong {
-  font-size: 15px;
+  font-size: 22px;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+  line-height: 1;
 }
 .bar {
   height: 8px;
@@ -1542,7 +1554,7 @@ textarea.input {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  font-size: 22px;
+  font-size: 28px;
   font-weight: 700;
   letter-spacing: -0.02em;
   line-height: 1.2;
@@ -2082,7 +2094,10 @@ select.input {
     padding: 14px 16px;
   }
   h1 {
-    font-size: 21px;
+    font-size: 23px;
+  }
+  .headline-text {
+    font-size: 17px;
   }
   .demo-grid,
   .kv-2,
@@ -2133,6 +2148,6 @@ select.input {
     justify-content: flex-start;
   }
   .traffic-kind {
-    font-size: 19px;
+    font-size: 22px;
   }
 }
