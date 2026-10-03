@@ -35,6 +35,40 @@
         word-break: keep-all;
         overflow-wrap: anywhere;
       }
+      html[lang="ja"] body {
+        font-family: "Noto Sans JP", "Yu Gothic", Meiryo, system-ui, sans-serif;
+        word-break: normal;
+      }
+      .nav-tools,
+      .languages {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .nav-tools {
+        flex-wrap: wrap;
+        justify-content: flex-end;
+      }
+      .languages {
+        gap: 3px;
+        flex-shrink: 0;
+      }
+      .languages button {
+        border: 1px solid var(--line);
+        border-radius: 5px;
+        padding: 3px 8px;
+        background: transparent;
+        font-size: 12px;
+      }
+      .languages button[aria-pressed="true"] {
+        background: var(--soft);
+        color: var(--green);
+      }
+      .translation-note {
+        color: var(--muted);
+        font-size: 13px;
+        margin-bottom: 20px;
+      }
       button {
         font: inherit;
         cursor: pointer;
@@ -71,6 +105,8 @@
         gap: 15px;
       }
       .brand {
+        flex-shrink: 0;
+        white-space: nowrap;
         font-weight: 750;
         font-size: 20px;
         letter-spacing: -0.5px;
@@ -643,15 +679,42 @@
     <nav>
       <div>
         <div class="brand"><span aria-hidden="true">✳</span>Hibiscus</div>
-        <span class="nav-note" id="record-label">실제 실행 기록</span>
+        <div class="nav-tools">
+          <span class="nav-note" id="record-label">실제 실행 기록</span>
+          <div
+            class="languages"
+            role="group"
+            aria-label="보고서 언어"
+            data-i18n-aria="languageLabel"
+          >
+            <button
+              type="button"
+              id="lang-ko"
+              lang="ko"
+              aria-label="한국어"
+              aria-pressed="true"
+            >
+              KO
+            </button>
+            <button
+              type="button"
+              id="lang-ja"
+              lang="ja"
+              aria-label="日本語"
+              aria-pressed="false"
+            >
+              JA
+            </button>
+          </div>
+        </div>
       </div>
     </nav>
     <main>
       <header class="head">
         <div>
           <p class="eyebrow">FAILURE DIAGNOSIS</p>
-          <h1>어디부터 고칠까요?</h1>
-          <p class="lead">
+          <h1 data-i18n="heading">어디부터 고칠까요?</h1>
+          <p class="lead" data-i18n="lead">
             같은 요청을 다시 보냈을 때 달라진 응답을 코드와 함께 살펴봅니다.
           </p>
           <p class="lead" id="recorded-case">
@@ -664,27 +727,48 @@
         class="replay"
         id="conditions"
         aria-label="조건별 재현 결과"
+        data-i18n-aria="conditionsLabel"
       ></section>
       <div class="story">
         <div class="stat">
-          <strong id="mismatch-count">—</strong><span>응답 불일치</span>
+          <strong id="mismatch-count">—</strong
+          ><span data-i18n="mismatches">응답 불일치</span>
         </div>
         <span class="arrow" aria-hidden="true">→</span>
         <div class="stat">
-          <strong id="finding-count">—</strong><span>원인 가설</span>
+          <strong id="finding-count">—</strong
+          ><span data-i18n="findings">원인 가설</span>
         </div>
-        <div class="switch" role="group" aria-label="표시 방식">
-          <button type="button" id="show-raw" aria-pressed="false">
+        <div
+          class="switch"
+          role="group"
+          aria-label="표시 방식"
+          data-i18n-aria="viewLabel"
+        >
+          <button
+            type="button"
+            id="show-raw"
+            data-i18n="raw"
+            aria-pressed="false"
+          >
             실패 기록</button
-          ><button type="button" id="show-analysis" aria-pressed="true">
+          ><button
+            type="button"
+            id="show-analysis"
+            data-i18n="analysis"
+            aria-pressed="true"
+          >
             저장된 AI 분석
           </button>
         </div>
       </div>
+      <p id="translation-note" class="translation-note" hidden></p>
       <section id="analysis-view">
         <div class="section-meta">
-          <h2>무엇을 바꾸면 될까요?</h2>
-          <span>카드를 누르면 응답과 코드 근거가 열립니다.</span>
+          <h2 data-i18n="changesHeading">무엇을 바꾸면 될까요?</h2>
+          <span data-i18n="cardHelp"
+            >카드를 누르면 응답과 코드 근거가 열립니다.</span
+          >
         </div>
         <div id="cards" class="cards"></div>
         <div id="empty" class="empty" hidden></div>
@@ -693,12 +777,13 @@
           id="detail"
           class="detail"
           aria-label="원인과 근거"
+          data-i18n-aria="detailLabel"
           tabindex="-1"
           hidden
         ></section>
         <div class="result-note">
-          <strong>다음은 재검증</strong
-          ><span
+          <strong data-i18n="nextStep">다음은 재검증</strong
+          ><span data-i18n="retestNote"
             >원인을 고친 뒤 같은 요청으로 다시 확인합니다. 분석 결과만으로
             배포를 허용하지 않습니다.</span
           >
@@ -706,21 +791,25 @@
       </section>
       <section id="raw-view" hidden>
         <div class="section-meta">
-          <h2>실제로 달라진 응답</h2>
-          <span>같은 요청이 여러 조건에서 실패하면 각각 셉니다.</span>
+          <h2 data-i18n="rawHeading">실제로 달라진 응답</h2>
+          <span data-i18n="rawNote"
+            >같은 요청이 여러 조건에서 실패하면 각각 셉니다.</span
+          >
         </div>
         <div id="raw-table"></div>
       </section>
       <footer class="foot">
         <details>
-          <summary id="provenance-summary">이 분석의 실행 기록과 한계</summary>
+          <summary id="provenance-summary" data-i18n="provenanceSummary">
+            이 분석의 실행 기록과 한계
+          </summary>
           <dl id="provenance" class="provenance"></dl>
-          <p>
+          <p data-i18n="integrityNote">
             소스와 실행 산출물의 해시 일치를 확인했습니다. 주석·설명문과 정책의
             해결 힌트는 AI 입력에서 제외했습니다. 이 검사는 기록 간 일관성을
             확인하며, 별도의 서명 검증을 대신하지 않습니다.
           </p>
-          <p>
+          <p data-i18n="limitsNote">
             AI가 인용한 요청·파일·줄이 실제 입력에 있는지 검사합니다. 원인
             가설의 정확성과 수정 효과는 코드 검토와 재실행으로 확인해야 합니다.
             현재 VM의 실시간 상태를 표시하는 화면은 아닙니다.
@@ -732,9 +821,11 @@
     <script type="application/json" id="report-data">__REPORT_DATA__</script>
     <script>
       "use strict";
-      const { input, analysis } = JSON.parse(
-        document.getElementById("report-data").textContent,
-      );
+      const {
+        input,
+        analysis,
+        translations = {},
+      } = JSON.parse(document.getElementById("report-data").textContent);
       const $ = (id) => document.getElementById(id);
       const element = (tag, text, cls) => {
         const e = document.createElement(tag);
@@ -743,338 +834,564 @@
         return e;
       };
       const successful = analysis?.status === "succeeded";
-      const findings = successful ? analysis.output.findings : [];
-      const conditionNames = {
-        none: "평상시",
-        restart: "재시작",
-        replace: "교체",
-      };
-      const scopeNames = {
-        code: "코드 수정",
-        configuration: "설정 변경",
-        code_and_infrastructure: "코드 + 저장소·인프라",
-        unknown: "추가 확인",
-      };
-      $("mismatch-count").textContent = input.mismatches.length;
-      $("finding-count").textContent = successful ? findings.length : "—";
-      $("test-status").textContent = input.mismatches.length
-        ? "재현 테스트 실패"
-        : "응답 일치";
-      $("test-status").classList.toggle("fail", input.mismatches.length > 0);
-      $("record-label").textContent = successful
-        ? "실제 실행 · 저장된 AI 분석"
-        : "실제 실행 · AI 분석 미완료";
-      $("recorded-case").textContent =
-        `${input.recorded_at.slice(0, 10)} 실행의 분석 사례 · 현재 배포의 실시간 진단이 아닙니다.`;
-      for (const c of input.conditions) {
-        const box = element("div", undefined, "condition");
-        const label = element(
-          "div",
-          conditionNames[c.condition],
-          "condition-label",
-        );
-        label.append(element("small", c.condition));
-        box.append(label);
-        const count = element(
-          "b",
-          String(c.matched),
-          c.matched < c.total ? "failed" : "",
-        );
-        count.append(element("span", " / " + c.total));
-        box.append(
-          count,
-          element(
-            "span",
-            c.matched === c.total ? "일치" : `${c.total - c.matched}건 불일치`,
-            "pill " + (c.matched < c.total ? "fail" : "neutral"),
-          ),
-        );
-        $("conditions").append(box);
-      }
-      function table(mismatches) {
-        const wrap = element("div", undefined, "table-wrap"),
-          t = element("table"),
-          head = element("thead"),
-          hr = element("tr");
-        for (const label of ["조건 · 요청", "호출", "기대 응답", "실제 응답"]) {
-          const h = element("th", label);
-          h.scope = "col";
-          hr.append(h);
-        }
-        head.append(hr);
-        t.append(head);
-        const body = element("tbody");
-        for (const m of mismatches) {
-          const row = element("tr");
-          row.append(
-            element("td", `${conditionNames[m.condition]} #${m.index}`),
-            element("td", m.request, "req"),
-            element("td", m.expected, "response"),
-            element("td", m.actual, "response"),
-          );
-          body.append(row);
-        }
-        t.append(body);
-        wrap.append(t);
-        return wrap;
-      }
-      $("raw-table").append(table(input.mismatches));
-      let active = null;
-      function closeDetail() {
-        active = null;
-        $("detail").hidden = true;
-        document
-          .querySelectorAll(".card")
-          .forEach((c) => c.setAttribute("aria-expanded", "false"));
-      }
-      function showDetail(f, button) {
-        if (active === f.id) {
-          closeDetail();
-          return;
-        }
-        closeDetail();
-        active = f.id;
-        button.setAttribute("aria-expanded", "true");
-        const panel = $("detail");
-        panel.replaceChildren();
-        panel.hidden = false;
-        const head = element("div", undefined, "detail-head");
-        head.append(element("h3", f.title));
-        const close = element("button", "×", "close");
-        close.type = "button";
-        close.setAttribute("aria-label", "근거 닫기");
-        close.onclick = () => {
-          closeDetail();
-          button.focus();
-        };
-        head.append(close);
-        panel.append(head);
-        const grid = element("div", undefined, "detail-grid"),
-          explanation = element("div"),
-          code = element("div");
-        for (const [label, value] of [
-          ["관측된 현상", f.observed],
-          ["AI의 원인 가설", f.hypothesis],
-          ["다음 조치", f.next_action],
-          ["다음에 확인할 것", f.verification],
-          ["이 조치만으로 해결되지 않는 것", f.limit],
-        ])
-          explanation.append(
-            element("span", label, "label"),
-            element("p", value),
-          );
-        code.append(element("span", "AI가 근거로 지목한 코드", "label"));
-        for (const loc of f.source_locations) {
-          const source = input.sources.find((s) => s.path === loc.path);
-          code.append(
-            element(
-              "div",
-              `${loc.path}:${loc.line_start}–${loc.line_end} · 앞뒤 2줄 포함`,
-              "code-title",
-            ),
-          );
-          const start = Math.max(1, loc.line_start - 2),
-            pre = element("pre", undefined, "code");
-          source.content
-            .split("\n")
-            .slice(start - 1, loc.line_end + 2)
-            .forEach((line, i) => {
-              const n = start + i,
-                row = element(
-                  "span",
-                  undefined,
-                  "code-line" +
-                    (n >= loc.line_start && n <= loc.line_end ? " cited" : ""),
-                );
-              row.append(
-                element("span", String(n), "ln"),
-                document.createTextNode(line),
-              );
-              pre.append(row);
-            });
-          code.append(pre);
-        }
-        if (!f.source_locations.length)
-          code.append(element("p", "특정 코드 위치를 확인하지 못했습니다."));
-        for (const id of f.fact_ids) {
-          const fact = input.facts.find((x) => x.id === id);
-          code.append(
-            element(
-              "div",
-              `${fact.path} · ${fact.storage}\n${fact.evidence}`,
-              "fact",
-            ),
-          );
-        }
-        grid.append(explanation, code);
-        panel.append(grid);
-        const evidence = element("details", undefined, "evidence");
-        const rows = input.mismatches.filter((m) =>
-          f.mismatch_ids.includes(m.id),
-        );
-        evidence.append(
-          element("summary", `관련 응답 ${rows.length}건 보기`),
-          table(rows),
-        );
-        panel.append(evidence);
-        panel.focus({ preventScroll: true });
-        panel.scrollIntoView({
-          behavior: matchMedia("(prefers-reduced-motion: reduce)").matches
-            ? "instant"
-            : "smooth",
-          block: "nearest",
-        });
-      }
-      function responsePair(m) {
-        const parse = (s) => {
-          const match = s.match(/^(\d+)\s+([\s\S]*)$/);
-          if (!match) return null;
-          try {
-            return { status: match[1], body: JSON.parse(match[2]) };
-          } catch {
-            return { status: match[1], body: match[2] };
-          }
-        };
-        const expected = parse(m.expected),
-          actual = parse(m.actual);
-        if (expected && actual) {
-          if (expected.status !== actual.status)
-            return [expected.status, actual.status];
-          const a = expected.body,
-            b = actual.body;
-          if (
-            a &&
-            b &&
-            typeof a === "object" &&
-            typeof b === "object" &&
-            !Array.isArray(a) &&
-            !Array.isArray(b)
-          ) {
-            const key = Object.keys(a).find(
-              (k) => JSON.stringify(a[k]) !== JSON.stringify(b[k]),
-            );
-            if (key)
-              return [
-                `${key}: ${JSON.stringify(a[key])}`,
-                `${key}: ${JSON.stringify(b[key])}`,
-              ];
-          }
-          if (
-            Array.isArray(a) &&
-            Array.isArray(b) &&
-            a.every((x) => typeof x === "string") &&
-            b.every((x) => typeof x === "string")
-          )
-            return [a.join(", "), b.join(", ")];
-        }
-        return [m.expected, m.actual].map((s) =>
-          s.length > 80 ? s.slice(0, 77) + "…" : s,
-        );
-      }
-      $("cards").dataset.many = String(findings.length > 3);
-      findings.forEach((f, i) => {
-        const card = element("button", undefined, "card");
-        card.type = "button";
-        card.setAttribute("aria-expanded", "false");
-        card.setAttribute("aria-controls", "detail");
-        const top = element("div", undefined, "card-top");
-        top.append(
-          element("span", String(i + 1).padStart(2, "0"), "card-index"),
-          element("span", scopeNames[f.scope], "pill neutral"),
-        );
-        const bottom = element("div", undefined, "card-bottom");
-        bottom.append(
-          element("small", "다음 조치"),
-          element("div", f.next_action.split(/(?<=\.)\s+/)[0], "action"),
-        );
-        const unique = f.mismatch_ids.find(
-          (id) =>
-            findings.filter((other) => other.mismatch_ids.includes(id))
-              .length === 1,
-        );
-        const example = input.mismatches.find(
-          (m) => m.id === (unique || f.mismatch_ids[0]),
-        );
-        const sample = element("div", undefined, "example"),
-          pair = element("div", undefined, "response-pair");
-        sample.append(
-          element(
-            "div",
-            `${example.request} · ${conditionNames[example.condition]} #${example.index}`,
-            "example-request",
-          ),
-        );
-        const [expected, actual] = responsePair(example);
-        pair.append(
-          element("code", expected),
-          element("span", "→"),
-          element("code", actual),
-        );
-        sample.append(pair);
-        card.append(
-          top,
-          element("h3", f.title),
-          sample,
-          bottom,
-          element(
-            "span",
-            `근거 ${f.mismatch_ids.length}건 보기 ↗`,
-            "card-link",
-          ),
-        );
-        card.onclick = () => showDetail(f, card);
-        $("cards").append(card);
-      });
-      if (!successful || !findings.length) {
-        $("empty").hidden = false;
-        $("empty").textContent = successful
-          ? "근거로 뒷받침할 원인 가설을 찾지 못했습니다."
-          : "아직 유효한 AI 분석이 없습니다. 실제 실패 기록을 먼저 확인할 수 있습니다.";
-      }
-      if (successful && analysis.output.unexplained_mismatch_ids.length) {
-        $("unexplained").hidden = false;
-        $("unexplained").textContent =
-          `원인 미확인 ${analysis.output.unexplained_mismatch_ids.length}건: ${analysis.output.unexplained_mismatch_ids.join(", ")}`;
-      }
-      if (
-        findings.reduce((n, f) => n + f.mismatch_ids.length, 0) >
-        input.mismatches.length
-      ) {
-        const note = element(
-          "p",
+      const originalFindings = successful ? analysis.output.findings : [];
+      const copy = {
+        pageTitle: ["Hibiscus · 실패 원인 분석", "Hibiscus · 失敗原因の分析"],
+        heading: ["어디부터 고칠까요?", "どこから直しますか？"],
+        lead: [
+          "같은 요청을 다시 보냈을 때 달라진 응답을 코드와 함께 살펴봅니다.",
+          "同じリクエストを再送したときに変わった応答を、コードと一緒に確認します。",
+        ],
+        conditionsLabel: ["조건별 재현 결과", "条件別の再現結果"],
+        mismatches: ["응답 불일치", "応答の不一致"],
+        findings: ["원인 가설", "原因の仮説"],
+        viewLabel: ["표시 방식", "表示内容"],
+        raw: ["실패 기록", "失敗記録"],
+        analysis: ["저장된 AI 분석", "保存済みAI分析"],
+        changesHeading: [
+          "무엇을 바꾸면 될까요?",
+          "何を変更すればよいでしょうか？",
+        ],
+        cardHelp: [
+          "카드를 누르면 응답과 코드 근거가 열립니다.",
+          "カードを押すと、根拠となる応答とコードが開きます。",
+        ],
+        detailLabel: ["원인과 근거", "原因と根拠"],
+        nextStep: ["다음은 재검증", "次は再検証"],
+        retestNote: [
+          "원인을 고친 뒤 같은 요청으로 다시 확인합니다. 분석 결과만으로 배포를 허용하지 않습니다.",
+          "修正後に同じリクエストで再検証します。分析結果だけではデプロイを許可しません。",
+        ],
+        rawHeading: ["실제로 달라진 응답", "実際に変わった応答"],
+        rawNote: [
+          "같은 요청이 여러 조건에서 실패하면 각각 셉니다.",
+          "同じリクエストが複数の条件で失敗した場合は、それぞれ数えます。",
+        ],
+        provenanceSummary: [
+          "이 분석의 실행 기록과 한계",
+          "この分析の実行記録と限界",
+        ],
+        integrityNote: [
+          "소스와 실행 산출물의 해시 일치를 확인했습니다. 주석·설명문과 정책의 해결 힌트는 AI 입력에서 제외했습니다. 이 검사는 기록 간 일관성을 확인하며, 별도의 서명 검증을 대신하지 않습니다.",
+          "ソースと実行成果物のハッシュの一致を確認しました。コメント・説明文とポリシーの解決ヒントはAIへの入力から除外しています。この検査は記録間の整合性を確認するもので、署名検証の代わりにはなりません。",
+        ],
+        limitsNote: [
+          "AI가 인용한 요청·파일·줄이 실제 입력에 있는지 검사합니다. 원인 가설의 정확성과 수정 효과는 코드 검토와 재실행으로 확인해야 합니다. 현재 VM의 실시간 상태를 표시하는 화면은 아닙니다.",
+          "AIが引用したリクエスト・ファイル・行が実際の入力に存在するかを検査します。原因の仮説の正しさと修正の効果は、コードレビューと再実行で確認する必要があります。現在のVMの状態をリアルタイムに表示する画面ではありません。",
+        ],
+        languageLabel: ["보고서 언어", "レポートの言語"],
+        translatedNote: [
+          "",
+          "保存済みの韓国語分析の日本語訳です。コード・応答・証拠は原文のまま表示します。",
+        ],
+        untranslatedNote: [
+          "",
+          "この分析の日本語訳はありません。分析本文は原文を表示します。",
+        ],
+        testFailed: ["재현 테스트 실패", "再現テスト失敗"],
+        testMatched: ["응답 일치", "応答一致"],
+        recordSuccess: [
+          "실제 실행 · 저장된 AI 분석",
+          "実際の実行 · 保存済みAI分析",
+        ],
+        recordPending: [
+          "실제 실행 · AI 분석 미완료",
+          "実際の実行 · AI分析未完了",
+        ],
+        recordedCase: [
+          "{date} 실행의 분석 사례 · 현재 배포의 실시간 진단이 아닙니다.",
+          "{date}の実行を分析した事例です。現在のデプロイのリアルタイム診断ではありません。",
+        ],
+        none: ["평상시", "通常時"],
+        restart: ["재시작", "再起動"],
+        replace: ["교체", "入れ替え"],
+        code: ["코드 수정", "コード修正"],
+        configuration: ["설정 변경", "設定変更"],
+        code_and_infrastructure: [
+          "코드 + 저장소·인프라",
+          "コード＋ストレージ・インフラ",
+        ],
+        unknown: ["추가 확인", "追加確認"],
+        matched: ["일치", "一致"],
+        mismatchCount: ["{count}건 불일치", "{count}件不一致"],
+        requestIndex: ["조건 · 요청", "条件・リクエスト番号"],
+        request: ["호출", "リクエスト"],
+        expected: ["기대 응답", "期待する応答"],
+        actual: ["실제 응답", "実際の応答"],
+        closeDetail: ["근거 닫기", "根拠を閉じる"],
+        observed: ["관측된 현상", "観測した現象"],
+        hypothesis: ["AI의 원인 가설", "AIによる原因の仮説"],
+        nextAction: ["다음 조치", "次の対応"],
+        verification: ["다음에 확인할 것", "次に確認すること"],
+        limit: [
+          "이 조치만으로 해결되지 않는 것",
+          "この対応だけでは解決しないこと",
+        ],
+        citedCode: ["AI가 근거로 지목한 코드", "AIが根拠として示したコード"],
+        codeContext: ["앞뒤 2줄 포함", "前後2行を含む"],
+        noSource: [
+          "특정 코드 위치를 확인하지 못했습니다.",
+          "具体的なコード位置は確認できませんでした。",
+        ],
+        relatedResponses: [
+          "관련 응답 {count}건 보기",
+          "関連する応答{count}件を見る",
+        ],
+        evidenceCount: ["근거 {count}건 보기 ↗", "根拠{count}件を見る ↗"],
+        noFindings: [
+          "근거로 뒷받침할 원인 가설을 찾지 못했습니다.",
+          "根拠で裏付けられる原因の仮説は見つかりませんでした。",
+        ],
+        noAnalysis: [
+          "아직 유효한 AI 분석이 없습니다. 실제 실패 기록을 먼저 확인할 수 있습니다.",
+          "有効なAI分析はまだありません。実際の失敗記録を先に確認できます。",
+        ],
+        unexplained: [
+          "원인 미확인 {count}건: {ids}",
+          "原因未確認{count}件：{ids}",
+        ],
+        overlap: [
           "하나의 불일치에 여러 원인이 겹칠 수 있습니다. 카드의 근거 건수에는 중복이 포함됩니다.",
-        );
-        note.style.cssText =
-          "font-size:12px;color:var(--muted);margin-top:12px";
-        $("cards").after(note);
+          "1件の不一致に複数の原因が重なる場合があります。カードの根拠件数には重複が含まれます。",
+        ],
+        recordedAt: ["기록한 시점", "記録日時"],
+        runId: ["실행 ID", "実行ID"],
+        sourceCommit: ["소스 커밋", "ソースコミット"],
+        imageDigest: ["이미지 digest", "イメージdigest"],
+        resultHash: ["결과 SHA-256", "結果SHA-256"],
+        sourceHash: ["소스 SHA-256", "ソースSHA-256"],
+        model: ["AI 모델", "AIモデル"],
+        notCalled: ["호출하지 않음", "未呼び出し"],
+        analyzedAt: ["AI 분석 시점", "AI分析日時"],
+        analysisStatus: ["AI 분석 상태", "AI分析の状態"],
+        inputHash: ["분석 입력 SHA-256", "分析入力SHA-256"],
+        evidenceCheck: ["근거 검사", "根拠の検査"],
+        evidenceCheckNote: [
+          "참조 일치 검사. 원인 정확도는 자동 검증하지 않음",
+          "参照の整合性を検査。原因の正しさは自動検証していません",
+        ],
+      };
+      function readLanguage() {
+        const requested = new URLSearchParams(location.search).get("lang");
+        if (requested === "ja" || requested === "ko") return requested;
+        try {
+          return localStorage.getItem("hibiscus.lang") === "ja" ? "ja" : "ko";
+        } catch {
+          return "ko";
+        }
       }
-      function view(name) {
-        $("analysis-view").hidden = name !== "analysis";
-        $("raw-view").hidden = name !== "raw";
-        $("show-analysis").setAttribute(
-          "aria-pressed",
-          String(name === "analysis"),
+      let lang = readLanguage();
+      let active = null;
+      let currentView = successful ? "analysis" : "raw";
+      const tr = (key, values = {}) =>
+        copy[key][lang === "ja" ? 1 : 0].replace(/\{(\w+)\}/g, (_, name) =>
+          String(values[name]),
         );
-        $("show-raw").setAttribute("aria-pressed", String(name === "raw"));
+      function render() {
+        const previousActive = active;
+        active = null;
+        const findings = originalFindings.map((finding) => ({
+          ...finding,
+          ...(lang === "ja" ? translations.ja?.[finding.id] : {}),
+        }));
+        document.documentElement.lang = lang;
+        document.title = tr("pageTitle");
+        document.querySelectorAll("[data-i18n]").forEach((node) => {
+          node.textContent = tr(node.dataset.i18n);
+        });
+        document.querySelectorAll("[data-i18n-aria]").forEach((node) => {
+          node.setAttribute("aria-label", tr(node.dataset.i18nAria));
+        });
+        for (const locale of ["ko", "ja"])
+          $("lang-" + locale).setAttribute(
+            "aria-pressed",
+            String(lang === locale),
+          );
+        for (const id of [
+          "conditions",
+          "cards",
+          "raw-table",
+          "provenance",
+          "detail",
+        ])
+          $(id).replaceChildren();
+        for (const id of ["empty", "unexplained", "detail"])
+          $(id).hidden = true;
+        $("overlap-note")?.remove();
+        $("translation-note").hidden = lang !== "ja" || !findings.length;
+        $("translation-note").textContent = tr(
+          translations.ja ? "translatedNote" : "untranslatedNote",
+        );
+        const conditionNames = {
+          none: tr("none"),
+          restart: tr("restart"),
+          replace: tr("replace"),
+        };
+        const scopeNames = {
+          code: tr("code"),
+          configuration: tr("configuration"),
+          code_and_infrastructure: tr("code_and_infrastructure"),
+          unknown: tr("unknown"),
+        };
+        $("mismatch-count").textContent = input.mismatches.length;
+        $("finding-count").textContent = successful ? findings.length : "—";
+        $("test-status").textContent = input.mismatches.length
+          ? tr("testFailed")
+          : tr("testMatched");
+        $("test-status").classList.toggle("fail", input.mismatches.length > 0);
+        $("record-label").textContent = successful
+          ? tr("recordSuccess")
+          : tr("recordPending");
+        $("recorded-case").textContent = tr("recordedCase", {
+          date: input.recorded_at.slice(0, 10),
+        });
+        for (const c of input.conditions) {
+          const box = element("div", undefined, "condition");
+          const label = element(
+            "div",
+            conditionNames[c.condition],
+            "condition-label",
+          );
+          label.append(element("small", c.condition));
+          box.append(label);
+          const count = element(
+            "b",
+            String(c.matched),
+            c.matched < c.total ? "failed" : "",
+          );
+          count.append(element("span", " / " + c.total));
+          box.append(
+            count,
+            element(
+              "span",
+              c.matched === c.total
+                ? tr("matched")
+                : tr("mismatchCount", { count: c.total - c.matched }),
+              "pill " + (c.matched < c.total ? "fail" : "neutral"),
+            ),
+          );
+          $("conditions").append(box);
+        }
+        function table(mismatches) {
+          const wrap = element("div", undefined, "table-wrap"),
+            t = element("table"),
+            head = element("thead"),
+            hr = element("tr");
+          for (const label of [
+            "requestIndex",
+            "request",
+            "expected",
+            "actual",
+          ].map((key) => tr(key))) {
+            const h = element("th", label);
+            h.scope = "col";
+            hr.append(h);
+          }
+          head.append(hr);
+          t.append(head);
+          const body = element("tbody");
+          for (const m of mismatches) {
+            const row = element("tr");
+            row.append(
+              element("td", `${conditionNames[m.condition]} #${m.index}`),
+              element("td", m.request, "req"),
+              element("td", m.expected, "response"),
+              element("td", m.actual, "response"),
+            );
+            body.append(row);
+          }
+          t.append(body);
+          wrap.append(t);
+          return wrap;
+        }
+        $("raw-table").append(table(input.mismatches));
+        function closeDetail() {
+          active = null;
+          $("detail").hidden = true;
+          document
+            .querySelectorAll(".card")
+            .forEach((c) => c.setAttribute("aria-expanded", "false"));
+        }
+        function showDetail(f, button, focus = true) {
+          if (active === f.id) {
+            closeDetail();
+            return;
+          }
+          closeDetail();
+          active = f.id;
+          button.setAttribute("aria-expanded", "true");
+          const panel = $("detail");
+          panel.replaceChildren();
+          panel.hidden = false;
+          const head = element("div", undefined, "detail-head");
+          head.append(element("h3", f.title));
+          const close = element("button", "×", "close");
+          close.type = "button";
+          close.setAttribute("aria-label", tr("closeDetail"));
+          close.onclick = () => {
+            closeDetail();
+            button.focus();
+          };
+          head.append(close);
+          panel.append(head);
+          const grid = element("div", undefined, "detail-grid"),
+            explanation = element("div"),
+            code = element("div");
+          for (const [label, value] of [
+            [tr("observed"), f.observed],
+            [tr("hypothesis"), f.hypothesis],
+            [tr("nextAction"), f.next_action],
+            [tr("verification"), f.verification],
+            [tr("limit"), f.limit],
+          ])
+            explanation.append(
+              element("span", label, "label"),
+              element("p", value),
+            );
+          code.append(element("span", tr("citedCode"), "label"));
+          for (const loc of f.source_locations) {
+            const source = input.sources.find((s) => s.path === loc.path);
+            code.append(
+              element(
+                "div",
+                `${loc.path}:${loc.line_start}–${loc.line_end} · ${tr("codeContext")}`,
+                "code-title",
+              ),
+            );
+            const start = Math.max(1, loc.line_start - 2),
+              pre = element("pre", undefined, "code");
+            source.content
+              .split("\n")
+              .slice(start - 1, loc.line_end + 2)
+              .forEach((line, i) => {
+                const n = start + i,
+                  row = element(
+                    "span",
+                    undefined,
+                    "code-line" +
+                      (n >= loc.line_start && n <= loc.line_end
+                        ? " cited"
+                        : ""),
+                  );
+                row.append(
+                  element("span", String(n), "ln"),
+                  document.createTextNode(line),
+                );
+                pre.append(row);
+              });
+            code.append(pre);
+          }
+          if (!f.source_locations.length)
+            code.append(element("p", tr("noSource")));
+          for (const id of f.fact_ids) {
+            const fact = input.facts.find((x) => x.id === id);
+            code.append(
+              element(
+                "div",
+                `${fact.path} · ${fact.storage}\n${fact.evidence}`,
+                "fact",
+              ),
+            );
+          }
+          grid.append(explanation, code);
+          panel.append(grid);
+          const evidence = element("details", undefined, "evidence");
+          const rows = input.mismatches.filter((m) =>
+            f.mismatch_ids.includes(m.id),
+          );
+          evidence.append(
+            element("summary", tr("relatedResponses", { count: rows.length })),
+            table(rows),
+          );
+          panel.append(evidence);
+          if (!focus) return;
+          panel.focus({ preventScroll: true });
+          panel.scrollIntoView({
+            behavior: matchMedia("(prefers-reduced-motion: reduce)").matches
+              ? "instant"
+              : "smooth",
+            block: "nearest",
+          });
+        }
+        function responsePair(m) {
+          const parse = (s) => {
+            const match = s.match(/^(\d+)\s+([\s\S]*)$/);
+            if (!match) return null;
+            try {
+              return { status: match[1], body: JSON.parse(match[2]) };
+            } catch {
+              return { status: match[1], body: match[2] };
+            }
+          };
+          const expected = parse(m.expected),
+            actual = parse(m.actual);
+          if (expected && actual) {
+            if (expected.status !== actual.status)
+              return [expected.status, actual.status];
+            const a = expected.body,
+              b = actual.body;
+            if (
+              a &&
+              b &&
+              typeof a === "object" &&
+              typeof b === "object" &&
+              !Array.isArray(a) &&
+              !Array.isArray(b)
+            ) {
+              const key = Object.keys(a).find(
+                (k) => JSON.stringify(a[k]) !== JSON.stringify(b[k]),
+              );
+              if (key)
+                return [
+                  `${key}: ${JSON.stringify(a[key])}`,
+                  `${key}: ${JSON.stringify(b[key])}`,
+                ];
+            }
+            if (
+              Array.isArray(a) &&
+              Array.isArray(b) &&
+              a.every((x) => typeof x === "string") &&
+              b.every((x) => typeof x === "string")
+            )
+              return [a.join(", "), b.join(", ")];
+          }
+          return [m.expected, m.actual].map((s) =>
+            s.length > 80 ? s.slice(0, 77) + "…" : s,
+          );
+        }
+        $("cards").dataset.many = String(findings.length > 3);
+        findings.forEach((f, i) => {
+          const card = element("button", undefined, "card");
+          card.type = "button";
+          card.setAttribute("aria-expanded", "false");
+          card.setAttribute("aria-controls", "detail");
+          const top = element("div", undefined, "card-top");
+          top.append(
+            element("span", String(i + 1).padStart(2, "0"), "card-index"),
+            element("span", scopeNames[f.scope], "pill neutral"),
+          );
+          const bottom = element("div", undefined, "card-bottom");
+          bottom.append(
+            element("small", tr("nextAction")),
+            element(
+              "div",
+              f.next_action.split(/(?<=。)\s*|(?<=\.)\s+/)[0],
+              "action",
+            ),
+          );
+          const unique = f.mismatch_ids.find(
+            (id) =>
+              findings.filter((other) => other.mismatch_ids.includes(id))
+                .length === 1,
+          );
+          const example = input.mismatches.find(
+            (m) => m.id === (unique || f.mismatch_ids[0]),
+          );
+          const sample = element("div", undefined, "example"),
+            pair = element("div", undefined, "response-pair");
+          sample.append(
+            element(
+              "div",
+              `${example.request} · ${conditionNames[example.condition]} #${example.index}`,
+              "example-request",
+            ),
+          );
+          const [expected, actual] = responsePair(example);
+          pair.append(
+            element("code", expected),
+            element("span", "→"),
+            element("code", actual),
+          );
+          sample.append(pair);
+          card.append(
+            top,
+            element("h3", f.title),
+            sample,
+            bottom,
+            element(
+              "span",
+              tr("evidenceCount", { count: f.mismatch_ids.length }),
+              "card-link",
+            ),
+          );
+          card.onclick = () => showDetail(f, card);
+          $("cards").append(card);
+        });
+        if (!successful || !findings.length) {
+          $("empty").hidden = false;
+          $("empty").textContent = successful
+            ? tr("noFindings")
+            : tr("noAnalysis");
+        }
+        if (successful && analysis.output.unexplained_mismatch_ids.length) {
+          $("unexplained").hidden = false;
+          $("unexplained").textContent = tr("unexplained", {
+            count: analysis.output.unexplained_mismatch_ids.length,
+            ids: analysis.output.unexplained_mismatch_ids.join(", "),
+          });
+        }
+        if (
+          findings.reduce((n, f) => n + f.mismatch_ids.length, 0) >
+          input.mismatches.length
+        ) {
+          const note = element("p", tr("overlap"));
+          note.id = "overlap-note";
+          note.style.cssText =
+            "font-size:12px;color:var(--muted);margin-top:12px";
+          $("cards").after(note);
+        }
+        function view(name) {
+          currentView = name;
+          $("analysis-view").hidden = name !== "analysis";
+          $("raw-view").hidden = name !== "raw";
+          $("show-analysis").setAttribute(
+            "aria-pressed",
+            String(name === "analysis"),
+          );
+          $("show-raw").setAttribute("aria-pressed", String(name === "raw"));
+        }
+        $("show-analysis").onclick = () => view("analysis");
+        $("show-raw").onclick = () => view("raw");
+        view(currentView);
+        const fields = [
+          [tr("recordedAt"), input.recorded_at],
+          [tr("runId"), input.run_id],
+          [tr("sourceCommit"), input.source_revision],
+          [tr("imageDigest"), input.image_digest],
+          [tr("resultHash"), input.result_sha256],
+          [tr("sourceHash"), input.source_tree_sha256],
+          [tr("model"), analysis?.model || tr("notCalled")],
+          [tr("analyzedAt"), analysis?.created_at || "—"],
+          [tr("analysisStatus"), analysis?.status || "not_run"],
+          [tr("inputHash"), analysis?.input_sha256 || "—"],
+          [tr("evidenceCheck"), tr("evidenceCheckNote")],
+        ];
+        for (const [label, value] of fields)
+          $("provenance").append(element("dt", label), element("dd", value));
+        const selected = findings.findIndex(
+          (finding) => finding.id === previousActive,
+        );
+        if (selected >= 0)
+          showDetail(findings[selected], $("cards").children[selected], false);
       }
-      $("show-analysis").onclick = () => view("analysis");
-      $("show-raw").onclick = () => view("raw");
-      view(successful ? "analysis" : "raw");
-      const fields = [
-        ["기록한 시점", input.recorded_at],
-        ["실행 ID", input.run_id],
-        ["소스 커밋", input.source_revision],
-        ["이미지 digest", input.image_digest],
-        ["결과 SHA-256", input.result_sha256],
-        ["소스 SHA-256", input.source_tree_sha256],
-        ["AI 모델", analysis?.model || "호출하지 않음"],
-        ["AI 분석 시점", analysis?.created_at || "—"],
-        ["AI 분석 상태", analysis?.status || "not_run"],
-        ["분석 입력 SHA-256", analysis?.input_sha256 || "—"],
-        ["근거 검사", "참조 일치 검사. 원인 정확도는 자동 검증하지 않음"],
-      ];
-      for (const [label, value] of fields)
-        $("provenance").append(element("dt", label), element("dd", value));
+      for (const locale of ["ko", "ja"])
+        $("lang-" + locale).onclick = () => {
+          lang = locale;
+          try {
+            localStorage.setItem("hibiscus.lang", lang);
+          } catch {
+            /* file:// may deny storage */
+          }
+          try {
+            const url = new URL(location.href);
+            url.searchParams.set("lang", lang);
+            history.replaceState(null, "", url);
+          } catch {
+            /* Language switching also works without History API access. */
+          }
+          render();
+        };
+      render();
     </script>
   </body>
 </html>

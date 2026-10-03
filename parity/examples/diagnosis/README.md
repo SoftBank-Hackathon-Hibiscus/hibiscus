@@ -17,6 +17,7 @@ python -m pip install -r requirements.txt
 python -m premortem.diagnosis \
   --bundle examples/diagnosis/guestbook --source app.py \
   --recorded examples/diagnosis/guestbook-analysis.json \
+  --translation examples/diagnosis/guestbook-analysis.ja.json \
   --out premortem/.runs/diagnosis-demo
 python -m http.server 5180 --bind 127.0.0.1 --directory premortem/.runs/diagnosis-demo
 ```
@@ -34,7 +35,9 @@ python -m http.server 5180 --bind 127.0.0.1 --directory premortem/.runs/diagnosi
 3. 실패 13건을 짚고, 두 번째 원인 카드를 눌러 `DROP TABLE` 코드와 교체 때 남는 저장소 문제를 보여줍니다.
 4. 탭을 닫고 기존 시연을 이어갑니다. 분석을 열거나 건너뛰어도 배포 상태와 정책 판단은 바뀌지 않습니다.
 
-분석 화면은 한국어입니다. 약 30초를 추가하면 되고, 화면을 여는 동안 추가 LLM 호출은 없습니다. 인터넷 없이도 열리며 `frontend/public/diagnosis/guestbook.html` 하나를 복사해 예비 화면으로 쓸 수 있습니다.
+분석 화면은 한국어·일본어를 지원합니다. 콘솔에서 선택한 언어를 이어받으며 보고서 안에서도 KO/JA를 바꿀 수 있습니다. 일본어로 직접 열려면 `/diagnosis/guestbook.html?lang=ja`를 사용합니다. 약 30초를 추가하면 되고, 화면을 여는 동안 추가 LLM 호출은 없습니다. 인터넷 없이도 열리며 `frontend/public/diagnosis/guestbook.html` 하나를 복사해 예비 화면으로 쓸 수 있습니다.
+
+일본어 본문은 `guestbook-analysis.ja.json`에 분리한 표시용 번역입니다. 원인 가설·관측 설명·다음 조치·재검증 방법·한계를 번역하며, 모델의 불확실한 설명도 유지합니다. 코드·실제 응답·근거 ID·줄 번호와 한국어 분석 JSON은 변경하지 않습니다. 생성 시 원본 분석의 정규화 JSON SHA-256과 원인 ID를 대조하고, 번역으로 증거 필드를 덮어쓰거나 다른 분석의 번역을 붙이는 경우에는 중단합니다. 번역 파일이 없는 다른 실행은 일본어 UI에서도 분석 본문을 원문으로 표시하고 그 사실을 안내합니다.
 
 프론트에 포함한 HTML을 다시 만들거나 원본 기록과 대조하려면 `parity/`에서 실행합니다. 생성 전 해시·실행 식별값·LLM 응답 검사를 거칩니다. 일반 프론트 빌드에는 Python이 필요 없습니다.
 

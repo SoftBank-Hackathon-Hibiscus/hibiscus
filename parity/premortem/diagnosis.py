@@ -226,8 +226,26 @@ def analyze(payload, provider, rejected_path=None):
     }
 
 
-def render_report(payload, record):
-    data = canonical({"input": payload, "analysis": record})
+def render_report(payload, record, translation=None):
+    translations = {}
+    if translation is not None:
+        from jsonschema import Draft202012Validator
+        text_fields = ("title", "observed", "hypothesis", "next_action", "verification", "limit")
+        schema = obj({
+            "language": {"const": "ja"},
+            "analysis_sha256": {"type": "string"},
+            "findings": array(obj({"id": {"type": "string"}, **{key: TEXT for key in text_fields}})),
+        })
+        require(not list(Draft202012Validator(schema).iter_errors(translation)), "번역 형식이 맞지 않습니다")
+        require(record is not None and record.get("status") == "succeeded"
+                and translation["analysis_sha256"] == sha256_bytes(canonical(record).encode()),
+                "번역과 원본 분석이 다릅니다")
+        expected = {finding["id"] for finding in record["output"]["findings"]}
+        actual = [finding["id"] for finding in translation["findings"]]
+        require(set(actual) == expected and len(actual) == len(expected), "번역의 원인 ID가 원본과 다릅니다")
+        translations["ja"] = {finding["id"]: {key: finding[key] for key in text_fields}
+                              for finding in translation["findings"]}
+    data = canonical({"input": payload, "analysis": record, "translations": translations})
     # A literal closing script tag must never escape this JSON script element.
     data = data.replace("<", "\\u003c").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
     return TEMPLATE_PATH.read_text(encoding="utf-8").replace("__REPORT_DATA__", data)
@@ -241,8 +259,10 @@ def main(argv=None):
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--live", action="store_true", help="明示したソースと記録を LLM に送信 / 실제 LLM 분석")
     modes.add_argument("--recorded", type=Path, help="같은 입력에 대한 이전 실제 분석 사용 (호출 없음)")
+    parser.add_argument("--translation", type=Path, help="저장된 분석의 표시용 일본어 번역 (원본 해시 대조)")
     args = parser.parse_args(argv)
     try:
+        require(args.translation is None or args.recorded is not None, "번역은 저장된 분석에만 사용할 수 있습니다")
         args.bundle = args.bundle.resolve()
         args.out = args.out.resolve()
         require(not args.out.is_relative_to(args.bundle), "진단 출력은 원본 실행 폴더 밖에 저장해야 합니다")
@@ -263,7 +283,8 @@ def main(argv=None):
             check_output(record["output"], payload)
         if record:
             write_json_atomic(args.out / "diagnosis.json", record)
-        write_text_atomic(args.out / "index.html", render_report(payload, record))
+        translation = load_json(args.translation) if args.translation else None
+        write_text_atomic(args.out / "index.html", render_report(payload, record, translation))
         print(canonical({"report": str(args.out / "index.html"), "analysis": record["status"] if record else "not_run"}))
         return 0 if record is None or record["status"] == "succeeded" else 1
     except (PremortemError, OSError, KeyError, TypeError, ValueError, SyntaxError, tokenize.TokenError) as error:

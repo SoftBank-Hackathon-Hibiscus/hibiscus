@@ -25,6 +25,7 @@ def main():
         status = generate([
             "--bundle", str(fixture / "guestbook"), "--source", "app.py",
             "--recorded", str(fixture / "guestbook-analysis.json"), "--out", str(output),
+            "--translation", str(fixture / "guestbook-analysis.ja.json"),
         ])
         if status:
             return status

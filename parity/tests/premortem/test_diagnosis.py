@@ -1,5 +1,6 @@
 import copy
 import json
+import re
 import shutil
 import tempfile
 import unittest
@@ -65,6 +66,42 @@ class DiagnosisTests(unittest.TestCase):
         self.assertEqual("succeeded", record["status"])
         self.assertEqual(record["input_sha256"], sha256_bytes(canonical(self.payload).encode()))
         check_output(record["output"], self.payload)
+
+    def test_japanese_display_keeps_original_analysis_and_evidence(self):
+        record = load_json(FIXTURE.parent / "guestbook-analysis.json")
+        translation = load_json(FIXTURE.parent / "guestbook-analysis.ja.json")
+        original = copy.deepcopy(record)
+        html = render_report(self.payload, record, translation)
+        data = json.loads(re.search(r'id="report-data">(.*?)</script>', html, re.S).group(1))
+        self.assertEqual(original, record)
+        self.assertEqual(record, data["analysis"])
+        self.assertEqual(self.payload, data["input"])
+        self.assertEqual(3, len(data["translations"]["ja"]))
+        self.assertEqual("起動のたびにpostsテーブルを削除", data["translations"]["ja"]["finding:2"]["title"])
+
+    def test_translation_rejects_changed_analysis_missing_findings_and_evidence_edits(self):
+        record = load_json(FIXTURE.parent / "guestbook-analysis.json")
+        translation = load_json(FIXTURE.parent / "guestbook-analysis.ja.json")
+        changed = copy.deepcopy(record)
+        changed["output"]["findings"][0]["hypothesis"] += " changed"
+        missing = copy.deepcopy(translation)
+        missing["findings"].pop()
+        altered = copy.deepcopy(translation)
+        altered["findings"][0]["source_locations"] = []
+        duplicate = copy.deepcopy(translation)
+        duplicate["findings"][1] = duplicate["findings"][0]
+        for source, display in [(changed, translation), (record, missing), (record, altered), (record, duplicate)]:
+            with self.subTest(display=display["findings"][0]["id"]), self.assertRaises(PremortemError):
+                render_report(self.payload, source, display)
+
+    def test_translation_cannot_escape_report_json(self):
+        record = load_json(FIXTURE.parent / "guestbook-analysis.json")
+        translation = load_json(FIXTURE.parent / "guestbook-analysis.ja.json")
+        translation["findings"][0]["title"] = '</script><script>alert("translation")</script>'
+        html = render_report(self.payload, record, translation)
+        self.assertNotIn('</script><script>alert', html)
+        data = json.loads(re.search(r'id="report-data">(.*?)</script>', html, re.S).group(1))
+        self.assertEqual(translation["findings"][0]["title"], data["translations"]["ja"]["finding:1"]["title"])
 
     def test_comment_tokens_inside_strings_are_not_erased(self):
         source = '"""answer"""\nvalue = "# keep me" # hide me\nsql = """DROP TABLE posts;"""\n'
