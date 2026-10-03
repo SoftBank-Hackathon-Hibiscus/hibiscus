@@ -47,6 +47,16 @@ describe("감사 로그 끝 고정 (anchor)", () => {
     expect(await checkAnchors(anchors, { ok: true, lines: [], head: GENESIS }, signer)).toEqual({ ok: true, anchors: 1 });
   });
 
+  it("다른 곳에 복사했다 되돌리며 끝 개행이 빠진 고정값 파일에도 새 줄을 따로 붙임", async () => {
+    const { audit, anchors, signer } = setup();
+    await auditLog(audit, 1);
+    await runAnchor({ auditPath: audit, anchorsPath: anchors, signer });
+    writeFileSync(anchors, readFileSync(anchors, "utf8").trimEnd());
+    await auditLog(audit, 1);
+    await runAnchor({ auditPath: audit, anchorsPath: anchors, signer });
+    expect(await checkAnchors(anchors, chain(audit), signer)).toEqual({ ok: true, anchors: 2 });
+  });
+
   it("고정한 뒤 로그가 늘어나는 건 정상", async () => {
     const { audit, anchors, signer } = setup();
     await auditLog(audit, 2);

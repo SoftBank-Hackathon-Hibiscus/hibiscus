@@ -49,7 +49,14 @@ export async function runAnchor(o: AnchorOptions): Promise<AuditAnchor> {
   if (!parsed.success) throw new SignerError("SIGN_FAILED", "cosign sign-blob 이 sigstore bundle 을 만들지 않음");
   const anchor = parsed.data;
   mkdirSync(dirname(resolve(o.anchorsPath)), { recursive: true });
-  appendFileSync(o.anchorsPath, JSON.stringify(anchor) + "\n", "utf8");
+  // 다른 곳에 복사했다 되돌리면서 끝 개행이 빠진 파일이면 새 줄이 앞 줄에 붙지 않게 개행부터
+  let prev = "";
+  try {
+    prev = readFileSync(o.anchorsPath, "utf8");
+  } catch {
+    // 없으면 새로 만듦
+  }
+  appendFileSync(o.anchorsPath, (prev !== "" && !prev.endsWith("\n") ? "\n" : "") + JSON.stringify(anchor) + "\n", "utf8");
   return anchor;
 }
 
