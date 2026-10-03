@@ -9,7 +9,7 @@ import { imageRefOf, type BlobVerifier, type ImageVerifier } from "./cosign.js";
 import { readDigestsFile, sweepDigests, type RegistryLister } from "./registry.js";
 import { canonicalize, parseWith, readJson, sha256Hex, SignerError } from "./io.js";
 import { DEFAULT_PLAN_SCHEMA, loadPlan } from "./plan.js";
-import { AUTO_APPROVER, SignResultSchema, type AuditLine, type SignResult } from "./schema.js";
+import { AUTO_APPROVER, SignResultSchema, type AuditLine, type SignLog, type SignResult } from "./schema.js";
 
 export const DEFAULT_PUBLIC_KEY = fileURLToPath(new URL("../keys/cosign.pub", import.meta.url));
 
@@ -249,7 +249,17 @@ export type AuditImageReason = "ref_invalid" | "signature_invalid" | "unlogged_s
 export function sigMatchesLine(sig: Record<string, string>, line: AuditLine): boolean {
   if (line.anchor === undefined || line.entry.kind !== "sign") return false;
   if (line.annotations !== undefined) return canonicalize(sig) === canonicalize(line.annotations);
-  return Object.entries(logAnnotations(line.entry, line.anchor)).every(([k, v]) => sig[k] === v);
+  return Object.entries(legacyLineAnnotations(line.entry, line.anchor, sig)).every(([k, v]) => sig[k] === v);
+}
+
+/**
+ * 주석 기록이 없는 예전 줄(PR #37 main signer)로 비교할 주석. 그때 서명에는 signed_at 이 없어서,
+ * 서명에 signed_at 이 없으면 빼고 봄 (예전 감사 로그가 audit --images 에서 오탐 나지 않게)
+ */
+function legacyLineAnnotations(entry: SignLog, anchor: string, sig: Record<string, string>): Record<string, string> {
+  const expected = logAnnotations(entry, anchor);
+  if (sig.signed_at === undefined) delete expected.signed_at;
+  return expected;
 }
 
 /** 기록과 서명 주석 차이 (detail 용) */
@@ -410,7 +420,7 @@ export async function runAuditVerify(o: AuditVerifyOptions): Promise<AuditVerify
       // 같은 실행·같은 anchor 의 기록이 있는데 주석이 다르면, 정상 서명을 복사해서 일부만 바꾼 쌍둥이 서명
       const twin = logged.find((line) => line.anchor === anchor && line.entry.kind === "sign" && line.entry.run_id === sig.run_id);
       if (twin !== undefined && twin.anchor !== undefined && twin.entry.kind === "sign") {
-        const expected = twin.annotations ?? logAnnotations(twin.entry, twin.anchor);
+        const expected = twin.annotations ?? legacyLineAnnotations(twin.entry, twin.anchor, sig);
         found({ line: twin.seq, reason: "twin_signature", image: imageRef, run_id: runId, detail: `기록된 서명과 주석만 다른 서명 (${annotationDiff(expected, sig) || "주석 같음"}): ${imageRef}` });
         continue;
       }

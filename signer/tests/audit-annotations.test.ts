@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { auditHash, checkAuditChain, GENESIS } from "../src/audit.js";
 import type { ImageVerifier } from "../src/cosign.js";
-import { SignerError, writeJson } from "../src/io.js";
+import { SignerError, signLogLine, writeJson } from "../src/io.js";
 import type { AuditLine } from "../src/schema.js";
 import { runSign } from "../src/sign.js";
 import { runAuditVerify, runVerify } from "../src/verify.js";
@@ -212,5 +212,36 @@ describe("예전 형식(.sig) 서명", () => {
     // signer 서명을 예전 형식으로 옮김
     signer.legacy.push(...signer.calls.splice(0));
     expect(await runAuditVerify({ auditPath, verifier: signer, strictImages: true })).toMatchObject({ code: 0 });
+  });
+});
+
+describe("예전 main 형식 감사 로그 (PR #37 signer 로 서명)", () => {
+  const DIGEST = `sha256:${"a".repeat(64)}`;
+  /** main signer 와 같은 모양: 줄에 주석 기록 없음, 서명 주석에 signed_at·image_repo·approval_sha256 없음 */
+  function mainFormat() {
+    const dir = tmp();
+    const auditPath = join(dir, "sign_audit.jsonl");
+    const signer = new RecordingSigner();
+    const entry = signLogLine({ run_id: "r-003", digest: DIGEST, plan_hash: "b".repeat(64), result: "signed", requester: "alice", approver: "auto", reason: null, signature_ref: `cosign:${REPO}@${DIGEST}` }, NOW);
+    const body = { seq: 1, prev_hash: GENESIS, entry, anchor: GENESIS };
+    write(auditPath, [{ ...body, hash: auditHash(body) }]);
+    const annotations = {
+      run_id: "r-003", plan_hash: "b".repeat(64), source_revision: "none", targets: "onprem", failover_allowed: "false",
+      requester: "alice", approver: "auto", plan_sha256: "c".repeat(64), audit_head: GENESIS,
+    };
+    return { auditPath, signer, annotations };
+  }
+
+  it("signed_at 없는 예전 서명은 audit --images 에서 그대로 통과 (signature_invalid·twin_signature 오탐 없음)", async () => {
+    const { auditPath, signer, annotations } = mainFormat();
+    await signer.sign(`${REPO}@${DIGEST}`, annotations);
+    expect(await runAuditVerify({ auditPath, verifier: signer })).toMatchObject({ code: 0, signed: 1 });
+    expect(await runAuditVerify({ auditPath, verifier: signer, strictImages: true })).toMatchObject({ code: 0 });
+  });
+
+  it("예전 줄이어도 서명에 signed_at 이 있으면 비교함 (다르면 맞는 서명 없음)", async () => {
+    const { auditPath, signer, annotations } = mainFormat();
+    await signer.sign(`${REPO}@${DIGEST}`, { ...annotations, signed_at: encodeURIComponent(new Date(NOW.getTime() + 1000).toISOString()) });
+    expect(await runAuditVerify({ auditPath, verifier: signer })).toMatchObject({ code: 1, reason: "signature_invalid" });
   });
 });
