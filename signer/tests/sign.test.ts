@@ -131,6 +131,24 @@ describe("runSign", () => {
     expect(outcome).toMatchObject({ code: 1, reason: "approval_missing" });
   });
 
+  it("서명 직후 자기 확인: 통과하면 서명, 확인에 쓴 주석은 서명 주석 그대로", async () => {
+    const dir = tmp();
+    const signer = new RecordingSigner();
+    const outcome = await runSign({ planPath: plan("allow"), requester: "alice", imageRepo: REPO, signer, selfVerifier: signer, now: () => NOW, ...paths(dir) });
+    expect(outcome.code).toBe(0);
+    expect(signer.verifyCalls).toEqual([{ imageRef: signer.calls[0]!.imageRef, annotations: signer.calls[0]!.annotations }]);
+  });
+
+  it("서명 직후 자기 확인이 실패하면(다른 키로 서명 등) code 2, sign_result 없음, refused(sign_failed)", async () => {
+    const dir = tmp();
+    const signer = new RecordingSigner();
+    const wrongKey = new RecordingSigner(); // 서명을 하나도 모르는 확인기 = 다른 공개키
+    const outcome = await runSign({ planPath: plan("allow"), requester: "alice", imageRepo: REPO, signer, selfVerifier: wrongKey, now: () => NOW, ...paths(dir) });
+    expect(outcome).toMatchObject({ code: 2, reason: "sign_failed", detail: expect.stringMatching(/서명 직후 확인 실패/) });
+    expect(existsSync(paths(dir).outPath)).toBe(false);
+    expect(readLog(paths(dir).logPath)[0]).toMatchObject({ result: "refused", reason: "sign_failed" });
+  });
+
   it("cosign 이 실패하면 code 2, sign_result.json 없음, refused(sign_failed) 기록", async () => {
     const dir = tmp();
     const outcome = await runSign({ planPath: plan("allow"), requester: "alice", imageRepo: REPO, signer: new RecordingSigner(true), now: () => NOW, ...paths(dir) });

@@ -4,7 +4,7 @@ import { existsSync, rmSync } from "node:fs";
 import { signAnnotations } from "./annotations.js";
 import { loadApproval } from "./approval.js";
 import { appendAudit, readAuditHead, type AuditOptions } from "./audit.js";
-import { imageRefOf, type ImageSigner } from "./cosign.js";
+import { imageRefOf, type ImageSigner, type ImageVerifier } from "./cosign.js";
 import { decideSign } from "./decide.js";
 import { appendSignLog, SignerError, signLogLine, writeJson } from "./io.js";
 import { DEFAULT_PLAN_SCHEMA, loadPlan } from "./plan.js";
@@ -24,6 +24,8 @@ export interface SignOptions {
   audit?: AuditOptions;
   /** 승인 유효시간(ms). 없으면 오래된 승인도 받음 */
   approvalTtlMs?: number;
+  /** 있으면 서명 직후 이 확인기(고정한 공개키)로 다시 확인. 실패하면 sign_result 를 안 남김 */
+  selfVerifier?: ImageVerifier;
   now?: () => Date;
 }
 
@@ -78,6 +80,16 @@ export async function runSign(o: SignOptions): Promise<SignOutcome> {
     await refused(signLogLine({ ...base, result: "refused", approver: decision.approver, reason: "sign_failed", signature_ref: null }, now()));
     const detail = e instanceof SignerError ? e.message : String(e);
     return { code: 2, reason: "sign_failed", detail };
+  }
+
+  // 서명 직후 자기 확인. 키가 공개키와 안 맞거나 주석이 안 붙었으면 여기서 멈춤 (배포 때가 아니라 서명 순간에 잡게)
+  if (o.selfVerifier) {
+    try {
+      await o.selfVerifier.verify(imageRef, annotations);
+    } catch (e) {
+      await refused(signLogLine({ ...base, result: "refused", approver: decision.approver, reason: "sign_failed", signature_ref: null }, now()));
+      return { code: 2, reason: "sign_failed", detail: `서명 직후 확인 실패: ${e instanceof SignerError ? e.message : String(e)}` };
+    }
   }
 
   const signedAt = now();

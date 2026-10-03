@@ -48,6 +48,38 @@ describe("cli 빈 플래그", () => {
   });
 });
 
+describe("cli fingerprint / 공개키 고정", () => {
+  const TEAM_KEY = "2f049a775b1f1075c8c14ad13483b5d1ae411e32f7f89e2dc1b113b3a2d3dcfa";
+
+  it("fingerprint 는 레포 공개키 지문을 출력", () => {
+    const r = cli(["fingerprint"]);
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain(`sha256:${TEAM_KEY}`);
+  });
+
+  it("고정한 지문과 다르면 verify 는 cosign 을 부르기 전에 PUBKEY_MISMATCH (2)", () => {
+    const dir = tmp();
+    const result = join(dir, "sign_result.json");
+    writeFileSync(result, "{}");
+    const r = cli(["verify", "--result", result, "--pubkey-sha256", "0".repeat(64)]);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/PUBKEY_MISMATCH/);
+  });
+
+  it("SIGNER_SELF_VERIFY=1 인데 공개키가 고정값과 다르면 서명 전에 멈춤", () => {
+    const dir = tmp();
+    const key = join(dir, "cosign.key");
+    writeFileSync(key, "dummy");
+    const r = cli(["sign", "--plan", plan("allow"), "--requester", "alice", "--image-repo", "localhost:5001/hib/app", "--key", key, "--out", join(dir, "r.json"), "--log", join(dir, "d.jsonl")], {
+      SIGNER_SELF_VERIFY: "1",
+      SIGNER_PUBKEY_SHA256: "0".repeat(64),
+    });
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/PUBKEY_MISMATCH/);
+    expect(existsSync(join(dir, "d.jsonl"))).toBe(false);
+  });
+});
+
 describe("cli audit", () => {
   /** dry-run 서명 2번으로 감사 로그 2줄 */
   function auditLog(dir: string): string {

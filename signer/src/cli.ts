@@ -2,9 +2,10 @@
 import { rmSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { createApproval } from "./approval.js";
-import { CosignSigner, CosignVerifier, DryRunSigner } from "./cosign.js";
+import { CosignSigner, CosignVerifier, DryRunSigner, isKmsKey } from "./cosign.js";
 import { SignerError, writeJson } from "./io.js";
 import { DEFAULT_PLAN_SCHEMA, loadPlan } from "./plan.js";
+import { checkPublicKeyPin, publicKeyFingerprint } from "./keys.js";
 import { runSign } from "./sign.js";
 import { DEFAULT_PUBLIC_KEY, runAuditVerify, runVerify } from "./verify.js";
 
@@ -17,6 +18,7 @@ const USAGE = `사용법
   npx tsx src/cli.ts verify --result <sign_result.json> [--plan <plan.json>] [--audit <감사 로그>] [--image-repo <저장소>]
                             [--pub <cosign.pub>] [--no-tlog] [--plan-schema <Plan.schema.json>]
   npx tsx src/cli.ts audit --audit <감사 로그> [--images [--image-repo <저장소>] [--pub <cosign.pub>] [--no-tlog]]
+  npx tsx src/cli.ts fingerprint [--pub <cosign.pub>] [--pubkey-sha256 <지문>]
 
   --image-repo  태그 없는 이미지 저장소 (예: asia-northeast3-docker.pkg.dev/<프로젝트>/<저장소>/<이미지>). 없으면 IMAGE_REPO 환경변수
   --key         cosign 개인키 경로 또는 KMS 키 주소(gcpkms://...). 없으면 SIGNER_COSIGN_KEY 환경변수. 비밀번호는 COSIGN_PASSWORD 환경변수 (KMS 는 필요 없음)
@@ -24,6 +26,8 @@ const USAGE = `사용법
                 배포 쪽 verify 에도 --insecure-ignore-tlog=true 필요
   --dry-run     cosign 을 부르지 않고 signature_ref 를 dry-run:... 으로 채움 (연결 확인용, 실제 배포에 쓰지 말 것)
   --audit       서명 감사 로그(해시 체인) 경로. 없으면 SIGNER_AUDIT_LOG 환경변수, 둘 다 없으면 안 씀
+  --self-verify 서명 직후 공개키(--pub)로 바로 다시 확인. 실패하면 sign_result 안 남김. 없으면 SIGNER_SELF_VERIFY=1
+  --pubkey-sha256 공개키 지문 고정. 확인에 쓰는 공개키가 이 지문과 다르면 멈춤. 없으면 SIGNER_PUBKEY_SHA256
   --approval-ttl 승인 유효시간(분). 승인한 지 이보다 오래되면 서명 안 함 (approval_expired). 없으면 SIGNER_APPROVAL_TTL_MIN 환경변수, 둘 다 없으면 시간은 안 봄
 
   verify        sign_result.json 의 targets·approver 등이 서명된 값 그대로인지 cosign verify 로 확인
@@ -71,6 +75,8 @@ async function main(argv: string[]): Promise<number> {
       audit: { type: "string" },
       images: { type: "boolean", default: false },
       "approval-ttl": { type: "string" },
+      "pubkey-sha256": { type: "string" },
+      "self-verify": { type: "boolean", default: false },
     },
   });
   const planSchema = values["plan-schema"] ?? DEFAULT_PLAN_SCHEMA;
@@ -79,6 +85,12 @@ async function main(argv: string[]): Promise<number> {
   // 빈 플래그(--audit "")도 없는 것으로 봄
   const auditPath = values.audit || process.env.SIGNER_AUDIT_LOG || undefined;
   const pub = values.pub || process.env.COSIGN_PUBLIC_KEY || DEFAULT_PUBLIC_KEY;
+  const pinnedPub = values["pubkey-sha256"] || process.env.SIGNER_PUBKEY_SHA256 || undefined;
+  // 확인에 쓸 공개키. 지문을 고정했으면 다른 키로는 확인하지 않음
+  const trustedPub = (): string => {
+    if (pinnedPub !== undefined) checkPublicKeyPin(pub, pinnedPub);
+    return pub;
+  };
 
   if (command === "approve") {
     const loaded = loadPlan(required(values.plan, "plan"), planSchema);
@@ -98,6 +110,9 @@ async function main(argv: string[]): Promise<number> {
     const signer = dryRun
       ? new DryRunSigner()
       : new CosignSigner(required(values.key ?? process.env.SIGNER_COSIGN_KEY, "key"), "cosign", { noTlog });
+    // 시험 실행은 실제 서명이 없어서 자기 확인을 안 함. 지문 확인은 서명 전에 끝냄
+    const selfVerify = !dryRun && (values["self-verify"] === true || process.env.SIGNER_SELF_VERIFY === "1");
+    const selfVerifier = selfVerify ? new CosignVerifier(trustedPub(), "cosign", { noTlog }) : undefined;
     const outcome = await runSign({
       planPath: required(values.plan, "plan"),
       requester: required(values.requester, "requester"),
@@ -109,6 +124,7 @@ async function main(argv: string[]): Promise<number> {
       planSchemaPath: planSchema,
       ...(auditPath !== undefined ? { auditPath } : {}),
       ...(approvalTtlMs !== undefined ? { approvalTtlMs } : {}),
+      ...(selfVerifier !== undefined ? { selfVerifier } : {}),
     });
     if (outcome.code === 0) {
       const r = outcome.result;
@@ -118,6 +134,7 @@ async function main(argv: string[]): Promise<number> {
       console.log(`  signature: ${r.signature_ref}${dryRun ? "  (시험 실행)" : noTlog ? "  (Rekor 없이)" : ""}`);
       console.log(`  저장     : ${out}`);
       if (auditPath !== undefined) console.log(`  감사 로그: ${auditPath}`);
+      if (selfVerifier !== undefined) console.log(`  자기 확인: 통과 (${pub})`);
     } else {
       console.error(`[signer] 서명 안 함 (${outcome.reason}): ${outcome.detail}`);
     }
@@ -128,7 +145,7 @@ async function main(argv: string[]): Promise<number> {
     const imageRepo = values["image-repo"] || process.env.IMAGE_REPO || undefined;
     const outcome = await runVerify({
       resultPath: required(values.result, "result"),
-      verifier: new CosignVerifier(pub, "cosign", { noTlog }),
+      verifier: new CosignVerifier(trustedPub(), "cosign", { noTlog }),
       ...(imageRepo !== undefined ? { imageRepo } : {}),
       ...(values.plan !== undefined ? { planPath: values.plan } : {}),
       planSchemaPath: planSchema,
@@ -140,6 +157,7 @@ async function main(argv: string[]): Promise<number> {
       console.log(`  targets  : ${r.targets.join(", ")}`);
       console.log(`  approver : ${r.approver}`);
       console.log(`  확인한 주석: ${Object.keys(outcome.annotations).join(", ")}`);
+      if (!isKmsKey(pub)) console.log(`  공개키 지문: sha256:${publicKeyFingerprint(pub)}${pinnedPub !== undefined ? " (고정값과 같음)" : ""}`);
     } else {
       console.error(`[signer] 서명 확인 실패 (${outcome.reason}): ${outcome.detail}`);
     }
@@ -150,7 +168,7 @@ async function main(argv: string[]): Promise<number> {
     const imageRepo = values["image-repo"] || process.env.IMAGE_REPO || undefined;
     const outcome = await runAuditVerify({
       auditPath: required(auditPath, "audit"),
-      ...(values.images === true ? { verifier: new CosignVerifier(pub, "cosign", { noTlog }) } : {}),
+      ...(values.images === true ? { verifier: new CosignVerifier(trustedPub(), "cosign", { noTlog }) } : {}),
       ...(imageRepo !== undefined ? { imageRepo } : {}),
     });
     if (outcome.code === 0) {
@@ -161,6 +179,12 @@ async function main(argv: string[]): Promise<number> {
       console.error(`[signer] 감사 로그 ${where}${where ? " " : ""}문제 (${outcome.reason}): ${outcome.detail}`);
     }
     return outcome.code;
+  }
+
+  if (command === "fingerprint") {
+    const fingerprint = pinnedPub !== undefined ? checkPublicKeyPin(pub, pinnedPub) : publicKeyFingerprint(pub);
+    console.log(`sha256:${fingerprint}  ${pub}${pinnedPub !== undefined ? "  (고정값과 같음)" : ""}`);
+    return 0;
   }
 
   console.error(USAGE);
