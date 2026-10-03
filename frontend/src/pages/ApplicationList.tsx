@@ -3,6 +3,7 @@ import type { DataSource } from '../api/client';
 import { ApiError } from '../api/client';
 import type { ApplicationView, RouteSnapshot } from '../api/types';
 import { ErrorNotice } from '../components/ErrorNotice';
+import { Loader } from '../components/Loader';
 import { Empty, PageTitle, Pill } from '../components/ui';
 import { usePolling } from '../hooks/usePolling';
 import { relTime, targetLabel } from '../lib/format';
@@ -52,7 +53,7 @@ export function ApplicationList({ source }: { source: DataSource }) {
         }
       />
       {poll.error ? <ErrorNotice error={poll.error} /> : null}
-      {poll.loading && !rows && <Empty>{t('loading')}</Empty>}
+      {poll.loading && !rows && <Loader label={t('loading')} />}
       {rows && rows.length === 0 && (
         <section className="card">
           <Empty>{t('noApps')}</Empty>

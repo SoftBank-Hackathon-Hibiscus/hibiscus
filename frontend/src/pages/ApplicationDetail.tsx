@@ -4,7 +4,9 @@ import { ApiError, type DataSource } from '../api/client';
 import { MockDataSource } from '../api/mock';
 import type { AgentStatusResponse, ApplicationAgentSummary, ApplicationView, Deployment, DeploymentStatus, PolicyResult, RouteSnapshot, RoutingTargetHealth, RoutingTargetView, TargetKind } from '../api/types';
 import { ErrorNotice, describeError } from '../components/ErrorNotice';
+import { Loader } from '../components/Loader';
 import { Crumbs, Empty, Hash, PageTitle, Pill, type Tone } from '../components/ui';
+import { useMinVisible } from '../hooks/useMinVisible';
 import { usePolling } from '../hooks/usePolling';
 import { detectRouteChange, markOf, type RouteChange, type RouteMark } from '../lib/failover';
 import { fmtTime, relTime, targetLabel } from '../lib/format';
@@ -112,7 +114,8 @@ export function ApplicationDetail({ id, source }: { id: string; source: DataSour
   }, [poll.data]);
 
   const snap = poll.data;
-  if (poll.loading && !snap) return <Empty>{t('loading')}</Empty>;
+  const showLoader = useMinVisible(poll.loading && !snap, 900);
+  if (showLoader) return <Loader label={t('loading')} />;
   if (!snap) return <ErrorNotice error={poll.error ?? new Error('no data')} />;
 
   const a = snap.app.application;

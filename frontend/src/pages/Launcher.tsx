@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react';
 import { configToSearch } from '../api';
 import { Collapsible, PageTitle } from '../components/ui';
 import { useLang, type DictKey } from '../lib/i18n';
@@ -37,7 +38,7 @@ export function Launcher() {
       />
       <div className="launch-grid">
         {CARDS.map((card, i) => (
-          <a key={card.id} className="card launch-card" href={`${configToSearch({ mode: 'mock', scenario: card.id })}#${paths.get(card.id) ?? ''}`}>
+          <a key={card.id} className="card launch-card" style={{ '--i': i } as CSSProperties} href={`${configToSearch({ mode: 'mock', scenario: card.id })}#${paths.get(card.id) ?? ''}`}>
             <span className="launch-index">{i + 1}</span>
             <span className="launch-title">{t(card.title)}</span>
             <span className="launch-line">{t(card.line)}</span>

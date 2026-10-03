@@ -4,8 +4,10 @@ import type { DataSource } from '../api/client';
 import type { Approval, PiiReport, SignLog, TestResult } from '../api/contracts';
 import type { ApplicationView, Decision, DeploymentStatus, DeploymentView, StageName } from '../api/types';
 import { ErrorNotice } from '../components/ErrorNotice';
+import { Loader } from '../components/Loader';
 import { Modal } from '../components/Modal';
 import { Collapsible, Crumbs, DemoBadge, Empty, Hash, Kv, PageTitle, Pill, type Tone } from '../components/ui';
+import { useMinVisible } from '../hooks/useMinVisible';
 import { usePolling } from '../hooks/usePolling';
 import { findArtifact, latestStages, parseJsonArtifact } from '../lib/artifacts';
 import { fmtTime, relTime, targetLabel } from '../lib/format';
@@ -72,7 +74,9 @@ export function DeploymentDetail({ id, source }: { id: string; source: DataSourc
 
   const summary = useMemo(() => (view ? summarizeDeployment(view, lang) : null), [view, lang]);
 
-  if (poll.loading && !view) return <Empty>{t('loading')}</Empty>;
+  const showLoader = useMinVisible(poll.loading && !view, 900);
+
+  if (showLoader) return <Loader label={t('loading')} />;
   if (!view || !summary) return <ErrorNotice error={poll.error ?? new Error('no data')} />;
   const d = view.deployment;
   const appName = app?.application.name ?? d.applicationId;
