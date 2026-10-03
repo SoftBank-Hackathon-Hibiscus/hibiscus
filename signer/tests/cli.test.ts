@@ -30,6 +30,14 @@ describe("cli sign", () => {
   });
 });
 
+describe("cli sign --approval-ttl", () => {
+  it.each([["abc"], ["0"], ["-5"]])("%s 처럼 0 보다 큰 숫자가 아니면 실행 오류(2)", (ttl) => {
+    const r = cli(["sign", "--plan", plan("allow"), "--requester", "alice", "--image-repo", "localhost:5001/hib/app", "--dry-run", `--approval-ttl=${ttl}`, "--out", join(tmp(), "r.json"), "--log", join(tmp(), "d.jsonl")]);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/ARG_INVALID/);
+  });
+});
+
 describe("cli audit", () => {
   /** dry-run 서명 2번으로 감사 로그 2줄 */
   function auditLog(dir: string): string {

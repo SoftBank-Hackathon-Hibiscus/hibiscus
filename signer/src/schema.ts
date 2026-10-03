@@ -78,6 +78,7 @@ export const RefuseReasonSchema = z.enum([
   "approval_mismatch",
   "requester_mismatch",
   "self_approval",
+  "approval_expired",
   "sign_failed",
 ]);
 export type RefuseReason = z.infer<typeof RefuseReasonSchema>;

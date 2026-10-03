@@ -104,3 +104,4 @@ parity 의 `result.json`(`parity/mocks/test_result.json` 형식)은 이 계약�
 |---|---|---|
 | 2026-10-01 | contracts/publish-current | main 의 Plan, RollbackRequest, RollbackPlan, DecisionLog, SignResult, SignLog 를 그대로 공개 |
 | 2026-10-02 | #28 | TestResult 공개 및 런타임 의미 규칙 문서화 |
+| 2026-10-03 | signer/verify-audit | SignLog `reason` enum 에 `approval_expired` 추가 (승인 유효시간, 켤 때만 나옴). 값 추가라 기존 줄은 그대로 통과 |

@@ -22,6 +22,8 @@ export interface SignOptions {
   /** 있으면 결정마다 감사 로그(해시 체인)에도 한 줄 */
   auditPath?: string;
   audit?: AuditOptions;
+  /** 승인 유효시간(ms). 없으면 오래된 승인도 받음 */
+  approvalTtlMs?: number;
   now?: () => Date;
 }
 
@@ -52,7 +54,10 @@ export async function runSign(o: SignOptions): Promise<SignOutcome> {
     if (o.auditPath) await appendAudit(o.auditPath, line, undefined, o.audit);
   };
 
-  const decision = decideSign(plan, loaded.planSha256, o.requester, approval);
+  const decision = decideSign(plan, loaded.planSha256, o.requester, approval, {
+    now: now(),
+    ...(o.approvalTtlMs !== undefined ? { approvalTtlMs: o.approvalTtlMs } : {}),
+  });
   if (!decision.ok) {
     await refused(signLogLine({ ...base, result: "refused", approver: approval?.approver ?? null, reason: decision.reason, signature_ref: null }, now()));
     return { code: 1, reason: decision.reason, detail: decision.detail };

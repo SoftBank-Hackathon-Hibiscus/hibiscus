@@ -12,7 +12,8 @@ const USAGE = `사용법
   npx tsx src/cli.ts approve --plan <plan.json> --requester <id> --approver <id> [--out approval.json]
   npx tsx src/cli.ts sign --plan <plan.json> --requester <id> [--approval <approval.json>]
                           --image-repo <저장소> (--key <cosign.key> [--no-tlog] | --dry-run)
-                          [--out sign_result.json] [--log decisions.jsonl] [--audit <감사 로그>] [--plan-schema <Plan.schema.json>]
+                          [--out sign_result.json] [--log decisions.jsonl] [--audit <감사 로그>] [--approval-ttl <분>]
+                          [--plan-schema <Plan.schema.json>]
   npx tsx src/cli.ts verify --result <sign_result.json> [--plan <plan.json>] [--audit <감사 로그>] [--image-repo <저장소>]
                             [--pub <cosign.pub>] [--no-tlog] [--plan-schema <Plan.schema.json>]
   npx tsx src/cli.ts audit --audit <감사 로그> [--images [--pub <cosign.pub>] [--no-tlog]]
@@ -23,6 +24,7 @@ const USAGE = `사용법
                 배포 쪽 verify 에도 --insecure-ignore-tlog=true 필요
   --dry-run     cosign 을 부르지 않고 signature_ref 를 dry-run:... 으로 채움 (연결 확인용, 실제 배포에 쓰지 말 것)
   --audit       서명 감사 로그(해시 체인) 경로. 없으면 SIGNER_AUDIT_LOG 환경변수, 둘 다 없으면 안 씀
+  --approval-ttl 승인 유효시간(분). 승인한 지 이보다 오래되면 서명 안 함 (approval_expired). 없으면 SIGNER_APPROVAL_TTL_MIN 환경변수, 둘 다 없으면 시간은 안 봄
 
   verify        sign_result.json 의 targets·approver 등이 서명된 값 그대로인지 cosign verify 로 확인
   --plan        plan 내용과 plan 파일 해시까지 확인
@@ -37,6 +39,14 @@ const USAGE = `사용법
 function required(value: string | undefined, name: string): string {
   if (!value) throw new SignerError("ARG_MISSING", `--${name} 가 필요함\n\n${USAGE}`);
   return value;
+}
+
+/** 분 단위 양수 → ms. 없으면 undefined */
+function minutes(value: string | undefined, name: string): number | undefined {
+  if (value === undefined || value === "") return undefined;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) throw new SignerError("ARG_INVALID", `--${name} 는 0 보다 큰 분 단위 숫자여야 함: ${value}`);
+  return n * 60_000;
 }
 
 async function main(argv: string[]): Promise<number> {
@@ -59,6 +69,7 @@ async function main(argv: string[]): Promise<number> {
       pub: { type: "string" },
       audit: { type: "string" },
       images: { type: "boolean", default: false },
+      "approval-ttl": { type: "string" },
     },
   });
   const planSchema = values["plan-schema"] ?? DEFAULT_PLAN_SCHEMA;
@@ -81,6 +92,7 @@ async function main(argv: string[]): Promise<number> {
     const out = values.out ?? "sign_result.json";
     rmSync(out, { force: true });
     const dryRun = values["dry-run"] === true;
+    const approvalTtlMs = minutes(values["approval-ttl"] ?? process.env.SIGNER_APPROVAL_TTL_MIN, "approval-ttl");
     const signer = dryRun
       ? new DryRunSigner()
       : new CosignSigner(required(values.key ?? process.env.SIGNER_COSIGN_KEY, "key"), "cosign", { noTlog });
@@ -94,6 +106,7 @@ async function main(argv: string[]): Promise<number> {
       signer,
       planSchemaPath: planSchema,
       ...(auditPath !== undefined ? { auditPath } : {}),
+      ...(approvalTtlMs !== undefined ? { approvalTtlMs } : {}),
     });
     if (outcome.code === 0) {
       const r = outcome.result;

@@ -110,6 +110,21 @@ describe("runSign", () => {
     expect(readLog(paths(dir).logPath)[0]).toMatchObject({ result: "refused", reason: "approval_mismatch", approver: "bob" });
   });
 
+  it("needs_approval: 승인 유효시간이 지났으면 서명 안 하고 approval_expired 기록", async () => {
+    const dir = tmp();
+    const approvalPath = join(dir, "approval.json");
+    writeJson(approvalPath, createApproval(loadPlan(plan("needs-approval")), "alice", "bob", NOW));
+    const signer = new RecordingSigner();
+    const later = new Date(NOW.getTime() + 20 * 60_000);
+    const outcome = await runSign({ planPath: plan("needs-approval"), requester: "alice", approvalPath, imageRepo: REPO, signer, approvalTtlMs: 15 * 60_000, now: () => later, ...paths(dir) });
+
+    expect(outcome).toMatchObject({ code: 1, reason: "approval_expired" });
+    expect(signer.calls).toHaveLength(0);
+    const [line] = readLog(paths(dir).logPath);
+    expect(line).toMatchObject({ result: "refused", reason: "approval_expired", approver: "bob" });
+    expect(validators.SignLog!(line)).toBe(true);
+  });
+
   it("needs_approval: 승인 기록이 없으면 서명 안 함", async () => {
     const dir = tmp();
     const outcome = await runSign({ planPath: plan("needs-approval"), requester: "alice", imageRepo: REPO, signer: new RecordingSigner(), now: () => NOW, ...paths(dir) });
