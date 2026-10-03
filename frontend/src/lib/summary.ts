@@ -279,7 +279,9 @@ function describeDeploy(lang: Lang, stage: StageExecution | undefined, result: D
     case 'rolled_back': {
       // main 2cca2c3: 대표 경로 변경 실패도 전환한 대상을 모두 되돌린 뒤 rolled_back 으로 기록한다
       lines.push(r.result === 'error' ? t('deployLineRouteFailRolledBack') : t('deployLineRolledBack'));
-      for (const s of result.targets.filter((x) => x.phase === 'rollback' && x.result === 'ok')) lines.push(t('rollbackOk', { target: targetLabel(s.target) }));
+      for (const s of result.targets.filter((x) => x.phase === 'rollback' && x.result === 'ok')) {
+        lines.push(s.serving ? t('rollbackOkServing', { target: targetLabel(s.target), serving: s.serving }) : t('rollbackOk', { target: targetLabel(s.target) }));
+      }
       break;
     }
     case 'error': {
