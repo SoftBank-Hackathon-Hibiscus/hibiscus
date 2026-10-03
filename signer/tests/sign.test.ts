@@ -39,9 +39,21 @@ describe("runSign", () => {
     });
     expect(validators.SignResult!(result)).toBe(true);
 
-    // 서명 대상은 <저장소>@digest, 주석에 run_id·plan_hash·source_revision
+    // 서명 대상은 <저장소>@digest, 주석에 sign_result 의 서명 대상 필드 전부 + plan 파일 해시
     expect(signer.calls).toEqual([
-      { imageRef: `${REPO}@${p.digest}`, annotations: { run_id: p.run_id, plan_hash: p.plan_hash, source_revision: p.source_revision } },
+      {
+        imageRef: `${REPO}@${p.digest}`,
+        annotations: {
+          run_id: p.run_id,
+          plan_hash: p.plan_hash,
+          source_revision: p.source_revision,
+          targets: "onprem",
+          failover_allowed: "false",
+          requester: "alice",
+          approver: "auto",
+          plan_sha256: loadPlan(plan("allow-onprem")).planSha256,
+        },
+      },
     ]);
 
     const [line] = readLog(paths(dir).logPath);
@@ -76,10 +88,12 @@ describe("runSign", () => {
     const dir = tmp();
     const approvalPath = join(dir, "approval.json");
     writeJson(approvalPath, createApproval(loadPlan(plan("needs-approval")), "alice", "bob", NOW));
-    const outcome = await runSign({ planPath: plan("needs-approval"), requester: "alice", approvalPath, imageRepo: REPO, signer: new RecordingSigner(), now: () => NOW, ...paths(dir) });
+    const signer = new RecordingSigner();
+    const outcome = await runSign({ planPath: plan("needs-approval"), requester: "alice", approvalPath, imageRepo: REPO, signer, now: () => NOW, ...paths(dir) });
 
     expect(outcome.code).toBe(0);
     expect(readJsonFile(paths(dir).outPath)).toMatchObject({ requester: "alice", approver: "bob" });
+    expect(signer.calls[0]?.annotations).toMatchObject({ requester: "alice", approver: "bob" });
   });
 
   it("needs_approval: 승인 뒤 targets 를 바꾸면 서명 안 함", async () => {

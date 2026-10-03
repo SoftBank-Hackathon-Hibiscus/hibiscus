@@ -1,17 +1,20 @@
-// approve / sign 명령. 종료 코드 0 서명 / 1 거절 / 2 오류
+// approve / sign / verify 명령. 종료 코드 0 서명·확인 / 1 거절·확인 실패 / 2 오류
 import { rmSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { createApproval } from "./approval.js";
-import { CosignSigner, DryRunSigner } from "./cosign.js";
+import { CosignSigner, CosignVerifier, DryRunSigner } from "./cosign.js";
 import { SignerError, writeJson } from "./io.js";
 import { DEFAULT_PLAN_SCHEMA, loadPlan } from "./plan.js";
 import { runSign } from "./sign.js";
+import { DEFAULT_PUBLIC_KEY, runVerify } from "./verify.js";
 
 const USAGE = `사용법
   npx tsx src/cli.ts approve --plan <plan.json> --requester <id> --approver <id> [--out approval.json]
   npx tsx src/cli.ts sign --plan <plan.json> --requester <id> [--approval <approval.json>]
                           --image-repo <저장소> (--key <cosign.key> [--no-tlog] | --dry-run)
                           [--out sign_result.json] [--log decisions.jsonl] [--plan-schema <Plan.schema.json>]
+  npx tsx src/cli.ts verify --result <sign_result.json> [--plan <plan.json>] [--image-repo <저장소>]
+                            [--pub <cosign.pub>] [--no-tlog] [--plan-schema <Plan.schema.json>]
 
   --image-repo  태그 없는 이미지 저장소 (예: asia-northeast3-docker.pkg.dev/<프로젝트>/<저장소>/<이미지>). 없으면 IMAGE_REPO 환경변수
   --key         cosign 개인키 경로. 없으면 SIGNER_COSIGN_KEY 환경변수. 비밀번호는 COSIGN_PASSWORD 환경변수
@@ -19,7 +22,12 @@ const USAGE = `사용법
                 배포 쪽 verify 에도 --insecure-ignore-tlog=true 필요
   --dry-run     cosign 을 부르지 않고 signature_ref 를 dry-run:... 으로 채움 (연결 확인용, 실제 배포에 쓰지 말 것)
 
-종료 코드: 0 서명함 / 1 서명 거절 / 2 실행 오류`;
+  verify        sign_result.json 의 targets·approver 등이 서명된 값 그대로인지 cosign verify 로 확인
+  --plan        plan 내용과 plan 파일 해시까지 확인
+  --pub         cosign 공개키. 없으면 COSIGN_PUBLIC_KEY 환경변수, 그것도 없으면 keys/cosign.pub
+  --no-tlog     Rekor 없이 서명한 이미지 확인 (cosign verify --insecure-ignore-tlog=true)
+
+종료 코드: 0 서명함·확인함 / 1 서명 거절·확인 실패 / 2 실행 오류`;
 
 function required(value: string | undefined, name: string): string {
   if (!value) throw new SignerError("ARG_MISSING", `--${name} 가 필요함\n\n${USAGE}`);
@@ -42,9 +50,12 @@ async function main(argv: string[]): Promise<number> {
       out: { type: "string" },
       log: { type: "string" },
       "plan-schema": { type: "string" },
+      result: { type: "string" },
+      pub: { type: "string" },
     },
   });
   const planSchema = values["plan-schema"] ?? DEFAULT_PLAN_SCHEMA;
+  const noTlog = values["no-tlog"] === true || process.env.SIGNER_NO_TLOG === "1";
 
   if (command === "approve") {
     const loaded = loadPlan(required(values.plan, "plan"), planSchema);
@@ -60,7 +71,6 @@ async function main(argv: string[]): Promise<number> {
     const out = values.out ?? "sign_result.json";
     rmSync(out, { force: true });
     const dryRun = values["dry-run"] === true;
-    const noTlog = values["no-tlog"] === true || process.env.SIGNER_NO_TLOG === "1";
     const signer = dryRun
       ? new DryRunSigner()
       : new CosignSigner(required(values.key ?? process.env.SIGNER_COSIGN_KEY, "key"), "cosign", { noTlog });
@@ -83,6 +93,29 @@ async function main(argv: string[]): Promise<number> {
       console.log(`  저장     : ${out}`);
     } else {
       console.error(`[signer] 서명 안 함 (${outcome.reason}): ${outcome.detail}`);
+    }
+    return outcome.code;
+  }
+
+  if (command === "verify") {
+    // 빈 환경변수는 없는 것으로 봄 (backend 기본값이 '' 인 경우가 있음)
+    const pub = values.pub ?? (process.env.COSIGN_PUBLIC_KEY || DEFAULT_PUBLIC_KEY);
+    const imageRepo = values["image-repo"] ?? (process.env.IMAGE_REPO || undefined);
+    const outcome = await runVerify({
+      resultPath: required(values.result, "result"),
+      verifier: new CosignVerifier(pub, "cosign", { noTlog }),
+      ...(imageRepo !== undefined ? { imageRepo } : {}),
+      ...(values.plan !== undefined ? { planPath: values.plan } : {}),
+      planSchemaPath: planSchema,
+    });
+    if (outcome.code === 0) {
+      const r = outcome.result;
+      console.log(`[signer] 서명 확인함 run_id=${r.run_id} digest=${r.digest}`);
+      console.log(`  targets  : ${r.targets.join(", ")}`);
+      console.log(`  approver : ${r.approver}`);
+      console.log(`  확인한 주석: ${Object.keys(outcome.annotations).join(", ")}`);
+    } else {
+      console.error(`[signer] 서명 확인 실패 (${outcome.reason}): ${outcome.detail}`);
     }
     return outcome.code;
   }
