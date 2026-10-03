@@ -133,7 +133,7 @@ export function ApplicationDetail({ id, source }: { id: string; source: DataSour
         crumbs={<Crumbs items={[{ label: t('crumbApps'), href: hrefFor(APPLICATIONS_PATH) }, { label: a.name }]} />}
         title={a.name}
         sub={
-          <span className={`headline headline-${headlineTone}`}>
+          <span key={headline} className={`headline headline-${headlineTone}`}>
             <span className="headline-dot" aria-hidden />
             {headline}
           </span>
@@ -264,7 +264,8 @@ function TrafficCard({ snap, degraded, lang }: { snap: Snapshot; degraded: boole
         <Empty>{t('noRouteNote')}</Empty>
       ) : (
         <div className="traffic-grid">
-          <div className="traffic-main">
+          {/* 경로가 다른 대상으로 넘어가면 다시 그려지며 전환이 보이게 한다 */}
+          <div key={route.target.kind} className="traffic-main">
             <div className="traffic-text">
               <div className="traffic-kind">
                 {route.target.kind === 'onprem' ? <Server size={20} className="kind-icon" aria-hidden /> : <Cloud size={20} className="kind-icon" aria-hidden />}
