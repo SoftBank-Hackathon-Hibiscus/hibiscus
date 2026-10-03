@@ -17,6 +17,7 @@ import {
 } from '../../infrastructure/command-diagnostics.js';
 import { ParityInputService } from '../parity-input.service.js';
 import { DeploymentRepository } from '../deployment.repository.js';
+import { ApplicationPolicyInputService } from '../application-policy-input.service.js';
 import type { StageContext, StageOutcome } from '../types/deployment.type.js';
 const buildSchema = z.object({
   schema_version: z.literal('premortem.build.v1'),
@@ -71,6 +72,7 @@ export class ParityTestStage {
     private readonly inputs: ParityInputService,
     private readonly deployments: DeploymentRepository,
     private readonly applications: ApplicationRepository,
+    private readonly policyInput: ApplicationPolicyInputService,
   ) {}
 
   async run({
@@ -260,6 +262,7 @@ export class ParityTestStage {
       ) {
         throw new Error('Parity result does not match this deployment');
       }
+      const policyInput = this.policyInput.capture(sourcePath, paths);
       return {
         status: 'succeeded',
         exitCode: 0,
@@ -268,8 +271,13 @@ export class ParityTestStage {
           build_manifest: paths.relative(
             join(paths.test, 'parity/build_manifest.json'),
           ),
+          ...(policyInput ? { policy_input: policyInput } : {}),
         },
-        summary: { ...stage.summary, parity_baseline: baseline },
+        summary: {
+          ...stage.summary,
+          parity_baseline: baseline,
+          policy_input: Boolean(policyInput),
+        },
         deploymentPatch: {
           imageDigest: digest,
           digestSource: 'registry',

@@ -12,6 +12,7 @@ import { SignStage } from '../stages/sign.stage.js';
 import { TestStage } from '../stages/test.stage.js';
 import { ParityTestStage } from '../stages/parity-test.stage.js';
 import { DeploymentPaths } from '../types/deployment.type.js';
+import { ApplicationPolicyInputService } from '../application-policy-input.service.js';
 
 describe('SignStage', () => {
   it('rejects real signing after fixture tests without invoking the signer', async () => {
@@ -31,7 +32,10 @@ describe('SignStage', () => {
       paths.ensure();
 
       const context = {
-        application: { testTemplate: 'allow' } as Application,
+        application: {
+          testTemplate: 'allow',
+          sourcePath: directory,
+        } as Application,
         deployment: {
           executionMode: 'cli',
           decision: 'allow',
@@ -41,9 +45,13 @@ describe('SignStage', () => {
         paths,
       };
       const parityRun = vi.fn();
-      const test = await new TestStage(config, {
-        run: parityRun,
-      } as unknown as ParityTestStage).run(context);
+      const test = await new TestStage(
+        config,
+        {
+          run: parityRun,
+        } as unknown as ParityTestStage,
+        new ApplicationPolicyInputService(),
+      ).run(context);
       expect(test.status).toBe('succeeded');
       expect(test.summary).toMatchObject({ stub: true });
       expect(test.deploymentPatch).toBeUndefined();

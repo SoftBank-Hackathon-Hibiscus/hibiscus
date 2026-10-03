@@ -13,6 +13,7 @@ import { PolicyStage } from './stages/policy.stage.js';
 import { SignStage } from './stages/sign.stage.js';
 import { DeployStage } from './stages/deploy.stage.js';
 import { ParityInputService } from './parity-input.service.js';
+import { ApplicationPolicyInputService } from './application-policy-input.service.js';
 
 @Module({
   imports: [DatabaseModule, ApplicationModule],
@@ -26,6 +27,7 @@ import { ParityInputService } from './parity-input.service.js';
     TestStage,
     ParityTestStage,
     ParityInputService,
+    ApplicationPolicyInputService,
     PolicyStage,
     SignStage,
     DeployStage,

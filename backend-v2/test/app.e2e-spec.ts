@@ -1098,6 +1098,13 @@ describe('deployment API (e2e)', () => {
           policyHash: expect.stringMatching(/^[a-f0-9]{64}$/),
           skipped: false,
         });
+        expect(view.artifacts).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              relativePath: 'test/policy-input/policy.yaml',
+            }),
+          ]),
+        );
         const signed = JSON.parse(
           view.artifacts.find(
             (artifact: { name: string }) => artifact.name === 'sign_result',

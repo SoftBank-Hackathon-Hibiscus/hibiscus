@@ -21,6 +21,10 @@ import type {
 } from '../types/deployment.type.js';
 import { tail, canonicalJson } from '../types/deployment.type.js';
 import type { DeploymentPlan as Plan } from '../types/deployment.type.js';
+import {
+  APPLICATION_POLICY_PATH,
+  ApplicationPolicyInputService,
+} from '../application-policy-input.service.js';
 
 type Decision = NonNullable<Deployment['decision']>;
 const exitDecisions: Record<number, Decision> = {
@@ -28,7 +32,6 @@ const exitDecisions: Record<number, Decision> = {
   2: 'needs_approval',
   3: 'block',
 };
-const APPLICATION_POLICY_PATH = '.hibiscus/policy.yaml';
 
 @Injectable()
 export class PolicyStage implements StageRunner {
@@ -37,6 +40,7 @@ export class PolicyStage implements StageRunner {
   constructor(
     private readonly config: ConfigService<BackendConfig, true>,
     private readonly runner: CommandRunner,
+    private readonly policyInput: ApplicationPolicyInputService,
   ) {}
 
   async run(context: StageContext): Promise<StageOutcome> {
@@ -129,7 +133,8 @@ export class PolicyStage implements StageRunner {
         ? join(paths.test, 'parity', 'source')
         : application.sourcePath;
     if (
-      this.config.get('backend.parityTestMode', { infer: true }) === 'registry' &&
+      this.config.get('backend.parityTestMode', { infer: true }) ===
+        'registry' &&
       !existsSync(sourcePath)
     ) {
       return {
@@ -138,7 +143,7 @@ export class PolicyStage implements StageRunner {
         error: 'Tested source snapshot not found',
       };
     }
-    const policyPath = join(sourcePath, APPLICATION_POLICY_PATH);
+    const policyPath = this.policyInput.path(paths);
     if (!existsSync(policyPath)) {
       return this.skipMissingPolicy(context);
     }

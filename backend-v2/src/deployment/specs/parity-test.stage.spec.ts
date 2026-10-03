@@ -20,6 +20,7 @@ import type { BackendConfig } from '../../config/configs/backend.config.js';
 import type { StageExecution } from '../../database/schema.js';
 import { GithubSourceCheckoutService } from '../../github/github-source-checkout.service.js';
 import { ParityInputService } from '../parity-input.service.js';
+import { ApplicationPolicyInputService } from '../application-policy-input.service.js';
 
 describe('registry parity connection', () => {
   const directories: string[] = [];
@@ -113,6 +114,7 @@ describe('registry parity connection', () => {
         inputs,
         deployments as never,
         applications as never,
+        new ApplicationPolicyInputService(),
       );
     return {
       root,
@@ -328,6 +330,7 @@ describe('registry parity connection', () => {
     const checkedOut = join(root, 'github-checkout');
     mkdirSync(checkedOut);
     writeParity(checkedOut, 'candidate');
+    writeFileSync(join(checkedOut, '.hibiscus', 'policy.yaml'), 'version: 1\n');
     const destination = join(context.paths.root, 'test-work', 'source');
     mkdirSync(destination, { recursive: true });
     writeFileSync(join(destination, 'stale'), 'old checkout');
@@ -352,6 +355,14 @@ describe('registry parity connection', () => {
       call[0].args.includes('build'),
     )?.[0];
     expect(buildCall?.args).toContain(checkedOut);
+    expect(
+      readFileSync(
+        join(context.paths.test, 'policy-input', 'policy.yaml'),
+        'utf8',
+      ),
+    ).toBe('version: 1\n');
+    expect(result.artifacts.policy_input).toBe('test/policy-input/policy.yaml');
+    expect(result.summary).toMatchObject({ policy_input: true });
   });
 
   it('rejects artifacts checked against the old placeholder and accepts the verified image identity', () => {
