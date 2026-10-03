@@ -135,6 +135,23 @@ describe("cosign 에 넘기는 환경변수 (minimalEnv)", () => {
     );
   });
 
+  it("cosign version 확인에도 걸러진 환경변수만 감", async () => {
+    const dir = tmp();
+    const key = join(dir, "cosign.key");
+    writeFileSync(key, "dummy");
+    const log = join(dir, "env.log");
+    const bin = join(dir, "cosign");
+    writeFileSync(bin, `#!/bin/sh\necho "$1 DB_PASSWORD=\${DB_PASSWORD:-<unset>}" >> "${log}"\nif [ "$1" = "version" ]; then echo '{"gitVersion":"v3.1.3"}'; fi\nexit 0\n`);
+    chmodSync(bin, 0o755);
+    process.env.DB_PASSWORD = "hunter2";
+    try {
+      await new CosignSigner(key, bin, { minimalEnv: true }).sign(`${REPO}@${DIGEST}`, {});
+    } finally {
+      delete process.env.DB_PASSWORD;
+    }
+    expect(readFileSync(log, "utf8").trim().split("\n")).toEqual(["version DB_PASSWORD=<unset>", "sign DB_PASSWORD=<unset>"]);
+  });
+
   it("실제 cosign 프로세스에도 걸러진 환경변수만 감", async () => {
     const dir = tmp();
     const key = join(dir, "cosign.key");
@@ -275,10 +292,41 @@ describe("CosignVerifier", () => {
     const envelope = { payloadType: "application/vnd.in-toto+json", payload: Buffer.from(JSON.stringify(statement)).toString("base64"), signatures: [] };
     const { bin, argsFile } = fakeCosign(dir, { stdout: JSON.stringify(envelope) });
     const pub = pubKey(dir);
-    expect(await new CosignVerifier(pub, bin, { noTlog: true }).attestations(`${REPO}@${DIGEST}`, "t", "deploy.rego")).toEqual([statement]);
+    const policy = join(dir, "deploy.rego");
+    writeFileSync(policy, "package signature\n");
+    expect(await new CosignVerifier(pub, bin, { noTlog: true }).attestations(`${REPO}@${DIGEST}`, "t", policy)).toEqual([statement]);
     expect(readFileSync(argsFile, "utf8").trim().split("\n")).toEqual([
-      "verify-attestation", "--key", pub, "--insecure-ignore-tlog=true", "--type", "t", "--policy", "deploy.rego", "--", `${REPO}@${DIGEST}`,
+      "verify-attestation", "--key", pub, "--insecure-ignore-tlog=true", "--type", "t", "--policy", policy, "--", `${REPO}@${DIGEST}`,
     ]);
+  });
+
+  it("attestations: 정책 파일이 없으면 cosign 을 부르지 않고 POLICY_MISSING", async () => {
+    const dir = tmp();
+    const { bin, argsFile } = fakeCosign(dir);
+    await expect(new CosignVerifier(pubKey(dir), bin).attestations(`${REPO}@${DIGEST}`, "t", join(dir, "strcit.rego"))).rejects.toMatchObject({ code: "POLICY_MISSING" });
+    expect(existsSync(argsFile)).toBe(false);
+  });
+
+  // cosign v3.1.3 실제 stderr: 마지막 줄은 셋 다 같고 앞 줄이 다름
+  it.each([
+    ["문법 오류", "- 1 error occurred during loading: bad.rego:3: rego_parse_error: unexpected eof token", "POLICY_INVALID"],
+    ["파일 못 읽음", "- 1 error occurred during loading: stat x.rego: no such file or directory", "POLICY_INVALID"],
+    ["실제 거부", "- expression value, false, is not true", "POLICY_DENIED"],
+  ])("attestations: 정책 오류 분류 (%s)", async (_name, line, code) => {
+    const dir = tmp();
+    const policy = join(dir, "p.rego");
+    writeFileSync(policy, "package signature\n");
+    const { bin } = fakeCosign(dir, { code: 1, stderr: `${line}\nerror during command execution: 1 validation errors occurred` });
+    const err = await new CosignVerifier(pubKey(dir), bin).attestations(`${REPO}@${DIGEST}`, "t", policy).catch((e: unknown) => e);
+    expect(err).toMatchObject({ code });
+    if (code === "POLICY_DENIED") expect((err as Error).message).toContain("expression value, false, is not true");
+  });
+
+  it("signatures: 증명서처럼 type 을 바꿔도 주석이 있으면 서명으로 셈 (훔친 키로 감사 대조에서 숨기기)", async () => {
+    const dir = tmp();
+    const stdout = JSON.stringify([{ critical: { type: "x-not-a-signature" }, optional: { run_id: "r-999", audit_head: "0".repeat(64) } }]);
+    const { bin } = fakeCosign(dir, { stdout });
+    expect(await new CosignVerifier(pubKey(dir), bin).signatures(`${REPO}@${DIGEST}`)).toEqual([{ run_id: "r-999", audit_head: "0".repeat(64) }]);
   });
 
   it.each([

@@ -49,10 +49,10 @@ export const MIN_COSIGN_MAJOR = 3;
 const checkedVersions = new Map<string, Promise<string>>();
 
 /** cosign 이 v3 이상인지 실행 파일마다 한 번만 확인. 버전 문자열 반환 */
-export function ensureCosignVersion(cosignBin: string): Promise<string> {
+export function ensureCosignVersion(cosignBin: string, env: NodeJS.ProcessEnv = process.env): Promise<string> {
   let pending = checkedVersions.get(cosignBin);
   if (!pending) {
-    pending = readCosignVersion(cosignBin);
+    pending = readCosignVersion(cosignBin, env);
     checkedVersions.set(cosignBin, pending);
     // 실패는 기억하지 않음 (설치 후 다시 시도할 수 있게)
     pending.catch(() => checkedVersions.delete(cosignBin));
@@ -60,10 +60,10 @@ export function ensureCosignVersion(cosignBin: string): Promise<string> {
   return pending;
 }
 
-async function readCosignVersion(cosignBin: string): Promise<string> {
+async function readCosignVersion(cosignBin: string, env: NodeJS.ProcessEnv): Promise<string> {
   let stdout: string;
   try {
-    ({ stdout } = await execFileAsync(cosignBin, ["version", "--json"], { env: process.env, timeout: 30_000 }));
+    ({ stdout } = await execFileAsync(cosignBin, ["version", "--json"], { env, timeout: 30_000 }));
   } catch (e) {
     if ((e as { code?: unknown }).code === "ENOENT") throw new SignerError("COSIGN_MISSING", `cosign 실행 파일이 없음: ${cosignBin}`);
     throw new SignerError("COSIGN_VERSION_UNKNOWN", `cosign 버전을 확인하지 못함${lastStderrLine(e) ? `: ${lastStderrLine(e)}` : ""}`);
@@ -106,7 +106,7 @@ export class CosignSigner implements ImageSigner, BlobSigner {
 
   async sign(imageRef: string, annotations: Record<string, string>): Promise<string> {
     if (!isKmsKey(this.keyPath) && !existsSync(this.keyPath)) throw new SignerError("KEY_MISSING", `cosign 키 파일이 없음: ${this.keyPath}`);
-    await ensureCosignVersion(this.cosignBin);
+    await ensureCosignVersion(this.cosignBin, cosignEnv(this.options));
     const args = ["sign", "--yes", "--key", this.keyPath, ...this.tlogArgs()];
     for (const [key, value] of Object.entries(annotations)) args.push("-a", `${key}=${value}`);
     // -- 뒤라서 이미지 자리에 옵션처럼 생긴 값이 와도 옵션으로 안 읽힘
@@ -123,7 +123,7 @@ export class CosignSigner implements ImageSigner, BlobSigner {
 
   async attest(imageRef: string, predicateType: string, predicate: unknown): Promise<void> {
     if (!isKmsKey(this.keyPath) && !existsSync(this.keyPath)) throw new SignerError("KEY_MISSING", `cosign 키 파일이 없음: ${this.keyPath}`);
-    await ensureCosignVersion(this.cosignBin);
+    await ensureCosignVersion(this.cosignBin, cosignEnv(this.options));
     const dir = mkdtempSync(join(tmpdir(), "signer-attest-"));
     const predicatePath = join(dir, "predicate.json");
     writeFileSync(predicatePath, JSON.stringify(predicate), "utf8");
@@ -140,7 +140,7 @@ export class CosignSigner implements ImageSigner, BlobSigner {
 
   async signBlob(content: string): Promise<unknown> {
     if (!isKmsKey(this.keyPath) && !existsSync(this.keyPath)) throw new SignerError("KEY_MISSING", `cosign 키 파일이 없음: ${this.keyPath}`);
-    await ensureCosignVersion(this.cosignBin);
+    await ensureCosignVersion(this.cosignBin, cosignEnv(this.options));
     const dir = mkdtempSync(join(tmpdir(), "signer-blob-"));
     const blobPath = join(dir, "blob");
     const bundlePath = join(dir, "bundle.json");
@@ -222,6 +222,8 @@ export class CosignVerifier implements ImageVerifier, BlobVerifier {
 
   async attestations(imageRef: string, predicateType: string, policyPath?: string): Promise<unknown[]> {
     const args = ["verify-attestation", "--key", this.pubKeyPath, ...this.tlogArgs(), "--type", predicateType];
+    // 정책 파일이 없으면 cosign 은 증명서 거부와 같은 문구로 끝나서 미리 확인 (설정 오류라 실행 오류)
+    if (policyPath !== undefined && !existsSync(policyPath)) throw new SignerError("POLICY_MISSING", `Rego 정책 파일이 없음: ${policyPath}`);
     if (policyPath !== undefined) args.push("--policy", policyPath);
     args.push("--", imageRef);
     let stdout: string;
@@ -276,7 +278,7 @@ export class CosignVerifier implements ImageVerifier, BlobVerifier {
 
   private async run(args: string[]): Promise<string> {
     if (!isKmsKey(this.pubKeyPath) && !existsSync(this.pubKeyPath)) throw new SignerError("KEY_MISSING", `cosign 공개키 파일이 없음: ${this.pubKeyPath}`);
-    await ensureCosignVersion(this.cosignBin);
+    await ensureCosignVersion(this.cosignBin, cosignEnv(this.options));
     try {
       const { stdout } = await execFileAsync(this.cosignBin, args, { env: cosignEnv(this.options), timeout: 180_000, maxBuffer: 16 * 1024 * 1024 });
       return stdout;
@@ -285,10 +287,18 @@ export class CosignVerifier implements ImageVerifier, BlobVerifier {
       if (err.code === "ENOENT") throw new SignerError("COSIGN_MISSING", `cosign 실행 파일이 없음: ${this.cosignBin}`);
       if (err.killed) throw new SignerError("VERIFY_TIMEOUT", "cosign verify 시간 초과 (180초)");
       const stderr = lastStderrLine(e);
+      const fullStderr = String((e as { stderr?: unknown }).stderr ?? "");
       // 키·레지스트리를 못 쓴 건 설정 문제라 실행 오류(2). 나머지(서명 없음, 주석 불일치 등)만 검증 실패(1)
       if (KEY_ERROR_RE.test(stderr)) throw new SignerError("KEY_UNAVAILABLE", `cosign 공개키를 못 읽음: ${stderr}`);
       if (REGISTRY_ERROR_RE.test(stderr)) throw new SignerError("REGISTRY_UNAVAILABLE", `레지스트리에 접근하지 못함: ${stderr}`);
-      if (typeof err.code === "number" && POLICY_ERROR_RE.test(stderr)) throw new SignerError("POLICY_DENIED", `배포 증명서가 정책에 맞지 않음: ${stderr}`);
+      // cosign 은 정책을 못 읽은 것(문법 오류 등)도 "validation errors occurred" 로 끝내서 앞 줄들을 같이 봄
+      if (typeof err.code === "number" && POLICY_ERROR_RE.test(stderr) && POLICY_LOAD_ERROR_RE.test(fullStderr)) {
+        throw new SignerError("POLICY_INVALID", `Rego 정책을 불러오지 못함: ${policyReasons(fullStderr) || stderr}`);
+      }
+      if (typeof err.code === "number" && POLICY_ERROR_RE.test(stderr)) {
+        const reasons = policyReasons(fullStderr);
+        throw new SignerError("POLICY_DENIED", `배포 증명서가 정책에 맞지 않음: ${stderr}${reasons ? ` (${reasons})` : ""}`);
+      }
       if (typeof err.code === "number" && NO_SIGNATURE_RE.test(stderr)) throw new SignerError("SIGNATURE_NOT_FOUND", `cosign verify 실패: ${stderr}`);
       if (typeof err.code === "number" && SIGNATURE_ERROR_RE.test(stderr)) throw new SignerError("SIGNATURE_INVALID", `cosign verify 실패: ${stderr}`);
       throw new SignerError("VERIFY_FAILED", `cosign verify 실행 실패${stderr ? `: ${stderr}` : ""}`);
@@ -304,13 +314,31 @@ const NO_SIGNATURE_RE = /(?:^|:\s*)no signatures found(?:\s|$)/i;
 const SIGNATURE_ERROR_RE = /no matching (?:signatures|attestations)|none of the attestations matched|missing or incorrect annotation|not enough verified log entries|signature verification failed|failed to verify signature|invalid signature/i;
 // verify-attestation --policy 에서 Rego 정책을 통과 못 함
 const POLICY_ERROR_RE = /validation errors? occurred/i;
+// 정책 파일을 못 읽거나 문법·타입 오류 (cosign v3.1.3 에서 확인한 문구)
+const POLICY_LOAD_ERROR_RE = /error occurred during loading|rego_parse_error|rego_type_error|rego_compile_error|rego_unsafe_var_error/;
+
+/** cosign 이 "- " 로 찍는 정책 오류 줄들 (원인을 detail 에 남김) */
+function policyReasons(stderr: string): string {
+  return stderr
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.startsWith("- "))
+    .map((l) => l.slice(2))
+    .join("; ")
+    .slice(0, 400);
+}
 
 // 이미지 서명 payload 의 critical.type (v3 bundle, 예전 simple signing)
 const SIGNATURE_TYPES = new Set(["https://sigstore.dev/cosign/sign/v1", "cosign container image signature"]);
 
+// cosign verify -a 는 critical.type 을 안 보고 optional 만 봄. 그래서 주석이 하나라도 있으면 type 과 상관없이 서명으로 셈
+// (훔친 키로 type 만 바꾼 서명 payload 를 붙여 감사 대조에서 숨기는 것을 막음)
 function isAttestationPayload(payload: unknown): boolean {
-  const type = (payload as { critical?: { type?: unknown } } | null)?.critical?.type;
-  return typeof type === "string" && !SIGNATURE_TYPES.has(type);
+  const p = payload as { critical?: { type?: unknown }; optional?: unknown } | null;
+  const type = p?.critical?.type;
+  if (typeof type !== "string" || SIGNATURE_TYPES.has(type)) return false;
+  const optional = p?.optional;
+  return optional === undefined || optional === null || (typeof optional === "object" && !Array.isArray(optional) && Object.keys(optional).length === 0);
 }
 
 function lastStderrLine(e: unknown): string {
