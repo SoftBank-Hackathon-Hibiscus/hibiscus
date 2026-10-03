@@ -6,10 +6,12 @@
 
 ```
 plan.json ─→ [decision 확인] ─→ (needs_approval이면 approval.json 확인) ─→ cosign 서명 ─→ sign_result.json ─→ deploy
-                                                                                ├─→ decisions.jsonl (kind: sign)
-                                                                                └─→ 감사 로그 (해시 체인, 켤 때만)
+                                                         │                      ├─→ decisions.jsonl (kind: sign)
+                                                         │                      └─→ 감사 로그 (해시 체인, 켤 때만)
+                                                         ├─→ 서명 직후 자기 확인 (켤 때만)
+                                                         └─→ 배포 증명서 in-toto attestation (켤 때만)
 
-sign_result.json ─→ [npm run verify] ─→ 서명 주석과 하나라도 다르면 실패
+sign_result.json ─→ [npm run verify] ─→ 서명 주석과 하나라도 다르면 실패 (--attestation 이면 증명서 + Rego 정책까지)
 감사 로그        ─→ [npm run audit:verify] ─→ 끊긴 줄 번호
 ```
 
@@ -27,6 +29,10 @@ sign_result.json ─→ [npm run verify] ─→ 서명 주석과 하나라도 �
 - Plan 스키마 검사를 못 하면 서명 안 함
 - 거절이면 sign_result.json을 남기지 않음 (예전 결과가 있어도 지움, 인자 오류로 끝나도 지움)
 - 서명에 sign_result의 targets·approver 등을 전부 주석으로 붙임 → 서명 뒤 sign_result를 고치면 verify 실패
+- 사람 승인이면 승인 기록(누가, 언제) 해시까지 서명에 묶음
+- 요청자·승인자 id는 대소문자를 구분하지 않고 같은 사람으로 봄 (`alice`가 요청하고 `Alice`가 승인해도 본인 승인으로 거절)
+- 요청자 id 형식이 틀리면 서명 전에 멈춤 (`REQUESTER_INVALID`)
+- cosign v3 이상만 씀. v2면 서명·확인 전에 멈춤 (`COSIGN_VERSION`)
 
 ### 누가 요청하고 승인했는지는 signer가 확인하지 않음
 
@@ -55,8 +61,15 @@ npm run sign -- ... --key ~/hibiscus-secrets/cosign.key --no-tlog
 # cosign 없이 연결만 확인 (signature_ref가 dry-run:...)
 npm run sign -- --plan plan.json --requester <요청자> --image-repo <저장소> --dry-run
 
+# 서명 + 서명 직후 자기 확인 + 배포 증명서 (공개키 지문 고정)
+npm run sign -- ... --self-verify --attest --pubkey-sha256 sha256:<지문>
+
 # 서명 결과 확인 (누구나 공개키로)
-npm run verify -- --result sign_result.json [--plan plan.json] [--audit sign_audit.jsonl] [--image-repo <저장소>] [--no-tlog]
+npm run verify -- --result sign_result.json [--plan plan.json] [--approval approval.json] [--audit sign_audit.jsonl] \
+  [--image-repo <저장소>] [--attestation [--policy policy/deploy.rego]] [--no-tlog]
+
+# 공개키 지문 (고정값으로 쓸 값)
+npm run fingerprint [-- --pub keys/cosign.pub]
 
 # 감사 로그 확인 (--images 면 레지스트리 서명과 맞춰 봄)
 npm run audit:verify -- --audit sign_audit.jsonl [--images [--image-repo <저장소>] --no-tlog]
@@ -70,6 +83,11 @@ npm run audit:verify -- --audit sign_audit.jsonl [--images [--image-repo <저장
 | `--audit` | `SIGNER_AUDIT_LOG` | 감사 로그 경로. 둘 다 없으면 안 씀 |
 | `--approval-ttl` | `SIGNER_APPROVAL_TTL_MIN` | 승인 유효시간(분). 둘 다 없으면 시간은 안 봄 |
 | `--pub` (verify) | `COSIGN_PUBLIC_KEY` → `keys/cosign.pub` | 공개키 경로 또는 KMS 키 주소 |
+| `--pubkey-sha256` | `SIGNER_PUBKEY_SHA256` | 공개키 지문 고정. 확인에 쓰는 공개키가 이 지문과 다르면 멈춤 (`PUBKEY_MISMATCH`) |
+| `--self-verify` (sign) | `SIGNER_SELF_VERIFY=1` | 서명 직후 공개키로 바로 다시 확인. 실패하면 sign_result 안 남김 |
+| `--attest` (sign) | `SIGNER_ATTEST=1` | 배포 증명서도 이미지에 붙임. 못 붙이면 sign_result 안 남김 |
+| `--attestation` (verify) | | 배포 증명서도 확인. `--policy` 없으면 `policy/deploy.rego` |
+| `--approval` (verify) | | 이 승인 기록으로 서명했는지까지 확인 |
 
 - 빈 환경변수는 없는 것으로 봄
 - 종료 코드: 0 서명함·확인함 / 1 서명 거절·확인 실패 / 2 실행 오류 (인자, 파일, 키, 레지스트리 접근 등)
@@ -85,6 +103,7 @@ npm run audit:verify -- --audit sign_audit.jsonl [--images [--image-repo <저장
 | `targets` | 항목마다 `encodeURIComponent` 후 `+`로 연결 (예: `onprem+cloud_run`) |
 | `failover_allowed` | `true` / `false` |
 | `requester`, `approver` | 요청자, 승인자 (allow면 `auto`) |
+| `approval_sha256` | 승인 기록(approval.json, 키 정렬 JSON) 해시. 자동 승인이면 `none` |
 | `plan_sha256` | plan.json 전체(키 정렬 JSON) 해시. rules 등 나머지까지 묶음 |
 | `audit_head` | 감사 로그를 켰을 때만. 서명 직전 체인 끝 hash |
 
@@ -103,8 +122,11 @@ npm run audit:verify -- --audit sign_audit.jsonl [--images [--image-repo <저장
 | 3 | `cosign:<저장소>@<digest>` 형식, digest가 sign_result와 같음 | `ref_invalid` |
 | 4 | `--image-repo`와 같은 저장소 | `repo_mismatch` |
 | 5 | `--plan`과 run_id·digest·plan_hash·source_revision·targets·failover_allowed가 같음 | `plan_mismatch` |
-| 6 | `--audit` 체인이 이어지고 이 실행의 signed 줄이 있음 | `audit_mismatch` |
-| 7 | 위 주석 전부로 `cosign verify` | `signature_invalid` |
+| 6 | `--approval`과 run_id·digest·plan_hash·requester·approver가 같음 (자동 승인 결과면 승인 기록을 주면 안 됨) | `approval_mismatch` |
+| 7 | `--audit` 체인이 이어지고 이 실행의 signed 줄이 있음 | `audit_mismatch` |
+| 8 | 위 주석 전부로 `cosign verify` | `signature_invalid` |
+| 9 | `--attestation`이면 배포 증명서 서명·내용이 sign_result와 같음 | `attestation_invalid` |
+| 10 | `--attestation`이면 Rego 정책 통과 | `policy_denied` |
 
 - 공개키를 못 읽거나(`KEY_UNAVAILABLE`) 레지스트리에 못 가면(`REGISTRY_UNAVAILABLE`) 검증 실패가 아니라 실행 오류(2)
 - 알 수 없는 실행 실패(`VERIFY_FAILED`)나 잘못된 성공 출력(`VERIFY_OUTPUT_INVALID`)도 실행 오류(2)로 중단한다. 감사 검사에서 이를 빈 서명 목록으로 처리하지 않는다.
@@ -128,7 +150,8 @@ npm run audit:verify -- --audit sign_audit.jsonl [--images [--image-repo <저장
   - 확인할 이미지: signed 줄의 이미지 + 모든 줄 digest × 아는 저장소(signed 줄 저장소, `--image-repo`)
   - 이미지마다 이 키로 확인되는 서명을 전부 받아서, signed 줄마다 내용·anchor가 맞는 서명이 있는지, `audit_head`가 붙은 서명이 전부 로그의 signed 줄과 맞는지 봄
   - signed 줄이 하나도 없으면 저장소를 몰라서 `--image-repo` 필요 (없으면 실행 오류)
-- 마지막 줄이 깨져 있으면 이어 쓰지 않고 서명도 안 함 (`AUDIT_INVALID`). 서명 뒤 감사 로그를 못 쓰면 sign_result도 안 남김
+- 쓰기 전에 체인을 처음부터 끝까지 확인함. 중간 줄이라도 고쳐져 있으면 이어 쓰지 않고 서명도 안 함 (`AUDIT_INVALID`, 몇 번째 줄인지 나옴). 서명 뒤 감사 로그를 못 쓰면 sign_result도 안 남김
+- plan·승인 기록 형식 오류, 잘못된 요청자처럼 결정 전에 멈춘 시도도 `kind: sign_error` 줄로 남김 (decisions.jsonl에는 안 씀)
 - 여러 서명이 동시에 써도 갈라지지 않게 `<경로>.lock`으로 잠금 (5초 대기, 30초 넘은 잠금은 지움). cosign 서명 중에는 잠금 안 잡음
 - backend에서 쓸 때는 실행마다 지워지지 않는 절대경로 (`SIGNER_AUDIT_LOG=/var/lib/hibiscus/sign_audit.jsonl` 등). decisions.jsonl은 실행 폴더와 같이 지워짐
 
@@ -140,6 +163,52 @@ npm run audit:verify -- --audit sign_audit.jsonl [--images [--image-repo <저장
 - 이미지를 레지스트리에서 지우면 그 signed 줄은 `signature_invalid`로 나옴 (변조와 구분 안 됨)
 - 같은 이미지를 다른 감사 로그로 서명한 것(예: 로컬 시험)도 `unlogged_signature`로 나옴
 - 감사 로그를 켜기 전에 한 서명, 이 변경 전에 한 서명(`source_revision` 주석 없음)은 다시 서명해야 맞춰 볼 수 있음
+
+## 공개키 지문 고정
+
+- 배포 쪽은 레포의 `keys/cosign.pub`로 서명을 확인함. main 보호가 없으면 누구든 이 파일을 자기 키로 바꿔서 자기가 서명한 이미지를 통과시킬 수 있음
+- 지문을 레포 밖(VM 환경변수 등)에 고정해 두면, 공개키 파일이 바뀌었을 때 확인 전에 멈춤
+
+```bash
+npm run fingerprint            # sha256:2f049a775b1f1075c8c14ad13483b5d1ae411e32f7f89e2dc1b113b3a2d3dcfa  keys/cosign.pub
+SIGNER_PUBKEY_SHA256=sha256:2f049a77... npm run verify -- --result sign_result.json
+```
+
+- 지문은 공개키(SubjectPublicKeyInfo DER)의 sha256. `openssl pkey -pubin -in keys/cosign.pub -outform DER | shasum -a 256`과 같음
+- `--self-verify`와 같이 쓰면 서명 직후 확인도 고정한 공개키로만 함. 개인키가 공개키와 안 맞으면 배포 때가 아니라 서명 순간에 잡힘
+- KMS 키 주소는 지문을 여기서 계산할 수 없어서 고정하면 멈춤 (`PUBKEY_PIN_UNSUPPORTED`)
+
+## 배포 증명서 (in-toto attestation)
+
+서명과 별도로, 이 이미지가 어떤 정책 결정·승인·감사 기록으로 서명됐는지를 **서명된 문서(in-toto Statement, DSSE)**로 이미지에 붙임. 배포 직전에 `cosign verify-attestation --policy`로 서명과 정책(Rego)을 같이 확인
+
+- 종류(predicateType): `https://hibiscus.lth.so/attestations/deploy-decision/v1`
+- 내용(`contracts/DeployAttestation.schema.json`): run_id, digest, source_revision, decision, targets, failover_allowed, plan_hash, plan_sha256, 걸린 규칙(matched_rules), requester, approver, approved_at, approval_sha256, audit_head, signature_ref, signed_at, signer 버전
+- 주석은 문자열 몇 개만 담을 수 있지만, 증명서는 결정 전체를 구조 그대로 담고 정책 엔진(OPA/Rego)으로 검사할 수 있음
+
+`policy/deploy.rego`가 확인하는 것 (정책 판단을 다시 하지 않고, 서명된 결과가 승인 규칙을 벗어나지 않았는지만)
+
+| 조건 | 내용 |
+|---|---|
+| 결정 | `allow` 또는 `needs_approval`만 (block은 서명 안 함) |
+| 배포 위치 | 하나 이상, `onprem`·`cloud_run`만 |
+| 자동 승인 | `allow`일 때만 approver `auto`, 승인 기록 없음(`none`) |
+| 사람 승인 | `needs_approval`이면 승인자 ≠ 요청자(대소문자 무시), 승인자 `auto` 금지, 승인 기록 해시 있음 |
+
+```bash
+# 증명서까지 확인 (기본 정책)
+npm run verify -- --result sign_result.json --attestation
+
+# 회사마다 더 엄격한 정책을 따로 둘 수 있음
+npm run verify -- --result sign_result.json --attestation --policy my-company.rego
+
+# cosign 으로 직접
+cosign verify-attestation --key signer/keys/cosign.pub --type https://hibiscus.lth.so/attestations/deploy-decision/v1 \
+  --policy signer/policy/deploy.rego <저장소>@<digest>
+```
+
+- `--attest`를 켜면 서명할 때 cosign을 한 번 더 부름 (Rekor 없이면 `--no-tlog`와 같이)
+- 같은 이미지에 증명서가 여러 개면 sign_result와 같은 것 하나만 있으면 통과. 정책은 cosign이 증명서마다 검사
 
 ## 배포 쪽 서명 확인
 
@@ -165,6 +234,7 @@ cosign verify --key signer/keys/cosign.pub -a run_id=... -a plan_hash=... \
 | `contracts/SignLog.schema.json` | decisions.jsonl의 `kind: sign` 한 줄 |
 | `contracts/Approval.schema.json` | approval.json (signer 안에서만) |
 | `contracts/AuditLine.schema.json` | 감사 로그 한 줄 (signer 안에서만) |
+| `contracts/DeployAttestation.schema.json` | 배포 증명서 predicate (signer 안에서만) |
 
 - `npm run contracts`로 `src/schema.ts`에서 생성 (손으로 고치지 않음)
 - SignResult, SignLog는 루트 `contracts/`에도 같은 파일이 있음. 바꾸면 같은 PR에서 루트에도 복사 (테스트가 확인)
