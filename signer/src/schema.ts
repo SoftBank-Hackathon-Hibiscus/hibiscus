@@ -23,6 +23,8 @@ export const PersonSchema = z
   .regex(/^[A-Za-z0-9._-]{1,64}$/, "사람 id 는 영문·숫자·._- 만, 1~64자여야 합니다")
   .describe("GitHub 아이디 등 사람 id");
 export const AUTO_APPROVER = "auto";
+/** 같은 사람인지. GitHub 아이디는 대소문자를 구분하지 않아서 alice 와 Alice 를 같은 사람으로 봄 */
+export const samePerson = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase();
 const TimeSchema = z.string().describe("ISO 8601 시각");
 
 export const DecisionSchema = z.enum(["allow", "block", "needs_approval"]);
@@ -46,7 +48,7 @@ export const ApprovalSchema = z
     plan_hash: PlanHashSchema,
     plan_sha256: Sha256HexSchema.describe("승인할 때 본 plan.json 전체(키 정렬 JSON)의 sha256. 승인 뒤 targets 등이 바뀌면 달라짐"),
     requester: PersonSchema.describe("배포를 요청한 사람"),
-    approver: PersonSchema.refine((v) => v !== AUTO_APPROVER, "approver 에 auto 는 쓸 수 없습니다").describe("승인한 사람. requester 와 달라야 함"),
+    approver: PersonSchema.refine((v) => !samePerson(v, AUTO_APPROVER), "approver 에 auto 는 쓸 수 없습니다 (대소문자 무관)").describe("승인한 사람. requester 와 달라야 함"),
     approved_at: TimeSchema,
   })
   .describe("needs_approval plan 에 대한 사람 승인 기록");
