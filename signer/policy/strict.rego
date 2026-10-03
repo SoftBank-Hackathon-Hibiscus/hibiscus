@@ -1,5 +1,5 @@
 # 회사별로 바꿔 끼우는 엄격한 배포 조건 예시. deploy.rego 조건에 아래를 더함
-# - 시험 결과가 증명서에 있고, 통과했고, 모든 조건(정상·재시작·교체)에서 기록과 같았음
+# - 시험 결과가 증명서에 있고, 통과했고, 세 조건(정상 none·재시작 restart·교체 replace)을 전부 재생했고 모두 기록과 같았음
 # - 개인정보 규칙(R4, policy/policy.yaml)이 걸린 앱은 Cloud Run 금지, 장애 때도 안 넘김
 # - 사람 승인은 서명 1시간 안에 받은 것만 (오래된 승인 재사용 금지)
 # 쓰는 법: npm run verify -- --result sign_result.json --attestation --policy policy/strict.rego
@@ -53,17 +53,36 @@ valid_approval {
 	predicate.approval_sha256 != "none"
 }
 
-# 시험 결과: 있어야 하고, 통과, 한 건 이상 재생했고, 조건마다 전부 일치 (0건이면 시험을 안 한 것)
+# 시험 결과: 있어야 하고, 통과, 한 건 이상 재생했고, 세 조건이 하나씩 다 있고, 조건마다 전부 일치
+# (0건이면 시험을 안 한 것. 조건이 없으면 헬스 체크만 한 것, [none, none, none] 처럼 같은 조건만 있어도 안 됨)
+required_conditions := {"none", "restart", "replace"}
+
 tested {
 	predicate.test.passed == true
 	predicate.test.match.total > 0
 	predicate.test.match.matched == predicate.test.match.total
+	count(predicate.test.conditions) == count(required_conditions)
+	not condition_missing
 	not condition_failed
+}
+
+condition_missing {
+	name := required_conditions[_]
+	not has_condition(name)
+}
+
+has_condition(name) {
+	predicate.test.conditions[_].name == name
 }
 
 condition_failed {
 	c := predicate.test.conditions[_]
 	c.matched != c.total
+}
+
+condition_failed {
+	c := predicate.test.conditions[_]
+	c.total <= 0
 }
 
 # 개인정보 규칙(R4)이 걸렸으면 온프레만, 장애 전환도 금지
