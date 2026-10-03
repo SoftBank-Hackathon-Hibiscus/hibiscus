@@ -138,6 +138,8 @@ def run_repair_loop(scenario, pre, ai_mode: str, settings, docker, replay, comma
     retest = execute_run(scenario, patch.patched_root, "retest", pre.run_id, settings, docker, replay,
                          command_runner, run_root)
     result["cleanup_failures"] = list(retest.cleanup_failures)
+    if retest.cleanup_failures:
+        raise PremortemError("CLEANUP_FAILED", "재검사 컨테이너 정리에 실패해 수정 검토 묶음을 만들지 않음")
     if tree_hash(tree_listing(scenario.app_dir)[0]) != app_before:
         raise PremortemError("SOURCE_CHANGED", "원본 앱 폴더가 바뀜. 수정은 복사본에만 적용해야 함")
     write_text_atomic(Path(retest.run_dir) / "patch.diff", patch.diff_text)

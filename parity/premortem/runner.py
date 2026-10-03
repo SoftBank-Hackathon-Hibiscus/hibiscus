@@ -16,7 +16,7 @@ from .gate import fault_positions, overall_status
 from .jsonio import load_jsonl, write_json_atomic
 from .lifecycle import ConditionRunner
 from .paths import create_run_dir, new_run_id, validate_run_id
-from .snapshot import copy_file, git_commit_for, sha256_file, take_snapshot, verify_unchanged
+from .snapshot import copy_file, git_commit_for, sha256_file, take_snapshot, verify_source_tree, verify_unchanged
 from .validation import validate
 
 REFERENCE_BLOCKERS = [
@@ -86,6 +86,8 @@ def execute_run(scenario, source_dir: Path, stage: str, parent_run_id: Optional[
              "registry_link_verified": False, "source_build_link_verified": True,
              "platform": docker.image_platform(image_id)}
 
+    # 빌드/pull이 반환된 뒤에도 검사에 보관할 소스가 같은지 확인한다.
+    verify_source_tree(snapshot.root, snapshot.tree_sha256)
     request_count = len(load_jsonl(scenario.session_path))
     fault_after = fault_positions(list(scenario.fault_after), request_count)
     required = list(scenario.required_conditions)
@@ -119,6 +121,8 @@ def execute_run(scenario, source_dir: Path, stage: str, parent_run_id: Optional[
         if cleanup_failures:
             log(f"[{run_id}] 정리 실패(CLEANUP_FAILED): " + ", ".join(c[:12] for c in cleanup_failures))
 
+    # 재생과 정리 중의 변경도 성공 보고서·수정 검토 묶음을 만들기 전에 막는다.
+    verify_source_tree(snapshot.root, snapshot.tree_sha256)
     baseline_ok = True
     try:
         verify_unchanged(scenario.session_path, session_sha)
