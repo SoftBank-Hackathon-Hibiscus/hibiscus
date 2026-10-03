@@ -239,6 +239,11 @@ export function RegisterApplication({ source }: { source: DataSource }) {
                   <p className="form-hint">{t('environmentRegisterHint')}</p>
                   <EnvironmentEditor value={draft.environment} onChange={(environment) => setDraft((d) => ({ ...d, environment }))} />
                 </div>
+                <div className="form-field">
+                  <span className="field-label">{t('testEnvironmentTitle')}</span>
+                  <p className="form-hint">{t('testEnvironmentRegisterHint')}</p>
+                  <EnvironmentEditor value={draft.testEnvironment} onChange={(testEnvironment) => setDraft((d) => ({ ...d, testEnvironment }))} />
+                </div>
               </div>
             </Collapsible>
           </div>

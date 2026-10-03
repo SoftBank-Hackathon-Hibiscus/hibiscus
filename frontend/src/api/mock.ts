@@ -185,13 +185,11 @@ export class MockDataSource implements DataSource {
   }
 
   async updateApplicationEnvironment(applicationId: string, input: UpdateApplicationEnvironmentInput): Promise<UpdateApplicationEnvironmentResponse> {
-    this.tick();
-    if (validateEnvironment(input.environment) !== null) return this.fail(400, 'Invalid environment variables');
-    const view = this.isScenarioApp(applicationId) ? this.scenario.application : this.createdApp(applicationId)?.view;
-    if (!view) return this.fail(404, 'Application not found');
-    const environment = normalizeEnvironment(input.environment).map(({ name }) => name).sort();
-    view.environment = environment;
-    return this.delay({ environment });
+    return this.replaceEnvironmentAndDeploy(applicationId, input, 'runtime');
+  }
+
+  async updateApplicationTestEnvironment(applicationId: string, input: UpdateApplicationEnvironmentInput): Promise<UpdateApplicationEnvironmentResponse> {
+    return this.replaceEnvironmentAndDeploy(applicationId, input, 'test');
   }
 
   async listDeployments(applicationId: string): Promise<Deployment[]> {
@@ -380,6 +378,7 @@ export class MockDataSource implements DataSource {
         updatedAt: timestamp,
       },
       environment: (input.environment ?? []).map(({ name }) => name).sort(),
+      testEnvironment: (input.test_environment ?? []).map(({ name }) => name).sort(),
       agents: [],
     };
     const github: GithubApplicationLink = {
@@ -408,6 +407,21 @@ export class MockDataSource implements DataSource {
     const views = this.isScenarioApp(applicationId) ? this.scenario.deployments : this.createdApp(applicationId)?.deployments;
     if (!views) return this.fail(404, 'Application not found');
     return this.delay(this.pushDeployment(views, applicationId, input, 'manual', now));
+  }
+
+  private async replaceEnvironmentAndDeploy(applicationId: string, input: UpdateApplicationEnvironmentInput, kind: 'runtime' | 'test'): Promise<UpdateApplicationEnvironmentResponse> {
+    const now = this.tick();
+    if (validateEnvironment(input.environment) !== null) return this.fail(400, 'Invalid environment variables');
+    const view = this.isScenarioApp(applicationId) ? this.scenario.application : this.createdApp(applicationId)?.view;
+    const deployments = this.isScenarioApp(applicationId) ? this.scenario.deployments : this.createdApp(applicationId)?.deployments;
+    if (!view || !deployments) return this.fail(404, 'Application not found');
+    const latest = [...deployments].sort((left, right) => right.deployment.version - left.deployment.version)[0]?.deployment;
+    if (!latest) return this.fail(409, 'Application has no deployment source to redeploy');
+    const environment = normalizeEnvironment(input.environment).map(({ name }) => name).sort();
+    if (kind === 'runtime') view.environment = environment;
+    else view.testEnvironment = environment;
+    const deployment = this.pushDeployment(deployments, applicationId, { source_revision: latest.sourceRevision }, 'manual', now);
+    return this.delay({ environment, deployment });
   }
 
   private pushDeployment(views: DeploymentView[], applicationId: string, input: CreateDeploymentInput, trigger: Trigger, now: number): Deployment {

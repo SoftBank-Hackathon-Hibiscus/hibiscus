@@ -17,7 +17,7 @@ import { detectRouteChange, markOf, type RouteChange, type RouteMark } from '../
 import { fmtTime, relTime, targetLabel } from '../lib/format';
 import { useLang, type DictKey } from '../lib/i18n';
 import { loaderHoldMs } from '../lib/motion';
-import { APPLICATIONS_PATH, deploymentPath, hrefFor, realHref } from '../lib/router';
+import { APPLICATIONS_PATH, deploymentPath, hrefFor, navigate, realHref } from '../lib/router';
 
 const POLL_MS = 5000;
 
@@ -203,7 +203,10 @@ export function ApplicationDetail({ id, source }: { id: string; source: DataSour
         <AgentsCard rows={snap.agents} deployments={snap.deployments} activeDeploymentId={route?.target.deploymentId ?? null} />
       </div>
 
-      <EnvironmentCard applicationId={a.id} names={snap.app.environment ?? []} source={source} onSaved={poll.refresh} />
+      <div className="grid-2">
+        <EnvironmentCard applicationId={a.id} names={snap.app.environment ?? []} source={source} kind="runtime" />
+        <EnvironmentCard applicationId={a.id} names={snap.app.testEnvironment ?? []} source={source} kind="test" />
+      </div>
 
       <section className="card">
         <div className="card-head">
@@ -230,25 +233,23 @@ export function ApplicationDetail({ id, source }: { id: string; source: DataSour
   );
 }
 
-function EnvironmentCard({ applicationId, names, source, onSaved }: { applicationId: string; names: string[]; source: DataSource; onSaved: () => void }) {
+function EnvironmentCard({ applicationId, names, source, kind }: { applicationId: string; names: string[]; source: DataSource; kind: 'runtime' | 'test' }) {
   const { t } = useLang();
   const [editing, setEditing] = useState(false);
   const [rows, setRows] = useState<ApplicationEnvironmentVariableInput[]>([]);
   const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
   const [error, setError] = useState<unknown>(null);
 
   const save = async () => {
     if (validateEnvironment(rows) !== null) return;
     setSaving(true);
-    setSaved(false);
     setError(null);
     try {
-      await source.updateApplicationEnvironment(applicationId, { environment: rows.map(({ name, value }) => ({ name: name.trim(), value })) });
-      setRows([]);
-      setEditing(false);
-      setSaved(true);
-      onSaved();
+      const input = { environment: rows.map(({ name, value }) => ({ name: name.trim(), value })) };
+      const result = kind === 'runtime'
+        ? await source.updateApplicationEnvironment(applicationId, input)
+        : await source.updateApplicationTestEnvironment(applicationId, input);
+      navigate(deploymentPath(result.deployment.id));
     } catch (cause) {
       setError(cause);
     } finally {
@@ -260,11 +261,11 @@ function EnvironmentCard({ applicationId, names, source, onSaved }: { applicatio
     <section className="card">
       <div className="card-head">
         <div>
-          <h2 className="card-title">{t('environmentTitle')}</h2>
-          <p className="small muted">{t('environmentDetailHint')}</p>
+          <h2 className="card-title">{t(kind === 'runtime' ? 'environmentTitle' : 'testEnvironmentTitle')}</h2>
+          <p className="small muted">{t(kind === 'runtime' ? 'environmentDetailHint' : 'testEnvironmentDetailHint')}</p>
         </div>
         {!editing ? (
-          <button type="button" className="btn btn-small" onClick={() => { setEditing(true); setSaved(false); setError(null); }}>
+          <button type="button" className="btn btn-small" onClick={() => { setEditing(true); setError(null); }}>
             {t('environmentEdit')}
           </button>
         ) : null}
@@ -276,7 +277,7 @@ function EnvironmentCard({ applicationId, names, source, onSaved }: { applicatio
       ) : <Empty>{t('environmentNone')}</Empty>}
       {editing ? (
         <div className="environment-replace">
-          <Notice tone="warning">{t('environmentReplaceWarning')}</Notice>
+          <Notice tone="warning">{t(kind === 'runtime' ? 'environmentReplaceWarning' : 'testEnvironmentReplaceWarning')}</Notice>
           <EnvironmentEditor value={rows} onChange={setRows} disabled={saving} />
           {error ? <ErrorNotice error={error} /> : null}
           <div className="row">
@@ -285,7 +286,6 @@ function EnvironmentCard({ applicationId, names, source, onSaved }: { applicatio
           </div>
         </div>
       ) : null}
-      {saved ? <p className="small success-text" role="status">{t('environmentSaved')}</p> : null}
     </section>
   );
 }

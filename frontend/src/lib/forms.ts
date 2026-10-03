@@ -49,6 +49,7 @@ export interface RegistrationDraft {
   requiresApproval: boolean;
   autoDeploy: boolean;
   environment: ApplicationEnvironmentVariableInput[];
+  testEnvironment: ApplicationEnvironmentVariableInput[];
 }
 
 export const EMPTY_REGISTRATION: RegistrationDraft = {
@@ -63,6 +64,7 @@ export const EMPTY_REGISTRATION: RegistrationDraft = {
   requiresApproval: false,
   autoDeploy: true,
   environment: [],
+  testEnvironment: [],
 };
 
 export type RegistrationField = keyof RegistrationDraft;
@@ -110,6 +112,7 @@ export function validateRegistration(d: RegistrationDraft): RegistrationErrors {
   if (port === null || port < PORT_MIN || port > PORT_MAX) errors.containerPort = 'errPort';
 
   if (validateEnvironment(d.environment) !== null) errors.environment = 'errEnvironment';
+  if (validateEnvironment(d.testEnvironment) !== null) errors.testEnvironment = 'errEnvironment';
 
   return errors;
 }
@@ -131,6 +134,7 @@ export function toGithubApplicationInput(d: RegistrationDraft): GithubApplicatio
     branch: d.branch,
     auto_deploy: d.autoDeploy,
     environment: normalizeEnvironment(d.environment),
+    test_environment: normalizeEnvironment(d.testEnvironment),
   };
   return input;
 }

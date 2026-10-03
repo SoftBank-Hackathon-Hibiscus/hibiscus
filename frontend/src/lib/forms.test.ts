@@ -72,13 +72,19 @@ describe('toGithubApplicationInput', () => {
       branch: 'main',
       auto_deploy: true,
       environment: [],
+      test_environment: [],
     });
     expect(Object.keys(input)).not.toContain('source_path');
     expect(Object.keys(input)).not.toContain('policy_path');
   });
   it('환경변수는 정규화하여 요청에 포함한다', () => {
-    const input = toGithubApplicationInput({ ...valid, environment: [{ name: ' DATABASE_URL ', value: ' postgres://db/app ' }] });
+    const input = toGithubApplicationInput({
+      ...valid,
+      environment: [{ name: ' DATABASE_URL ', value: ' postgres://db/app ' }],
+      testEnvironment: [{ name: ' DATABASE_URL ', value: ' postgres://test/app ' }],
+    });
     expect(input.environment).toEqual([{ name: 'DATABASE_URL', value: ' postgres://db/app ' }]);
+    expect(input.test_environment).toEqual([{ name: 'DATABASE_URL', value: ' postgres://test/app ' }]);
   });
 });
 
@@ -93,6 +99,7 @@ describe('validateEnvironment', () => {
   });
   it('등록 검증에 환경변수 오류를 포함한다', () => {
     expect(validateRegistration({ ...valid, environment: [{ name: 'PORT', value: '3000' }] }).environment).toBe('errEnvironment');
+    expect(validateRegistration({ ...valid, testEnvironment: [{ name: 'PORT', value: '3000' }] }).testEnvironment).toBe('errEnvironment');
   });
 });
 

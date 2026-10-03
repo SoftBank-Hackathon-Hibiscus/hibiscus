@@ -66,7 +66,11 @@ describe('mock 애플리케이션 등록 (POST /github/applications 흉내)', ()
   });
   it('등록하면 목록·상세에 보이고 route 는 아직 없다(404), target 은 비어 있다', async () => {
     const s = source();
-    const created = await s.createGithubApplication({ ...input, environment: [{ name: 'DATABASE_URL', value: 'postgres://db/app' }] });
+    const created = await s.createGithubApplication({
+      ...input,
+      environment: [{ name: 'DATABASE_URL', value: 'postgres://db/app' }],
+      test_environment: [{ name: 'DATABASE_URL', value: 'postgres://test/app' }],
+    });
     expect(created.application.slug).toBe('contacts');
     expect(created.application.publicHost).toBe('contacts.lth.so');
     expect(created.application.sourcePath).toBe('https://github.com/hibiscus-demo/contacts.git');
@@ -76,6 +80,7 @@ describe('mock 애플리케이션 등록 (POST /github/applications 흉내)', ()
     expect(created.github).toMatchObject({ applicationId: created.application.id, repositoryId: MOCK_REPO_CONTACTS_ID, branch: 'main', autoDeploy: true, active: true });
     expect(created.healthCheck).toMatchObject({ path: '/health', intervalSeconds: 5, failureThreshold: 3 });
     expect(created.environment).toEqual(['DATABASE_URL']);
+    expect(created.testEnvironment).toEqual(['DATABASE_URL']);
 
     const list = await s.listApplications();
     expect(list.map((v) => v.application.id)).toEqual([APP_ID, created.application.id]);
@@ -93,9 +98,20 @@ describe('mock 애플리케이션 등록 (POST /github/applications 흉내)', ()
         { name: 'DATABASE_URL', value: 'postgres://db/app' },
       ],
     });
-    expect(result).toEqual({ environment: ['DATABASE_URL', 'REDIS_URL'] });
+    expect(result.environment).toEqual(['DATABASE_URL', 'REDIS_URL']);
+    expect(result.deployment).toMatchObject({ version: 2, sourceRevision: created.initial_deployment!.sourceRevision, status: 'queued' });
     expect(await s.getApplication(created.application.id)).toMatchObject({ environment: ['DATABASE_URL', 'REDIS_URL'] });
     expect(JSON.stringify(result)).not.toContain('postgres://');
+  });
+  it('검증용 환경변수를 바꾸면 새 배포를 만든다', async () => {
+    const s = source();
+    const created = await s.createGithubApplication(input);
+    const result = await s.updateApplicationTestEnvironment(created.application.id, {
+      environment: [{ name: 'DATABASE_URL', value: 'postgres://test/app' }],
+    });
+    expect(result.environment).toEqual(['DATABASE_URL']);
+    expect(result.deployment).toMatchObject({ version: 2, sourceRevision: created.initial_deployment!.sourceRevision });
+    expect((await s.getApplication(created.application.id)).testEnvironment).toEqual(['DATABASE_URL']);
   });
   it('기존 앱과 slug 가 겹치면 409, 접근 불가 저장소/브랜치는 404', async () => {
     const s = source();

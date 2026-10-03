@@ -118,6 +118,10 @@ export class RealDataSource implements DataSource {
     return this.put<UpdateApplicationEnvironmentResponse>(`/applications/${encodeURIComponent(applicationId)}/environment`, input);
   }
 
+  updateApplicationTestEnvironment(applicationId: string, input: UpdateApplicationEnvironmentInput) {
+    return this.put<UpdateApplicationEnvironmentResponse>(`/applications/${encodeURIComponent(applicationId)}/test-environment`, input);
+  }
+
   listDeployments(applicationId: string) {
     return this.get<Deployment[]>(`/applications/${encodeURIComponent(applicationId)}/deployments`);
   }
