@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "4f0b95df-f145-4f97-97ad-ad1f592e0bd7",
-  "prevId": "8d0dd2cb-632a-4987-b06f-5798daf79b66",
+  "id": "2bdfd9ad-960d-4213-a335-f851c172c4d3",
+  "prevId": "ee308faf-1f9f-488a-8a5d-d256b8f45da0",
   "tables": {
     "agent_heartbeats": {
       "name": "agent_heartbeats",
@@ -745,13 +745,6 @@
         },
         "default_branch": {
           "name": "default_branch",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "policy_path": {
-          "name": "policy_path",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -1599,6 +1592,28 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "policy_path": {
+          "name": "policy_path",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "policy_hash": {
+          "name": "policy_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "skipped": {
+          "name": "skipped",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
         },
         "plan_path": {
           "name": "plan_path",
