@@ -76,6 +76,38 @@ describe("CosignSigner", () => {
     const { bin } = fakeCosign(dir);
     await expect(new CosignSigner(join(dir, "nope.key"), bin).sign(`${REPO}@${DIGEST}`, {})).rejects.toMatchObject({ code: "KEY_MISSING" });
   });
+
+  it("signBlob: cosign sign-blob --yes --key <키> [Rekor 끄기] --bundle <임시 파일> -- <임시 파일> 로 부르고 bundle 을 돌려줌", async () => {
+    const dir = tmp();
+    const key = join(dir, "cosign.key");
+    writeFileSync(key, "dummy");
+    const argsFile = join(dir, "args.txt");
+    const bin = join(dir, "cosign");
+    // --bundle 뒤 경로에 bundle 을 쓰는 가짜 cosign
+    writeFileSync(bin, `#!/bin/sh
+if [ "$1" = "version" ]; then echo '{"gitVersion":"v3.1.3"}'; exit 0; fi
+printf '%s\\n' "$@" > "${argsFile}"
+for a; do last="$a"; done; cp "$last" "${join(dir, "blob.txt")}"
+while [ $# -gt 0 ]; do [ "$1" = "--bundle" ] && echo '{"mediaType":"m"}' > "$2"; shift; done
+exit 0
+`);
+    chmodSync(bin, 0o755);
+    expect(await new CosignSigner(key, bin, { noTlog: true }).signBlob("내용")).toEqual({ mediaType: "m" });
+    const args = readFileSync(argsFile, "utf8").trim().split("\n");
+    expect(args.slice(0, 6)).toEqual(["sign-blob", "--yes", "--key", key, "--use-signing-config=false", "--tlog-upload=false"]);
+    expect(args[6]).toBe("--bundle");
+    expect(args[8]).toBe("--");
+    expect(readFileSync(join(dir, "blob.txt"), "utf8")).toBe("내용");
+    expect(existsSync(args[9]!)).toBe(false); // 임시 파일은 지움
+  });
+
+  it("signBlob: cosign 이 실패하면 SIGN_FAILED", async () => {
+    const dir = tmp();
+    const key = join(dir, "cosign.key");
+    writeFileSync(key, "dummy");
+    const { bin } = fakeCosign(dir, { code: 1 });
+    await expect(new CosignSigner(key, bin).signBlob("x")).rejects.toMatchObject({ code: "SIGN_FAILED" });
+  });
 });
 
 describe("cosign 에 넘기는 환경변수 (minimalEnv)", () => {
@@ -272,5 +304,36 @@ describe("CosignVerifier", () => {
   it("cosign 실행 파일이 없으면 COSIGN_MISSING", async () => {
     const dir = tmp();
     await expect(new CosignVerifier(pubKey(dir), join(dir, "no-cosign")).verify(`${REPO}@${DIGEST}`, {})).rejects.toMatchObject({ code: "COSIGN_MISSING" });
+  });
+});
+
+describe("CosignVerifier.verifyBlob", () => {
+  function setup(o: Parameters<typeof fakeCosign>[1] = {}) {
+    const dir = tmp();
+    const pub = join(dir, "cosign.pub");
+    writeFileSync(pub, "dummy");
+    return { pub, ...fakeCosign(dir, o) };
+  }
+
+  it("cosign verify-blob --key <공개키> [--insecure-ignore-tlog=true] --bundle <임시 파일> -- <임시 파일>", async () => {
+    const { pub, bin, argsFile } = setup();
+    await new CosignVerifier(pub, bin, { noTlog: true }).verifyBlob("x", { mediaType: "m" });
+    const args = readFileSync(argsFile, "utf8").trim().split("\n");
+    expect(args.slice(0, 5)).toEqual(["verify-blob", "--key", pub, "--insecure-ignore-tlog=true", "--bundle"]);
+    expect(args[6]).toBe("--");
+  });
+
+  // 실제 cosign v3.1.3 이 낸 문구: 내용을 바꿨을 때 / bundle 서명 바이트가 망가졌을 때
+  it.each(["Error: failed to verify signature: invalid signature when validating ASN.1 encoded signature", "error during command execution: ecdsa: Invalid IEEE_P1363 encoded bytes"])(
+    "서명이 안 맞으면 SIGNATURE_INVALID (%s)",
+    async (stderr) => {
+      const { pub, bin } = setup({ code: 1, stderr });
+      await expect(new CosignVerifier(pub, bin).verifyBlob("x", {})).rejects.toMatchObject({ code: "SIGNATURE_INVALID" });
+    },
+  );
+
+  it("공개키를 못 읽으면 숨기지 않고 KEY_UNAVAILABLE", async () => {
+    const { pub, bin } = setup({ code: 1, stderr: "Error: loading public key: bad pem" });
+    await expect(new CosignVerifier(pub, bin).verifyBlob("x", {})).rejects.toMatchObject({ code: "KEY_UNAVAILABLE" });
   });
 });

@@ -1,6 +1,7 @@
 // contracts/*.schema.json 생성용. 손으로 고치지 말고 npm run contracts
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
+import { AuditAnchorSchema } from "./anchor.js";
 import { DeployPredicateSchema } from "./attestation.js";
 import { ApprovalSchema, AuditLineSchema, SignLogSchema, SignResultSchema } from "./schema.js";
 
@@ -12,6 +13,7 @@ export const CONTRACTS = [
   { name: "Approval", schema: ApprovalSchema },
   { name: "AuditLine", schema: AuditLineSchema },
   { name: "DeployAttestation", schema: DeployPredicateSchema },
+  { name: "AuditAnchor", schema: AuditAnchorSchema },
 ] as const;
 
 export function toJsonSchema(contract: (typeof CONTRACTS)[number]): Record<string, unknown> {

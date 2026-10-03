@@ -2,9 +2,10 @@
 import { fileURLToPath } from "node:url";
 import { logAnnotations, NO_APPROVAL, signAnnotations } from "./annotations.js";
 import { loadApproval } from "./approval.js";
+import { checkAnchors, type AnchorBreak } from "./anchor.js";
 import { DEPLOY_PREDICATE_TYPE, findDeployStatement } from "./attestation.js";
 import { checkAuditChain, findSignedLine, GENESIS, readAuditFile, type AuditBreak } from "./audit.js";
-import { imageRefOf, type ImageVerifier } from "./cosign.js";
+import { imageRefOf, type BlobVerifier, type ImageVerifier } from "./cosign.js";
 import { canonicalize, parseWith, readJson, sha256Hex, SignerError } from "./io.js";
 import { DEFAULT_PLAN_SCHEMA, loadPlan } from "./plan.js";
 import { AUTO_APPROVER, SignResultSchema, type AuditLine, type SignResult } from "./schema.js";
@@ -134,13 +135,15 @@ export interface AuditVerifyOptions {
   verifier?: ImageVerifier;
   /** 서명 줄이 없는 digest(거절 줄)도 이 저장소에서 서명을 찾음. 서명 줄을 거절로 바꿔치기한 것을 잡으려면 필요 */
   imageRepo?: string;
+  /** 있으면 감사 로그 끝 고정값(anchors 파일)과도 맞춰 봄. 끝을 잘라냈거나 다시 쓴 것을 잡음 */
+  anchors?: { path: string; verifier: BlobVerifier };
 }
 
 export type AuditImageReason = "ref_invalid" | "signature_invalid" | "unlogged_signature";
 
 export type AuditVerifyOutcome =
-  | { code: 0; lines: number; head: string; signed: number; images: number }
-  | { code: 1; line: number; reason: AuditBreak | AuditImageReason; detail: string };
+  | { code: 0; lines: number; head: string; signed: number; images: number; anchors?: number }
+  | { code: 1; line: number; reason: AuditBreak | AuditImageReason | AnchorBreak; detail: string };
 
 /**
  * 1) 체인이 이어지는지 2) (verifier 가 있으면) signed 줄마다 그 내용·anchor 와 맞는 이미지 서명이 있는지
@@ -150,7 +153,14 @@ export async function runAuditVerify(o: AuditVerifyOptions): Promise<AuditVerify
   const check = checkAuditChain(readAuditFile(o.auditPath));
   if (!check.ok) return { code: 1, line: check.line, reason: check.reason, detail: check.detail };
   const { lines, head } = check;
-  if (!o.verifier) return { code: 0, lines: lines.length, head, signed: 0, images: 0 };
+  let anchors: number | undefined;
+  if (o.anchors) {
+    const anchored = await checkAnchors(o.anchors.path, check, o.anchors.verifier);
+    if (!anchored.ok) return { code: 1, line: anchored.line, reason: anchored.reason, detail: anchored.detail };
+    anchors = anchored.anchors;
+  }
+  const withAnchors = anchors !== undefined ? { anchors } : {};
+  if (!o.verifier) return { code: 0, lines: lines.length, head, signed: 0, images: 0, ...withAnchors };
 
   // signed 줄의 서명 위치가 그 줄 digest 의 이미지인지 (옵션처럼 생긴 값, 다른 이미지 차단)
   const signedAt = new Map<string, AuditLine[]>();
@@ -217,5 +227,5 @@ export async function runAuditVerify(o: AuditVerifyOptions): Promise<AuditVerify
     }
     images++;
   }
-  return { code: 0, lines: lines.length, head, signed: [...signedAt.values()].reduce((n, ls) => n + ls.length, 0), images };
+  return { code: 0, lines: lines.length, head, signed: [...signedAt.values()].reduce((n, ls) => n + ls.length, 0), images, ...withAnchors };
 }

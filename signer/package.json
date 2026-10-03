@@ -9,6 +9,7 @@
     "sign": "tsx src/cli.ts sign",
     "verify": "tsx src/cli.ts verify",
     "audit:verify": "tsx src/cli.ts audit",
+    "audit:anchor": "tsx src/cli.ts anchor",
     "fingerprint": "tsx src/cli.ts fingerprint",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",

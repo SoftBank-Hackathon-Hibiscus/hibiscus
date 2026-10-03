@@ -110,6 +110,13 @@ describe("키 교체: 여러 공개키로 확인 (MultiKeyVerifier)", () => {
     expect(await new MultiKeyVerifier([invalid, ok]).attestations("r", "t")).toEqual([{ s: "ok" }]);
   });
 
+  it("감사 로그 고정값(blob)도 어느 키로든 확인되면 통과", async () => {
+    const blobOk = { ...ok, verifyBlob: async () => {} };
+    const blobBad = { ...invalid, verifyBlob: async () => { throw new SignerError("SIGNATURE_INVALID", "다른 키"); } };
+    await expect(new MultiKeyVerifier([blobBad, blobOk]).verifyBlob("x", {})).resolves.toBeUndefined();
+    await expect(new MultiKeyVerifier([blobBad, blobBad]).verifyBlob("x", {})).rejects.toMatchObject({ code: "SIGNATURE_INVALID" });
+  });
+
   it("믿는 키로 서명된 증명서가 정책을 어기면 다른 키 결과와 상관없이 POLICY_DENIED", async () => {
     await expect(new MultiKeyVerifier([ok, denied]).attestations("r", "t")).rejects.toMatchObject({ code: "POLICY_DENIED" });
   });

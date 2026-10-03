@@ -1,13 +1,23 @@
 // cosign 로컬 키 서명·확인. -a 주석으로 sign_result 필드를 붙여서 cosign verify -a ... 로 그대로인지 확인 가능.
 // 배포 증명서(in-toto attestation)를 붙이고 cosign verify-attestation(+Rego 정책)으로 확인하는 것도 여기서
 import { execFile } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { SignerError } from "./io.js";
 
 const execFileAsync = promisify(execFile);
+
+/** 파일 내용에 서명하고 sigstore bundle(JSON) 반환. 감사 로그 끝 고정에 씀 */
+export interface BlobSigner {
+  signBlob(content: string): Promise<unknown>;
+}
+
+/** signBlob 으로 만든 bundle 이 이 내용에 대한 믿는 키의 서명인지. 아니면 SIGNATURE_INVALID */
+export interface BlobVerifier {
+  verifyBlob(content: string, bundle: unknown): Promise<void>;
+}
 
 export interface ImageSigner {
   /** 서명하고 signature_ref 반환 */
@@ -87,7 +97,7 @@ export function cosignEnv(options: CosignOptions, env: NodeJS.ProcessEnv = proce
   return Object.fromEntries(Object.entries(env).filter(([name]) => COSIGN_ENV_NAMES.has(name) || COSIGN_ENV_PREFIXES.some((p) => name.startsWith(p))));
 }
 
-export class CosignSigner implements ImageSigner {
+export class CosignSigner implements ImageSigner, BlobSigner {
   constructor(
     private readonly keyPath: string,
     private readonly cosignBin = "cosign",
@@ -128,6 +138,28 @@ export class CosignSigner implements ImageSigner {
     }
   }
 
+  async signBlob(content: string): Promise<unknown> {
+    if (!isKmsKey(this.keyPath) && !existsSync(this.keyPath)) throw new SignerError("KEY_MISSING", `cosign 키 파일이 없음: ${this.keyPath}`);
+    await ensureCosignVersion(this.cosignBin);
+    const dir = mkdtempSync(join(tmpdir(), "signer-blob-"));
+    const blobPath = join(dir, "blob");
+    const bundlePath = join(dir, "bundle.json");
+    writeFileSync(blobPath, content, "utf8");
+    try {
+      await execFileAsync(this.cosignBin, ["sign-blob", "--yes", "--key", this.keyPath, ...this.tlogArgs(), "--bundle", bundlePath, "--", blobPath], {
+        env: cosignEnv(this.options),
+        timeout: 180_000,
+      });
+      return JSON.parse(readFileSync(bundlePath, "utf8")) as unknown;
+    } catch (e) {
+      if (e instanceof SyntaxError) throw new SignerError("SIGN_FAILED", "cosign sign-blob bundle 이 JSON 이 아님");
+      const stderr = lastStderrLine(e);
+      throw new SignerError("SIGN_FAILED", `cosign sign-blob 실패${stderr ? `: ${stderr}` : ""}`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
   // v3 는 --use-signing-config=false 없이 --tlog-upload=false 만 주면 에러
   private tlogArgs(): string[] {
     return this.options.noTlog ? ["--use-signing-config=false", "--tlog-upload=false"] : [];
@@ -146,7 +178,7 @@ export interface ImageVerifier {
   attestations?(imageRef: string, predicateType: string, policyPath?: string): Promise<unknown[]>;
 }
 
-export class CosignVerifier implements ImageVerifier {
+export class CosignVerifier implements ImageVerifier, BlobVerifier {
   constructor(
     private readonly pubKeyPath: string,
     private readonly cosignBin = "cosign",
@@ -213,6 +245,23 @@ export class CosignVerifier implements ImageVerifier {
     }
   }
 
+  async verifyBlob(content: string, bundle: unknown): Promise<void> {
+    const dir = mkdtempSync(join(tmpdir(), "signer-blob-"));
+    const blobPath = join(dir, "blob");
+    const bundlePath = join(dir, "bundle.json");
+    writeFileSync(blobPath, content, "utf8");
+    writeFileSync(bundlePath, JSON.stringify(bundle), "utf8");
+    try {
+      await this.run(["verify-blob", "--key", this.pubKeyPath, ...this.tlogArgs(), "--bundle", bundlePath, "--", blobPath]);
+    } catch (e) {
+      // bundle 은 파일에서 온 값이라 망가진 bundle(형식 오류, cosign panic 포함)도 서명이 안 맞는 것으로 봄. 키·cosign 없음·시간 초과는 그대로 실행 오류
+      if (e instanceof SignerError && (e.code === "SIGNATURE_NOT_FOUND" || e.code === "VERIFY_FAILED")) throw new SignerError("SIGNATURE_INVALID", e.message);
+      throw e;
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
   private verifyArgs(annotations: Record<string, string>, imageRef: string): string[] {
     const args = ["verify", "--key", this.pubKeyPath, ...this.tlogArgs()];
     for (const [key, value] of Object.entries(annotations)) args.push("-a", `${key}=${value}`);
@@ -251,7 +300,7 @@ const KEY_ERROR_RE = /loading verifier from key opts|loading public key/;
 const REGISTRY_ERROR_RE = /dial tcp|connection refused|no such host|i\/o timeout|TLS handshake|UNAUTHORIZED|DENIED/;
 // 실제 cosign 은 "error during command execution: no signatures found" 처럼 앞에 접두어가 붙음
 const NO_SIGNATURE_RE = /(?:^|:\s*)no signatures found(?:\s|$)/i;
-const SIGNATURE_ERROR_RE = /no matching (?:signatures|attestations)|none of the attestations matched|missing or incorrect annotation|not enough verified log entries|signature verification failed/i;
+const SIGNATURE_ERROR_RE = /no matching (?:signatures|attestations)|none of the attestations matched|missing or incorrect annotation|not enough verified log entries|signature verification failed|failed to verify signature|invalid signature/i;
 // verify-attestation --policy 에서 Rego 정책을 통과 못 함
 const POLICY_ERROR_RE = /validation errors? occurred/i;
 
@@ -270,7 +319,7 @@ export class DryRunSigner implements ImageSigner {
  * 키 교체 중처럼 믿는 공개키가 여러 개일 때. 서명·증명서는 그중 아무 키로나 확인되면 통과.
  * 키·레지스트리 설정 오류는 숨기지 않음 (다른 키로 통과하지 못하면 그 오류를 그대로 냄)
  */
-export class MultiKeyVerifier implements ImageVerifier {
+export class MultiKeyVerifier implements ImageVerifier, BlobVerifier {
   constructor(private readonly verifiers: readonly ImageVerifier[]) {
     if (verifiers.length === 0) throw new SignerError("ARG_INVALID", "믿는 공개키가 없음");
   }
@@ -286,6 +335,21 @@ export class MultiKeyVerifier implements ImageVerifier {
       }
     }
     throw firstConfigError(errors) ?? new SignerError("SIGNATURE_INVALID", `믿는 공개키 ${this.verifiers.length}개 모두로 확인 실패: ${messages(errors)}`);
+  }
+
+  async verifyBlob(content: string, bundle: unknown): Promise<void> {
+    const errors: unknown[] = [];
+    for (const v of this.verifiers) {
+      const blob = v as Partial<BlobVerifier>;
+      if (!blob.verifyBlob) continue;
+      try {
+        await blob.verifyBlob(content, bundle);
+        return;
+      } catch (e) {
+        errors.push(e);
+      }
+    }
+    throw firstConfigError(errors) ?? new SignerError("SIGNATURE_INVALID", `믿는 공개키로 확인되는 서명이 없음: ${messages(errors)}`);
   }
 
   async signatures(imageRef: string): Promise<Array<Record<string, string>>> {
