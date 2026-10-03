@@ -1,5 +1,5 @@
 import { Check, Clock, Cloud, FlaskConical, LoaderCircle, Lock, Minus, Rocket, Scale, Server, ShieldX, TriangleAlert, UserCheck, X, type LucideIcon } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import type { DataSource } from '../api/client';
 import type { Approval, PiiReport, SignLog, TestResult } from '../api/contracts';
 import type { ApplicationView, Decision, DeploymentStatus, DeploymentView, StageName } from '../api/types';
@@ -109,7 +109,8 @@ export function DeploymentDetail({ id, source }: { id: string; source: DataSourc
 
       <Stepper view={view} summary={summary} />
 
-      <section className="card headline-card">
+      {/* 결론 문장이 바뀔 때만 다시 그려져 한 번 올라온다 (폴링 재렌더에는 움직이지 않음) */}
+      <section key={summary.conclusion} className="card headline-card">
         <span className={`headline-icon tone-${summary.tone}`} aria-hidden>
           <HeadIcon size={14} />
         </span>
@@ -247,11 +248,12 @@ function Stepper({ view, summary }: { view: DeploymentView; summary: DeploymentS
   return (
     <section className="card">
       <ol className="stepper" aria-label="pipeline">
-        {items.map((item) => {
+        {items.map((item, i) => {
           const Icon = item.tone === 'muted' && item.short === t('shortPending') ? Clock : TONE_ICON[item.tone];
           return (
-            <li key={item.key} className={`step step-${item.tone}`}>
-              <span className="step-mark" aria-hidden>
+            <li key={item.key} className={`step step-${item.tone}`} style={{ '--i': i } as CSSProperties}>
+              {/* 상태(tone)가 바뀌면 key 가 바뀌어 표시가 다시 그려지면서 한 번 튄다 */}
+              <span key={item.tone} className="step-mark" aria-hidden>
                 <Icon size={14} className={item.tone === 'info' ? 'spin' : undefined} />
               </span>
               <span className="step-label">{item.label}</span>
@@ -561,7 +563,7 @@ function TestDetail({ view, summary }: { view: DeploymentView; summary: Deployme
         <div>
           <div className="sub-title">{t('conditionsTitle')}</div>
           <div className="conditions">
-            {conditions.map((c) => {
+            {conditions.map((c, i) => {
               const pct = c.total ? Math.round((c.matched / c.total) * 100) : 0;
               return (
                 <div key={c.name} className="condition">
@@ -572,7 +574,7 @@ function TestDetail({ view, summary }: { view: DeploymentView; summary: Deployme
                     </span>
                   </div>
                   <div className="bar" aria-hidden>
-                    <span className={`bar-fill ${c.failed ? 'bar-danger' : 'bar-success'}`} style={{ width: `${pct}%` }} />
+                    <span className={`bar-fill ${c.failed ? 'bar-danger' : 'bar-success'}`} style={{ width: `${pct}%`, animationDelay: `${i * 90}ms` }} />
                   </div>
                 </div>
               );

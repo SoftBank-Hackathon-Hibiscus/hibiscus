@@ -142,7 +142,9 @@ code {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  * {
+  *,
+  *::before,
+  *::after {
     transition: none !important;
     animation: none !important;
   }
@@ -2149,5 +2151,85 @@ select.input {
   }
   .traffic-kind {
     font-size: 22px;
+  }
+}
+
+/* ---- motion: 상태가 바뀌는 순간만 움직인다. 데이터가 그대로면(폴링 재렌더) 움직이지 않는다 ---- */
+:root {
+  --ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+/* 배포 상세: 단계가 왼쪽부터 차례로, 테스트 막대는 0 에서 차오른다 (처음 그릴 때 한 번) */
+.step {
+  animation: step-in 0.4s var(--ease-out) both;
+  animation-delay: calc(var(--i, 0) * 90ms);
+}
+.step::before {
+  transform-origin: left center;
+  animation: line-grow 0.4s var(--ease-out) both;
+  animation-delay: calc(var(--i, 0) * 90ms);
+}
+.step-mark {
+  animation: mark-pop 0.4s var(--ease-out) both;
+  animation-delay: calc(var(--i, 0) * 90ms + 60ms);
+}
+.bar-fill {
+  transform-origin: left center;
+  animation: bar-grow 0.7s var(--ease-out) both;
+}
+.headline-card,
+.headline,
+.banner {
+  animation: rise-in 0.35s var(--ease-out) both;
+}
+/* 앱 상세: 실제 route 변화가 관찰됐을 때만 현재 트래픽 블록이 옆에서 들어온다 */
+.traffic-main-swap {
+  animation: swap-in 0.45s var(--ease-out) both;
+}
+.pill,
+.step-mark,
+.target-row,
+.headline-dot {
+  transition:
+    background-color 0.3s var(--ease-out),
+    color 0.3s var(--ease-out),
+    border-color 0.3s var(--ease-out);
+}
+@keyframes step-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+@keyframes line-grow {
+  from {
+    transform: scaleX(0);
+  }
+}
+@keyframes mark-pop {
+  0% {
+    transform: scale(0.6);
+  }
+  60% {
+    transform: scale(1.04);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+@keyframes bar-grow {
+  from {
+    transform: scaleX(0);
+  }
+}
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+@keyframes swap-in {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
   }
 }

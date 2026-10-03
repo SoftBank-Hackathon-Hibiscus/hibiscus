@@ -136,7 +136,7 @@ export function ApplicationDetail({ id, source }: { id: string; source: DataSour
         crumbs={<Crumbs items={[{ label: t('crumbApps'), href: realHref(APPLICATIONS_PATH) }, { label: a.name }]} />}
         title={a.name}
         sub={
-          <span className={`headline headline-${headlineTone}`}>
+          <span key={headline} className={`headline headline-${headlineTone}`}>
             <span className="headline-dot" aria-hidden />
             {headline}
           </span>
@@ -185,7 +185,7 @@ export function ApplicationDetail({ id, source }: { id: string; source: DataSour
 
       {latestEvent && <RouteBanner seen={latestEvent} deployments={snap.deployments} />}
 
-      <TrafficCard snap={snap} degraded={degraded} lang={lang} />
+      <TrafficCard snap={snap} degraded={degraded} lang={lang} swapAt={latestEvent?.at ?? null} />
 
       <div className="grid-2">
         <TargetsCard snap={snap} />
@@ -246,7 +246,8 @@ function pickTargets(snap: Snapshot) {
   return { current, standby };
 }
 
-function TrafficCard({ snap, degraded, lang }: { snap: Snapshot; degraded: boolean; lang: 'ko' | 'ja' }) {
+/** swapAt: lib/failover 가 실제 route 변화를 관찰한 시각. 그때만 현재 트래픽 블록이 전환 애니메이션으로 다시 그려진다 */
+function TrafficCard({ snap, degraded, lang, swapAt }: { snap: Snapshot; degraded: boolean; lang: 'ko' | 'ja'; swapAt: number | null }) {
   const { t } = useLang();
   const route = snap.route;
   const { current, standby } = pickTargets(snap);
@@ -274,7 +275,7 @@ function TrafficCard({ snap, degraded, lang }: { snap: Snapshot; degraded: boole
         <Empty>{t('noRouteNote')}</Empty>
       ) : (
         <div className="traffic-grid">
-          <div className="traffic-main">
+          <div key={swapAt ?? 'initial'} className={`traffic-main${swapAt !== null ? ' traffic-main-swap' : ''}`}>
             <div className="traffic-text">
               <div className="traffic-kind">
                 {route.target.kind === 'onprem' ? <Server size={20} className="kind-icon" aria-hidden /> : <Cloud size={20} className="kind-icon" aria-hidden />}
