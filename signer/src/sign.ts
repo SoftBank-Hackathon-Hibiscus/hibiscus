@@ -8,7 +8,7 @@ import { imageRefOf, type ImageSigner } from "./cosign.js";
 import { decideSign } from "./decide.js";
 import { appendSignLog, SignerError, signLogLine, writeJson } from "./io.js";
 import { DEFAULT_PLAN_SCHEMA, loadPlan } from "./plan.js";
-import { SignResultSchema, type RefuseReason, type SignLog, type SignResult } from "./schema.js";
+import { PersonSchema, SignResultSchema, type RefuseReason, type SignLog, type SignResult } from "./schema.js";
 
 export interface SignOptions {
   planPath: string;
@@ -36,6 +36,8 @@ export async function runSign(o: SignOptions): Promise<SignOutcome> {
   const now = o.now ?? (() => new Date());
   if (existsSync(o.outPath)) rmSync(o.outPath);
 
+  // 요청자 id 를 먼저 확인. 형식이 틀리면 cosign 서명만 레지스트리에 남고 기록 없이 끝나던 문제 막음
+  if (!PersonSchema.safeParse(o.requester).success) throw new SignerError("REQUESTER_INVALID", `요청자 id 형식 오류 (영문·숫자·._- 1~64자): ${o.requester}`);
   const loaded = loadPlan(o.planPath, o.planSchemaPath ?? DEFAULT_PLAN_SCHEMA);
   const { plan } = loaded;
   const approval = o.approvalPath ? loadApproval(o.approvalPath) : undefined;

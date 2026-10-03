@@ -163,6 +163,14 @@ describe("runSign", () => {
     expect(signer.calls).toHaveLength(0);
   });
 
+  it.each([["a%2Cb"], ["x".repeat(65)], ["bob(1)"], [""]])("요청자 id 형식이 틀리면(%s) 서명 전에 REQUESTER_INVALID, 서명·기록 모두 안 함", async (requester) => {
+    const dir = tmp();
+    const signer = new RecordingSigner();
+    await expect(runSign({ planPath: plan("allow"), requester, imageRepo: REPO, signer, now: () => NOW, ...paths(dir) })).rejects.toMatchObject({ code: "REQUESTER_INVALID" });
+    expect(signer.calls).toHaveLength(0);
+    expect(existsSync(paths(dir).logPath)).toBe(false);
+  });
+
   it("이미지 저장소에 태그가 붙어 있으면 오류", async () => {
     const dir = tmp();
     await expect(
