@@ -1139,7 +1139,7 @@ textarea.input {
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 72px;
+  gap: 40px;
   padding-bottom: 40px;
 }
 /* hero 뒤의 아주 옅은 세이지 glow. 텍스트 뒤에만, 색은 액센트 계열 */
@@ -1158,7 +1158,7 @@ textarea.input {
   filter: blur(8px);
 }
 .hero {
-  min-height: min(72vh, 620px);
+  min-height: min(62vh, 560px);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1983,10 +1983,10 @@ select.input {
     font-size: 36px;
   }
   .hero {
-    min-height: min(64vh, 560px);
+    min-height: min(56vh, 480px);
   }
   .home {
-    gap: 48px;
+    gap: 36px;
   }
   /* 세로 pipeline: 선이 왼쪽에 서고 pulse 가 위에서 아래로 */
   .pipeline-track {
