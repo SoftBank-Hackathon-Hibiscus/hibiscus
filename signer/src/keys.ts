@@ -1,6 +1,6 @@
 // 공개키 지문. 배포 쪽이 믿는 공개키가 몰래 바뀌지 않았는지 확인할 때 씀 (레포의 keys/cosign.pub 는 누구나 바꿀 수 있어서)
 import { createHash, createPublicKey } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { isKmsKey } from "./cosign.js";
 import { SignerError } from "./io.js";
 
@@ -33,4 +33,16 @@ export function checkPublicKeyPin(pubKeyPath: string, expected: string): string 
     throw new SignerError("PUBKEY_MISMATCH", `공개키가 고정한 지문과 다름 (고정 ${pinned.slice(0, 12)}…, 실제 ${actual.slice(0, 12)}…): ${pubKeyPath}`);
   }
   return actual;
+}
+
+/** 개인키 파일을 다른 사용자도 읽을 수 있으면 그 권한(8진수), 괜찮으면 undefined. KMS 주소·Windows 는 안 봄 */
+export function looseKeyPermissions(keyPath: string): string | undefined {
+  if (isKmsKey(keyPath) || process.platform === "win32") return undefined;
+  let mode: number;
+  try {
+    mode = statSync(keyPath).mode;
+  } catch {
+    return undefined; // 없는 파일은 서명 때 KEY_MISSING
+  }
+  return (mode & 0o077) !== 0 ? (mode & 0o777).toString(8) : undefined;
 }

@@ -5,7 +5,7 @@ import { createApproval } from "./approval.js";
 import { CosignSigner, CosignVerifier, DryRunSigner, isKmsKey } from "./cosign.js";
 import { SignerError, writeJson } from "./io.js";
 import { DEFAULT_PLAN_SCHEMA, loadPlan } from "./plan.js";
-import { checkPublicKeyPin, publicKeyFingerprint } from "./keys.js";
+import { checkPublicKeyPin, looseKeyPermissions, publicKeyFingerprint } from "./keys.js";
 import { DEFAULT_POLICY } from "./attestation.js";
 import { runSign } from "./sign.js";
 import { DEFAULT_PUBLIC_KEY, runAuditVerify, runVerify } from "./verify.js";
@@ -29,6 +29,7 @@ const USAGE = `사용법
   --dry-run     cosign 을 부르지 않고 signature_ref 를 dry-run:... 으로 채움 (연결 확인용, 실제 배포에 쓰지 말 것)
   --audit       서명 감사 로그(해시 체인) 경로. 없으면 SIGNER_AUDIT_LOG 환경변수, 둘 다 없으면 안 씀
   --attest      배포 증명서(in-toto attestation)도 이미지에 붙임. 없으면 SIGNER_ATTEST=1
+  --minimal-env cosign 에 필요한 환경변수만 넘김 (backend 의 다른 비밀값이 cosign 으로 안 가게). 없으면 SIGNER_MINIMAL_ENV=1
   --self-verify 서명 직후 공개키(--pub)로 바로 다시 확인. 실패하면 sign_result 안 남김. 없으면 SIGNER_SELF_VERIFY=1
   --pubkey-sha256 공개키 지문 고정. 확인에 쓰는 공개키가 이 지문과 다르면 멈춤. 없으면 SIGNER_PUBKEY_SHA256
   --approval-ttl 승인 유효시간(분). 승인한 지 이보다 오래되면 서명 안 함 (approval_expired). 없으면 SIGNER_APPROVAL_TTL_MIN 환경변수, 둘 다 없으면 시간은 안 봄
@@ -88,11 +89,15 @@ async function main(argv: string[]): Promise<number> {
       attestation: { type: "boolean", default: false },
       policy: { type: "string" },
       "max-age": { type: "string" },
+      "minimal-env": { type: "boolean", default: false },
       json: { type: "boolean", default: false },
     },
   });
   const planSchema = values["plan-schema"] ?? DEFAULT_PLAN_SCHEMA;
   const noTlog = values["no-tlog"] === true || process.env.SIGNER_NO_TLOG === "1";
+  // cosign 에 필요한 환경변수만 넘김 (켤 때만, VM 에서 레지스트리 인증이 되는지 먼저 확인하고 켤 것)
+  const minimalEnv = values["minimal-env"] === true || process.env.SIGNER_MINIMAL_ENV === "1";
+  const cosignOptions = { noTlog, minimalEnv };
   // 빈 환경변수는 없는 것으로 봄 (backend 기본값이 '' 인 경우가 있음)
   // 빈 플래그(--audit "")도 없는 것으로 봄
   const auditPath = values.audit || process.env.SIGNER_AUDIT_LOG || undefined;
@@ -119,12 +124,18 @@ async function main(argv: string[]): Promise<number> {
     rmSync(out, { force: true });
     const dryRun = values["dry-run"] === true;
     const approvalTtlMs = minutes(values["approval-ttl"] || process.env.SIGNER_APPROVAL_TTL_MIN, "approval-ttl");
-    const signer = dryRun
-      ? new DryRunSigner()
-      : new CosignSigner(required(values.key ?? process.env.SIGNER_COSIGN_KEY, "key"), "cosign", { noTlog });
+    const keyPath = dryRun ? undefined : required(values.key ?? process.env.SIGNER_COSIGN_KEY, "key");
+    // 개인키 파일을 다른 사용자도 읽을 수 있으면 경고. SIGNER_STRICT_KEY_PERMS=1 이면 서명 안 함
+    const loose = keyPath !== undefined ? looseKeyPermissions(keyPath) : undefined;
+    if (loose !== undefined) {
+      const message = `개인키 파일 권한이 ${loose} 라서 다른 사용자도 읽을 수 있음 (chmod 600 권장): ${keyPath}`;
+      if (process.env.SIGNER_STRICT_KEY_PERMS === "1") throw new SignerError("KEY_PERMISSIONS", message);
+      console.error(`[signer] 경고: ${message}`);
+    }
+    const signer = keyPath === undefined ? new DryRunSigner() : new CosignSigner(keyPath, "cosign", cosignOptions);
     // 시험 실행은 실제 서명이 없어서 자기 확인을 안 함. 지문 확인은 서명 전에 끝냄
     const selfVerify = !dryRun && (values["self-verify"] === true || process.env.SIGNER_SELF_VERIFY === "1");
-    const selfVerifier = selfVerify ? new CosignVerifier(trustedPub(), "cosign", { noTlog }) : undefined;
+    const selfVerifier = selfVerify ? new CosignVerifier(trustedPub(), "cosign", cosignOptions) : undefined;
     const attest = !dryRun && (values.attest === true || process.env.SIGNER_ATTEST === "1");
     const outcome = await runSign({
       planPath: required(values.plan, "plan"),
@@ -166,7 +177,7 @@ async function main(argv: string[]): Promise<number> {
       maxAgeMs = minutes(values["max-age"] || process.env.SIGNER_MAX_AGE_MIN, "max-age");
       outcome = await runVerify({
         resultPath: required(values.result, "result"),
-        verifier: new CosignVerifier(trustedPub(), "cosign", { noTlog }),
+        verifier: new CosignVerifier(trustedPub(), "cosign", cosignOptions),
         ...(imageRepo !== undefined ? { imageRepo } : {}),
         ...(values.plan !== undefined ? { planPath: values.plan } : {}),
         ...(values.approval ? { approvalPath: values.approval } : {}),
@@ -233,7 +244,7 @@ async function main(argv: string[]): Promise<number> {
     const imageRepo = values["image-repo"] || process.env.IMAGE_REPO || undefined;
     const outcome = await runAuditVerify({
       auditPath: required(auditPath, "audit"),
-      ...(values.images === true ? { verifier: new CosignVerifier(trustedPub(), "cosign", { noTlog }) } : {}),
+      ...(values.images === true ? { verifier: new CosignVerifier(trustedPub(), "cosign", cosignOptions) } : {}),
       ...(imageRepo !== undefined ? { imageRepo } : {}),
     });
     if (outcome.code === 0) {

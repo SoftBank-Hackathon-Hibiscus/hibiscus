@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -101,6 +101,19 @@ describe("cli verify --json", () => {
     const r = cli(["verify", "--result", "x.json", "--max-age=abc", "--json"]);
     expect(r.code).toBe(2);
     expect(JSON.parse(r.stdout.trim())).toMatchObject({ error: "ARG_INVALID" });
+  });
+});
+
+describe("cli 개인키 권한", () => {
+  it("다른 사용자도 읽을 수 있는 키면 SIGNER_STRICT_KEY_PERMS=1 일 때 서명 전에 멈춤 (KEY_PERMISSIONS)", () => {
+    const dir = tmp();
+    const key = join(dir, "cosign.key");
+    writeFileSync(key, "dummy");
+    chmodSync(key, 0o644);
+    const r = cli(["sign", "--plan", plan("allow"), "--requester", "alice", "--image-repo", "localhost:5001/hib/app", "--key", key, "--out", join(dir, "r.json"), "--log", join(dir, "d.jsonl")], { SIGNER_STRICT_KEY_PERMS: "1" });
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/KEY_PERMISSIONS/);
+    expect(existsSync(join(dir, "d.jsonl"))).toBe(false);
   });
 });
 

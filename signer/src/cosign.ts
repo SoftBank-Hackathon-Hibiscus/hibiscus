@@ -73,6 +73,18 @@ async function readCosignVersion(cosignBin: string): Promise<string> {
 export interface CosignOptions {
   /** Rekor(투명성 로그)에 안 올림. 이렇게 서명한 이미지는 verify 에도 --insecure-ignore-tlog=true 필요 */
   noTlog?: boolean;
+  /** cosign 에 필요한 환경변수만 넘김 (backend 의 다른 비밀값이 cosign 프로세스로 새지 않게) */
+  minimalEnv?: boolean;
+}
+
+// cosign 이 서명·확인·레지스트리 인증·KMS 에 쓰는 환경변수. 나머지(DB 주소, GitHub App 키, JWT 비밀값 등)는 안 넘김
+const COSIGN_ENV_NAMES = new Set(["PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "TZ", "DOCKER_CONFIG", "REGISTRY_AUTH_FILE", "TUF_ROOT", "GOOGLE_APPLICATION_CREDENTIALS", "GCE_METADATA_HOST", "GCE_METADATA_IP", "SSL_CERT_FILE", "SSL_CERT_DIR", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy"]);
+const COSIGN_ENV_PREFIXES = ["COSIGN_", "SIGSTORE_", "REKOR_", "CLOUDSDK_", "GOOGLE_", "AWS_", "AZURE_", "VAULT_"];
+
+/** minimalEnv 면 cosign 에 필요한 것만 남긴 환경변수 */
+export function cosignEnv(options: CosignOptions, env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  if (!options.minimalEnv) return env;
+  return Object.fromEntries(Object.entries(env).filter(([name]) => COSIGN_ENV_NAMES.has(name) || COSIGN_ENV_PREFIXES.some((p) => name.startsWith(p))));
 }
 
 export class CosignSigner implements ImageSigner {
@@ -91,7 +103,7 @@ export class CosignSigner implements ImageSigner {
     args.push("--", imageRef);
     try {
       // 비밀번호는 COSIGN_PASSWORD 로만 받음
-      await execFileAsync(this.cosignBin, args, { env: process.env, timeout: 180_000 });
+      await execFileAsync(this.cosignBin, args, { env: cosignEnv(this.options), timeout: 180_000 });
     } catch (e) {
       const stderr = lastStderrLine(e);
       throw new SignerError("SIGN_FAILED", `cosign 서명 실패${stderr ? `: ${stderr}` : ""}`);
@@ -107,7 +119,7 @@ export class CosignSigner implements ImageSigner {
     writeFileSync(predicatePath, JSON.stringify(predicate), "utf8");
     const args = ["attest", "--yes", "--key", this.keyPath, ...this.tlogArgs(), "--type", predicateType, "--predicate", predicatePath, "--", imageRef];
     try {
-      await execFileAsync(this.cosignBin, args, { env: process.env, timeout: 180_000 });
+      await execFileAsync(this.cosignBin, args, { env: cosignEnv(this.options), timeout: 180_000 });
     } catch (e) {
       const stderr = lastStderrLine(e);
       throw new SignerError("ATTEST_FAILED", `cosign 배포 증명서 붙이기 실패${stderr ? `: ${stderr}` : ""}`);
@@ -216,7 +228,7 @@ export class CosignVerifier implements ImageVerifier {
     if (!isKmsKey(this.pubKeyPath) && !existsSync(this.pubKeyPath)) throw new SignerError("KEY_MISSING", `cosign 공개키 파일이 없음: ${this.pubKeyPath}`);
     await ensureCosignVersion(this.cosignBin);
     try {
-      const { stdout } = await execFileAsync(this.cosignBin, args, { env: process.env, timeout: 180_000, maxBuffer: 16 * 1024 * 1024 });
+      const { stdout } = await execFileAsync(this.cosignBin, args, { env: cosignEnv(this.options), timeout: 180_000, maxBuffer: 16 * 1024 * 1024 });
       return stdout;
     } catch (e) {
       const err = e as { code?: unknown; killed?: boolean };

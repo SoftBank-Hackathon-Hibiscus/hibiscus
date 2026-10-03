@@ -1,7 +1,7 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { CosignSigner, CosignVerifier, ensureCosignVersion, isKmsKey } from "../src/cosign.js";
+import { CosignSigner, CosignVerifier, cosignEnv, ensureCosignVersion, isKmsKey } from "../src/cosign.js";
 import { fakeCosign, REPO, tmp } from "./helpers.js";
 
 const DIGEST = `sha256:${"a".repeat(64)}`;
@@ -75,6 +75,53 @@ describe("CosignSigner", () => {
     const dir = tmp();
     const { bin } = fakeCosign(dir);
     await expect(new CosignSigner(join(dir, "nope.key"), bin).sign(`${REPO}@${DIGEST}`, {})).rejects.toMatchObject({ code: "KEY_MISSING" });
+  });
+});
+
+describe("cosign 에 넘기는 환경변수 (minimalEnv)", () => {
+  const ENV = {
+    PATH: "/usr/bin",
+    HOME: "/home/x",
+    COSIGN_PASSWORD: "pw",
+    GOOGLE_APPLICATION_CREDENTIALS: "/sa.json",
+    CLOUDSDK_CONFIG: "/gcloud",
+    DOCKER_CONFIG: "/docker",
+    HTTPS_PROXY: "http://proxy",
+    GITHUB_APP_PRIVATE_KEY: "-----BEGIN RSA PRIVATE KEY-----",
+    JWT_ACCESS_SECRET: "jwt",
+    DATABASE_URL: "postgres://",
+    SIGNER_COSIGN_KEY: "/k",
+  };
+
+  it("끄면 환경변수 전체를 그대로 넘김 (기존 동작)", () => {
+    expect(cosignEnv({}, ENV)).toBe(ENV);
+  });
+
+  it("켜면 cosign·레지스트리 인증·KMS 에 쓰는 것만 남기고 backend 비밀값은 뺌", () => {
+    expect(Object.keys(cosignEnv({ minimalEnv: true }, ENV)).sort()).toEqual(
+      ["CLOUDSDK_CONFIG", "COSIGN_PASSWORD", "DOCKER_CONFIG", "GOOGLE_APPLICATION_CREDENTIALS", "HOME", "HTTPS_PROXY", "PATH"].sort(),
+    );
+  });
+
+  it("실제 cosign 프로세스에도 걸러진 환경변수만 감", async () => {
+    const dir = tmp();
+    const key = join(dir, "cosign.key");
+    writeFileSync(key, "dummy");
+    const envFile = join(dir, "env.txt");
+    const bin = join(dir, "cosign");
+    writeFileSync(bin, `#!/bin/sh\nif [ "$1" = "version" ]; then echo '{"gitVersion":"v3.1.3"}'; exit 0; fi\nenv > "${envFile}"\n`);
+    chmodSync(bin, 0o755);
+    process.env.HIBISCUS_TEST_SECRET = "should-not-leak";
+    process.env.COSIGN_PASSWORD = "pw";
+    try {
+      await new CosignSigner(key, bin, { minimalEnv: true }).sign(`${REPO}@${DIGEST}`, {});
+    } finally {
+      delete process.env.HIBISCUS_TEST_SECRET;
+      delete process.env.COSIGN_PASSWORD;
+    }
+    const env = readFileSync(envFile, "utf8");
+    expect(env).toContain("COSIGN_PASSWORD=pw");
+    expect(env).not.toContain("HIBISCUS_TEST_SECRET");
   });
 });
 

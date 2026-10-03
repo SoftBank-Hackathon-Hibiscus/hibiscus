@@ -1,8 +1,8 @@
 import { generateKeyPairSync } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { checkPublicKeyPin, publicKeyFingerprint } from "../src/keys.js";
+import { checkPublicKeyPin, looseKeyPermissions, publicKeyFingerprint } from "../src/keys.js";
 import { DEFAULT_PUBLIC_KEY } from "../src/verify.js";
 import { tmp } from "./helpers.js";
 
@@ -48,5 +48,19 @@ describe("공개키 지문", () => {
     const path = join(tmp(), "bad.pub");
     writeFileSync(path, "not a key");
     expect(() => publicKeyFingerprint(path)).toThrow(expect.objectContaining({ code: "PUBKEY_INVALID" }));
+  });
+});
+
+describe.skipIf(process.platform === "win32")("개인키 파일 권한", () => {
+  it.each([[0o600, undefined], [0o400, undefined], [0o640, "640"], [0o644, "644"], [0o604, "604"]])("권한 %o → %s", (mode, expected) => {
+    const path = join(tmp(), "cosign.key");
+    writeFileSync(path, "dummy");
+    chmodSync(path, mode);
+    expect(looseKeyPermissions(path)).toBe(expected);
+  });
+
+  it("KMS 키 주소와 없는 파일은 안 봄", () => {
+    expect(looseKeyPermissions("gcpkms://projects/p/locations/l/keyRings/r/cryptoKeys/k")).toBeUndefined();
+    expect(looseKeyPermissions("/nope/cosign.key")).toBeUndefined();
   });
 });
