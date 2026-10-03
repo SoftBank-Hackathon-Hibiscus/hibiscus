@@ -1,0 +1,50 @@
+{
+  "$id": "AuditAnchor.schema.json",
+  "title": "AuditAnchor",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "kind": {
+      "type": "string",
+      "const": "audit_anchor"
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991,
+      "description": "고정한 줄 번호 (빈 로그면 0)"
+    },
+    "head": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "그 줄의 hash (빈 로그면 0 이 64개)"
+    },
+    "time": {
+      "type": "string"
+    },
+    "bundle": {
+      "type": "object",
+      "properties": {
+        "mediaType": {
+          "type": "string",
+          "format": "starts_with",
+          "pattern": "^application\\/vnd\\.dev\\.sigstore\\.bundle.*"
+        }
+      },
+      "required": [
+        "mediaType"
+      ],
+      "additionalProperties": {},
+      "description": "서명한 내용에 대한 sigstore bundle (cosign sign-blob --bundle)"
+    }
+  },
+  "required": [
+    "kind",
+    "seq",
+    "head",
+    "time",
+    "bundle"
+  ],
+  "additionalProperties": false,
+  "description": "감사 로그 끝 고정 한 줄. anchors 파일(jsonl)에 쌓임"
+}

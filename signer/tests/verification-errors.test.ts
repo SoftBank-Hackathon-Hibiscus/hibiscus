@@ -36,7 +36,8 @@ describe("감사 이미지 검증 오류", () => {
   it.skipIf(process.platform === "win32")("실행 권한 오류를 서명 없음으로 숨기지 않는다", async () => {
     const { bin, options } = await fixture({});
     chmodSync(bin, 0o600);
-    await expect(runAuditVerify(options)).rejects.toMatchObject({ code: "VERIFY_FAILED" });
+    // cosign 버전 확인에서 먼저 실행 오류(2)로 멈춤
+    await expect(runAuditVerify(options)).rejects.toMatchObject({ code: "COSIGN_VERSION_UNKNOWN" });
   });
 
   it.each(["", "not JSON", "{}", "[null]", '[{"optional":"invalid"}]'])("잘못된 성공 출력(%j)을 서명 없음으로 숨기지 않는다", async (stdout) => {

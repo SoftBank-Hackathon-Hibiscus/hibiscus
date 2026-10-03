@@ -1,8 +1,9 @@
+import { createHash } from "node:crypto";
 import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ImageSigner, ImageVerifier } from "../src/cosign.js";
+import type { BlobSigner, BlobVerifier, ImageSigner, ImageVerifier } from "../src/cosign.js";
 import { SignerError } from "../src/io.js";
 
 export const FIXTURES = fileURLToPath(new URL("../fixtures/plans/", import.meta.url));
@@ -33,9 +34,10 @@ export function copyPlan(src: string, dir: string, patch: Record<string, unknown
  * 받은 인자를 기록하는 가짜 서명기. 서명을 이미지별로 쌓아 두는 가짜 레지스트리 역할도 함
  * verify 는 cosign 처럼 "주석이 전부 맞는 서명이 하나라도 있으면" 통과
  */
-export class RecordingSigner implements ImageSigner, ImageVerifier {
+export class RecordingSigner implements ImageSigner, ImageVerifier, BlobSigner, BlobVerifier {
   calls: Array<{ imageRef: string; annotations: Record<string, string> }> = [];
   verifyCalls: Array<{ imageRef: string; annotations: Record<string, string> }> = [];
+  attests: Array<{ imageRef: string; predicateType: string; predicate: unknown }> = [];
   constructor(private readonly fail = false) {}
   async sign(imageRef: string, annotations: Record<string, string>): Promise<string> {
     this.calls.push({ imageRef, annotations });
@@ -50,13 +52,35 @@ export class RecordingSigner implements ImageSigner, ImageVerifier {
   async signatures(imageRef: string): Promise<Array<Record<string, string>>> {
     return this.calls.filter((c) => c.imageRef === imageRef).map((c) => c.annotations);
   }
+  async attest(imageRef: string, predicateType: string, predicate: unknown): Promise<void> {
+    if (this.fail) throw new Error("registry unreachable");
+    this.attests.push({ imageRef, predicateType, predicate: JSON.parse(JSON.stringify(predicate)) });
+  }
+  /** 가짜 sign-blob: 내용 해시를 bundle 로 */
+  async signBlob(content: string): Promise<unknown> {
+    if (this.fail) throw new Error("registry unreachable");
+    return { mediaType: "application/vnd.dev.sigstore.bundle.v0.3+json", fake: createHash("sha256").update(content).digest("hex") };
+  }
+  async verifyBlob(content: string, bundle: unknown): Promise<void> {
+    if ((bundle as { fake?: unknown })?.fake !== createHash("sha256").update(content).digest("hex")) throw new SignerError("SIGNATURE_INVALID", "verify-blob: invalid signature");
+  }
+  /** cosign verify-attestation 처럼 in-toto Statement 를 돌려줌. 정책(Rego)은 가짜라서 안 봄 */
+  async attestations(imageRef: string, predicateType: string): Promise<unknown[]> {
+    const mine = this.attests.filter((a) => a.imageRef === imageRef && a.predicateType === predicateType);
+    if (mine.length === 0) throw new SignerError("SIGNATURE_INVALID", "cosign verify 실패: no matching attestations");
+    const [name, digest] = imageRef.split("@");
+    return mine.map((a) => ({ _type: "https://in-toto.io/Statement/v0.1", subject: [{ name, digest: { sha256: digest!.slice("sha256:".length) } }], predicateType, predicate: a.predicate }));
+  }
 }
 
 /**
  * 받은 인자를 파일에 적고 끝나는 가짜 cosign.
  * expectArgs 를 주면 인자가 그것과 똑같을 때만 0, 아니면 1 (서명 주석이 안 맞는 상황)
  */
-export function fakeCosign(dir: string, o: { code?: number; expectArgs?: string[]; stderr?: string; stdout?: string } = {}): { bin: string; argsFile: string } {
+export function fakeCosign(
+  dir: string,
+  o: { code?: number; expectArgs?: string[]; stderr?: string; stdout?: string; version?: string } = {},
+): { bin: string; argsFile: string } {
   const argsFile = join(dir, "args.txt");
   const bin = join(dir, "cosign");
   let check = `exit ${o.code ?? 0}`;
@@ -68,7 +92,10 @@ export function fakeCosign(dir: string, o: { code?: number; expectArgs?: string[
   const stderr = (o.stderr ?? "boom: registry denied").replace(/'/g, "");
   const stdoutFile = join(dir, "stdout.txt");
   writeFileSync(stdoutFile, o.stdout !== undefined ? o.stdout + "\n" : "");
-  writeFileSync(bin, `#!/bin/sh\nprintf '%s\\n' "$@" > "${argsFile}"\ncat "${stdoutFile}"\necho '${stderr}' >&2\n${check}\n`);
+  // version --json 은 기록하지 않고 버전만 답함 (signer 가 cosign v3 이상인지 먼저 확인함)
+  const version = `if [ "$1" = "version" ]; then echo '{"gitVersion":"${o.version ?? "v3.1.3"}"}'; exit 0; fi`;
+  // args.txt 는 마지막 호출, calls.txt 는 모든 호출
+  writeFileSync(bin, `#!/bin/sh\n${version}\nprintf '%s\\n' "$@" > "${argsFile}"\nprintf '%s\\n' "$@" >> "${join(dir, "calls.txt")}"\ncat "${stdoutFile}"\necho '${stderr}' >&2\n${check}\n`);
   chmodSync(bin, 0o755);
   return { bin, argsFile };
 }
