@@ -68,7 +68,7 @@ npm run sign -- --plan plan.json --requester <요청자> --image-repo <저장소
 npm run sign -- ... --self-verify --attest --test-result test_result.json --pubkey-sha256 sha256:<지문>
 
 # 서명 결과 확인 (누구나 공개키로)
-npm run verify -- --result sign_result.json [--plan plan.json] [--approval approval.json] [--audit sign_audit.jsonl [--latest]] \
+npm run verify -- --result sign_result.json [--plan plan.json] [--approval approval.json] [--audit sign_audit.jsonl [--anchors sign_audit.anchors.jsonl] [--latest]] \
   [--image-repo <저장소>] [--attestation [--policy policy/deploy.rego] [--policy-sha256 sha256:<지문>] [--test-result test_result.json]] \
   [--max-age 30] [--json] [--no-tlog]
 
@@ -114,7 +114,7 @@ bash scripts/attack-demo.sh
 | `--max-age` (verify) | `SIGNER_MAX_AGE_MIN` | 서명한 지 이 시간(분)이 지난 결과는 거부 (`expired`) |
 | `--json` (verify, audit, reconcile) | | 결과를 JSON 한 줄로 (실행 오류도) |
 | `--latest` (verify) | `SIGNER_VERIFY_LATEST=1` | `--audit`와 같이. 뒤에 더 새로 서명한 결과가 있거나 같은 이미지가 block 됐으면 거부 (`superseded`) |
-| `--anchors` | `SIGNER_AUDIT_ANCHORS` | 감사 로그 끝 고정값 파일. anchor 는 여기에 추가, audit 는 이것과도 맞춰 봄. anchor 에서 없으면 `<감사 로그>.anchors.jsonl` |
+| `--anchors` | `SIGNER_AUDIT_ANCHORS` | 감사 로그 끝 고정값 파일. anchor 는 여기에 추가, audit·reconcile·`verify --audit`는 이것과도 맞춰 봄. anchor 에서 없으면 `<감사 로그>.anchors.jsonl` |
 | `--images` (audit) | | 레지스트리 서명과 맞춰 봄 |
 | `--strict-images` (audit) | | `--images`와 같이. `audit_head` 없는 서명도 로그에 없는 서명으로 봄 (키 도용 감지) |
 | `--sweep` (audit) | `SIGNER_AUDIT_SWEEP=1` | `--images`와 같이. 저장소 태그를 crane 으로 전부 훑어서 로그에 없던 이미지의 서명도 봄 |
@@ -160,7 +160,7 @@ bash scripts/attack-demo.sh
 | 5 | `--image-repo`와 같은 저장소 | `repo_mismatch` |
 | 6 | `--plan`과 run_id·digest·plan_hash·source_revision·targets·failover_allowed가 같음 | `plan_mismatch` |
 | 7 | `--approval`과 run_id·digest·plan_hash·requester·approver가 같음 (자동 승인 결과면 승인 기록을 주면 안 됨) | `approval_mismatch` |
-| 8 | `--audit` 체인이 이어지고, 이 실행의 signed 줄이 있고, 취소된 서명이 아니고, 기록한 주석과 sign_result가 같음 | `audit_mismatch` |
+| 8 | `--audit` 체인이 이어지고(`--anchors`면 끝 고정값과도 같고), 이 실행의 signed 줄이 있고, 취소된 서명이 아니고, 기록한 주석과 sign_result가 같음 | `audit_mismatch` |
 | 9 | `--audit`이면 철회되지 않음 | `revoked` |
 | 10 | `--latest`면 뒤에 더 새 서명·같은 이미지의 block 결정이 없음 | `superseded` |
 | 11 | 위 주석 전부로 `cosign verify` (`--audit`이면 기록한 주석 그대로). 저장소만 다른 서명이 있으면 | `signature_invalid` / `repo_mismatch` |
@@ -172,6 +172,7 @@ bash scripts/attack-demo.sh
 - 알 수 없는 실행 실패(`VERIFY_FAILED`)나 잘못된 성공 출력(`VERIFY_OUTPUT_INVALID`)도 실행 오류(2)로 중단한다. 감사 검사에서 이를 빈 서명 목록으로 처리하지 않는다.
 - 한 이미지에 서명이 여러 개면 "주석이 전부 맞는 서명이 하나라도 있으면" 통과 (cosign 규칙). 같은 이미지의 예전 정상 결과도 통과할 수 있어서, 최신인지는 `--audit --latest`, `--plan`, `--max-age`로
 - 키를 가진 사람이 정상 서명 주석을 복사해 targets 만 바꾼 쌍둥이 서명을 붙이면 `--audit` 없는 verify 는 통과함. `--audit`이면 감사 로그에 기록한 주석과 비교해서 걸림
+- `--audit`만 주면 감사 로그 파일을 고칠 수 있는 사람이 끝의 철회·취소·block 줄을 잘라내 `revoked`·취소·`--latest` 검사를 피할 수 있음. 배포 직전 확인은 `--anchors`도 같이 (`SIGNER_AUDIT_ANCHORS`는 `--audit`가 있을 때만 씀)
 - `--json` 출력 (콘솔·backend가 그대로 읽는 용도)
   - 통과: `{"ok":true,"code":0,"run_id","digest","image","targets","failover_allowed","requester","approver","signed_at","checked":{...},"pubkeys":[...],"pubkey_pinned"}`
   - 실패: `{"ok":false,"code":1,"reason","detail"}` / 실행 오류: `{"ok":false,"code":2,"error","message"}`
@@ -187,6 +188,7 @@ bash scripts/attack-demo.sh
 - signed 줄의 `annotations` = 이미지 서명에 실제로 붙인 주석 전체
   - 줄 내용·anchor 와 다르거나, 앞 줄부터 기록했는데 이 줄에만 없으면(지운 흔적) `annotations_invalid`
   - `--images`·`verify --audit`·`reconcile`은 이 기록과 정확히 같은 서명만 인정 → 주석만 바꾼 쌍둥이 서명은 `twin_signature`
+  - 쌍둥이에서 `audit_head`까지 빼면 signer 밖 서명과 같아져서 `--strict-images`일 때만 `unlogged_signature` (기본 모드는 통과). 이때도 `verify --audit`는 `audit_mismatch`, reconcile 은 `target_not_signed`
 - 서명은 됐는데 뒤 단계(자기 확인·증명서)가 실패하면, signed 줄을 먼저 남기고 그 줄을 `cancels`로 가리키는 거절 줄을 붙임
   - 레지스트리에 남은 서명이 기록에 있어서 `--images`가 계속 `unlogged_signature`를 내지 않음
   - 그 서명으로 sign_result 를 다시 만들어도 `verify --audit`에서 `audit_mismatch` (취소된 서명)
@@ -208,10 +210,13 @@ bash scripts/attack-demo.sh
   - `--sweep`이면 저장소 태그를 crane 으로 전부 훑음 (cosign v3 는 서명 대상마다 `sha256-<digest>` 태그를 남김). 로그에 한 번도 안 나온 이미지에 한 서명까지 봄
     - 복사한 로그로 서명(운영자가 `SIGNER_AUDIT_LOG`를 사본으로 바꿈) → `unlogged_signature` "N번째 줄 뒤에서 갈라짐"
     - 훔친 키로 새 이미지에 직접 서명 → `--strict-images`와 같이 쓰면 `unlogged_signature`
-    - 태그 없는 이미지는 `--digests-file` (예: `gcloud artifacts docker images list <저장소> --format='value(version)'`)
+    - 태그 없는 이미지는 `--digests-file` (예: `gcloud artifacts docker images list <저장소> --format='value(version)'`). `--digests-file`만 주면 태그는 안 훑음 (태그가 한도를 넘는 저장소를 목록으로 나눠 볼 때)
+    - 빈 감사 로그를 훑을 땐 저장소를 몰라서 `--image-repo` 필요 (로그를 통째로 비워도 조용히 통과하지 않게)
     - 조회 실패는 빈 목록으로 통과시키지 않고 실행 오류 (`REGISTRY_UNAVAILABLE`, `CRANE_MISSING`, `SWEEP_TRUNCATED`)
     - 키 유출 조사: `--pub leaked.pub --images --sweep --json`으로 그 키로 한 서명을 뽑아 볼 수 있음
   - 키 교체 중(`--pub` 여러 개)엔 이미지가 한 키로만 서명돼 있어도 됨. 어느 키로도 확인되는 서명이 없을 때만 `signature_invalid`
+  - 취소된 signed 줄(믿는 키로 안 보이는 서명이라 취소된 경우 등)은 맞는 서명이 없어도 됨
+  - `--strict-images`·`--sweep`이면 예전 형식(`.sig` 태그) 서명도 따로 물어봄 (`--new-bundle-format=false`). cosign v3 는 새 형식 서명이 하나라도 있으면 예전 형식을 안 돌려줘서, 훔친 키로 예전 형식으로 붙인 서명이 숨을 수 있음
   - signed 줄이 하나도 없으면 저장소를 몰라서 `--image-repo` 필요 (없으면 실행 오류)
 - 쓰기 전에 체인을 처음부터 끝까지 확인함. 중간 줄이라도 고쳐져 있으면 이어 쓰지 않고 서명도 안 함 (`AUDIT_INVALID`, 몇 번째 줄인지 나옴). 서명 뒤 감사 로그를 못 쓰면 sign_result도 안 남김
 - plan·승인 기록 형식 오류, 잘못된 요청자처럼 결정 전에 멈춘 시도도 `kind: sign_error` 줄로 남김 (decisions.jsonl에는 안 씀)
@@ -337,8 +342,9 @@ cosign verify-attestation --key signer/keys/cosign.pub --type https://hibiscus.l
 ```
 
 - `--run-id` 없으면 이미지 전체: 그 이미지의 서명 전부 `revoked`, 다시 서명 요청도 거부 (`DIGEST_REVOKED`, 되돌릴 수 없어서 새로 빌드)
-- `--run-id` 있으면 그 실행의 서명만 `revoked`, 같은 이미지를 새 실행으로 서명하는 건 됨
-- 철회 줄도 체인의 한 줄이라 지우면 체인·끝 고정에서 걸림. `--anchors --key`를 주면 철회 직후 바로 끝 고정
+- `--run-id` 있으면 그 실행의 서명만 `revoked`, 그 실행은 다시 서명 안 함(`RUN_REVOKED`, 미리 철회도 같음). 같은 이미지를 새 실행으로 서명하는 건 됨
+- 같은 철회를 다시 하면 새 줄 없이 "이미 철회돼 있음" (재시도해도 줄이 안 쌓임)
+- 철회 줄도 체인의 한 줄이라 지우면 끝 고정값에서 걸림 (`audit --anchors`, `verify --audit --anchors`). `--anchors --key`를 주면 철회 직후 바로 끝 고정 (키가 없으면 철회 줄을 쓰기 전에 멈춤)
 - `verify --latest`: 이 결과 뒤에 같은 저장소·겹치는 배포 위치로 더 새로 서명한 결과(취소·철회 안 된 것)가 있거나 같은 이미지가 block 됐으면 `superseded` (예전 결과 재사용·몰래 롤백). 정상 롤백은 새 실행으로 다시 서명
 - 한계: 감사 로그를 보는 곳(`verify --audit`, `reconcile`)에서만 보임. 배포 쪽 cosign verify 는 철회를 모름
 
@@ -428,11 +434,11 @@ bash scripts/attack-demo.sh            # DEMO_PORT=5055, DEMO_KEEP=1 이면 작�
 | 서명 뒤 targets에 cloud_run, approver, signed_at, plan 규칙 결과 바꾸기 | verify `signature_invalid` |
 | 다른 이미지 digest, 이미지·서명을 다른 저장소로 복사, dry-run 결과 | verify `ref_invalid`, `repo_mismatch`, `dry_run` |
 | 공격자 키로 서명 / 레포 공개키 바꿔치기 | verify `signature_invalid` / `PUBKEY_MISMATCH` |
-| 팀 키를 훔쳐 signer 밖에서 직접 서명 | audit `--strict-images` `unlogged_signature` |
+| 팀 키를 훔쳐 signer 밖에서 직접 서명 (새 형식, 예전 `.sig` 형식) | audit `--strict-images` `unlogged_signature` |
 | 복사한 로그로 서명, 훔친 키로 새 이미지 서명 | audit `--sweep` (두 건 다 `findings`) |
 | 시험 실패 이미지 / 시험 결과 파일 바꿔치기 / 정책 파일에 한 줄 붙이기 | verify `policy_denied` (strict.rego) / `attestation_invalid` / `POLICY_PIN_MISMATCH` |
 | 감사 로그 한 줄 수정 / 끝 자르기 / 서명 줄 빼기 / 빼고 체인 다시 계산 | audit `hash_mismatch` / `anchor_truncated` / verify `audit_mismatch` / audit `--images` `unlogged_signature` |
-| v2 뒤에 v1 결과로 배포 / 철회한 v2 배포 / 철회 줄 지우기 / 철회 이미지 다시 서명 | verify `superseded` / `revoked` / audit `anchor_truncated` / sign `DIGEST_REVOKED` |
+| v2 뒤에 v1 결과로 배포 / 철회한 v2 배포 / 철회 줄 지우기 / 철회 이미지 다시 서명 | verify `superseded` / `revoked` / verify·audit `--anchors` `anchor_truncated` / sign `DIGEST_REVOKED` |
 | targets 를 고쳐 Cloud Run 에 배포, 철회한 이미지·로그에 없는 이미지가 떠 있음 | reconcile `target_not_signed` / `deploy_revoked` / `deploy_unlogged` |
 
 - 정상 흐름(서명, 증명서, 끝 고정, 전체 확인, 키 교체 중 확인)은 통과해야 함. 기대와 다르면 종료 코드 1
