@@ -29,6 +29,7 @@ const USAGE = `사용법
   --dry-run     cosign 을 부르지 않고 signature_ref 를 dry-run:... 으로 채움 (연결 확인용, 실제 배포에 쓰지 말 것)
   --audit       서명 감사 로그(해시 체인) 경로. 없으면 SIGNER_AUDIT_LOG 환경변수, 둘 다 없으면 안 씀
   --attest      배포 증명서(in-toto attestation)도 이미지에 붙임. 없으면 SIGNER_ATTEST=1
+  --test-result 시험 결과(test_result.json)를 증명서에 넣음 (sign). verify --attestation 에서는 이 시험 결과로 서명했는지 확인
   --minimal-env cosign 에 필요한 환경변수만 넘김 (backend 의 다른 비밀값이 cosign 으로 안 가게). 없으면 SIGNER_MINIMAL_ENV=1
   --self-verify 서명 직후 공개키(--pub)로 바로 다시 확인. 실패하면 sign_result 안 남김. 없으면 SIGNER_SELF_VERIFY=1
   --pubkey-sha256 공개키 지문 고정. 확인에 쓰는 공개키가 이 지문과 다르면 멈춤. 없으면 SIGNER_PUBKEY_SHA256
@@ -90,6 +91,7 @@ async function main(argv: string[]): Promise<number> {
       policy: { type: "string" },
       "max-age": { type: "string" },
       "minimal-env": { type: "boolean", default: false },
+      "test-result": { type: "string" },
       json: { type: "boolean", default: false },
     },
   });
@@ -150,6 +152,7 @@ async function main(argv: string[]): Promise<number> {
       ...(approvalTtlMs !== undefined ? { approvalTtlMs } : {}),
       ...(selfVerifier !== undefined ? { selfVerifier } : {}),
       ...(attest ? { attest } : {}),
+      ...(values["test-result"] !== undefined ? { testResultPath: values["test-result"] } : {}),
     });
     if (outcome.code === 0) {
       const r = outcome.result;
@@ -174,6 +177,7 @@ async function main(argv: string[]): Promise<number> {
     let maxAgeMs: number | undefined;
     let outcome: Awaited<ReturnType<typeof runVerify>>;
     try {
+      if (values["test-result"] !== undefined && values.attestation !== true) throw new SignerError("ARG_INVALID", "--test-result 는 --attestation 과 같이 써야 함 (시험 결과는 증명서에 들어 있음)");
       maxAgeMs = minutes(values["max-age"] || process.env.SIGNER_MAX_AGE_MIN, "max-age");
       outcome = await runVerify({
         resultPath: required(values.result, "result"),
@@ -181,7 +185,9 @@ async function main(argv: string[]): Promise<number> {
         ...(imageRepo !== undefined ? { imageRepo } : {}),
         ...(values.plan !== undefined ? { planPath: values.plan } : {}),
         ...(values.approval ? { approvalPath: values.approval } : {}),
-        ...(values.attestation === true ? { attestation: { policyPath } } : {}),
+        ...(values.attestation === true
+          ? { attestation: { policyPath, ...(values["test-result"] !== undefined ? { testResultPath: values["test-result"] } : {}) } }
+          : {}),
         ...(maxAgeMs !== undefined ? { maxAgeMs } : {}),
         planSchemaPath: planSchema,
         ...(auditPath !== undefined ? { auditPath } : {}),

@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { createApproval } from "../src/approval.js";
 import { DEPLOY_PREDICATE_TYPE, findDeployStatement } from "../src/attestation.js";
@@ -140,5 +141,91 @@ describe("배포 증명서 확인 (verify --attestation)", () => {
     const [statement] = (await signer.attestations(`${REPO}@${readJsonFile(resultPath).digest}`, DEPLOY_PREDICATE_TYPE)) as any[];
     const old = { ...statement, predicate: { ...statement.predicate, run_id: "r-old" } };
     expect(findDeployStatement([old, statement], readJsonFile(resultPath) as SignResult)).toMatchObject({ ok: true });
+  });
+});
+
+describe("증명서에 시험 결과 넣기 (--test-result)", () => {
+  // policy 픽스처 01-allow 의 시험 결과는 signer allow 픽스처와 run_id·digest 가 같음
+  const TEST_RESULT = fileURLToPath(new URL("../../policy/fixtures/01-allow/test_result.json", import.meta.url));
+
+  async function signAllow(dir: string, testResultPath: string, signer = new RecordingSigner()) {
+    return runSign({
+      planPath: plan("allow"),
+      requester: "alice",
+      imageRepo: REPO,
+      signer,
+      attest: true,
+      testResultPath,
+      outPath: join(dir, "sign_result.json"),
+      logPath: join(dir, "d.jsonl"),
+      auditPath: join(dir, "audit.jsonl"),
+      now: () => NOW,
+    });
+  }
+
+  it("시험 결과 해시·통과 여부·일치 수가 증명서에 들어감", async () => {
+    const signer = new RecordingSigner();
+    expect((await signAllow(tmp(), TEST_RESULT, signer)).code).toBe(0);
+    expect(signer.attests[0]!.predicate).toMatchObject({
+      test: { sha256: sha256Hex(canonicalize(readJsonFile(TEST_RESULT))), passed: true, match: { total: 20, matched: 20 }, conditions: [] },
+    });
+    expect(validate(signer.attests[0]!.predicate)).toBe(true);
+  });
+
+  it("조건별(정상·재시작·교체) 결과도 들어감", async () => {
+    const dir = tmp();
+    const withConditions = join(dir, "test_result.json");
+    writeJson(withConditions, {
+      ...readJsonFile(TEST_RESULT),
+      match: { total: 4, matched: 4 },
+      facts: {
+        conditions: [
+          { name: "none", total: 4, matched: 4, failed: false, mismatches: [] },
+          { name: "restart", total: 4, matched: 4, failed: false, mismatches: [] },
+          { name: "replace", total: 4, matched: 4, failed: false, mismatches: [] },
+        ],
+      },
+    });
+    const signer = new RecordingSigner();
+    expect((await signAllow(dir, withConditions, signer)).code).toBe(0);
+    expect((signer.attests[0]!.predicate as any).test.conditions).toEqual([
+      { name: "none", total: 4, matched: 4 },
+      { name: "restart", total: 4, matched: 4 },
+      { name: "replace", total: 4, matched: 4 },
+    ]);
+  });
+
+  it.each([
+    ["다른 실행의 시험 결과", { run_id: "r-999" }, "TEST_RESULT_MISMATCH"],
+    ["다른 이미지의 시험 결과", { digest: `sha256:${"9".repeat(64)}` }, "TEST_RESULT_MISMATCH"],
+    ["형식이 틀린 시험 결과", { passed: "yes" }, "TEST_RESULT_INVALID"],
+  ])("%s 면 서명 전에 멈춤 (%s), 감사 로그에 sign_error", async (_, patch, code) => {
+    const dir = tmp();
+    const bad = join(dir, "test_result.json");
+    writeJson(bad, { ...readJsonFile(TEST_RESULT), ...patch });
+    const signer = new RecordingSigner();
+    await expect(signAllow(dir, bad, signer)).rejects.toMatchObject({ code });
+    expect(signer.calls).toHaveLength(0);
+    expect(readJsonFile(join(dir, "audit.jsonl"))).toMatchObject({ entry: { kind: "sign_error", code } });
+  });
+
+  it("verify: 준 시험 결과로 서명했으면 통과, 고친 시험 결과면 attestation_invalid", async () => {
+    const dir = tmp();
+    const signer = new RecordingSigner();
+    await signAllow(dir, TEST_RESULT, signer);
+    const resultPath = join(dir, "sign_result.json");
+    expect(await runVerify({ resultPath, verifier: signer, attestation: { testResultPath: TEST_RESULT } })).toMatchObject({ code: 0 });
+    const forged = join(dir, "forged.json");
+    writeJson(forged, { ...readJsonFile(TEST_RESULT), match: { total: 20, matched: 19 } });
+    expect(await runVerify({ resultPath, verifier: signer, attestation: { testResultPath: forged } })).toMatchObject({
+      code: 1,
+      reason: "attestation_invalid",
+      detail: expect.stringMatching(/시험 결과 해시/),
+    });
+  });
+
+  it("verify: 시험 결과 없이 서명한 증명서에 시험 결과를 요구하면 attestation_invalid", async () => {
+    const { signer, resultPath } = await signWith(tmp(), "allow-onprem");
+    expect(await runVerify({ resultPath, verifier: signer, attestation: { testResultPath: TEST_RESULT } })).toMatchObject({ code: 1, reason: "attestation_invalid", detail: expect.stringMatching(/시험 결과가 없음/) });
   });
 });

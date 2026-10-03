@@ -2,7 +2,7 @@
 // 거절이면 sign_result.json 을 안 남김 (이전 파일도 지움). plan 을 못 읽으면 run_id 를 몰라서 기록 없이 오류
 import { existsSync, rmSync } from "node:fs";
 import { NO_APPROVAL, signAnnotations } from "./annotations.js";
-import { buildPredicate, DEPLOY_PREDICATE_TYPE } from "./attestation.js";
+import { buildPredicate, DEPLOY_PREDICATE_TYPE, loadTestEvidence } from "./attestation.js";
 import { loadApproval } from "./approval.js";
 import { appendAudit, readAuditHead, type AuditOptions } from "./audit.js";
 import { imageRefOf, type ImageSigner, type ImageVerifier } from "./cosign.js";
@@ -29,6 +29,9 @@ export interface SignOptions {
   selfVerifier?: ImageVerifier;
   /** true 면 배포 증명서(in-toto attestation)도 붙임. 못 붙이면 sign_result 를 안 남김 */
   attest?: boolean;
+  /** 있으면 이 시험 결과(test_result.json)를 증명서에 넣음. run_id·digest 가 plan 과 같아야 함 */
+  testResultPath?: string;
+  testSchemaPath?: string;
   now?: () => Date;
 }
 
@@ -73,6 +76,8 @@ async function signOnce(o: SignOptions, seen: { runId?: string }): Promise<SignO
   seen.runId = plan.run_id;
   const approval = o.approvalPath ? loadApproval(o.approvalPath) : undefined;
   const imageRef = imageRefOf(o.imageRepo, plan.digest);
+  // 시험 결과는 서명 전에 확인 (형식·실행이 틀리면 서명하지 않음)
+  const test = o.testResultPath !== undefined ? loadTestEvidence(o.testResultPath, plan, o.testSchemaPath) : undefined;
   const base = {
     run_id: plan.run_id,
     digest: plan.digest,
@@ -134,7 +139,7 @@ async function signOnce(o: SignOptions, seen: { runId?: string }): Promise<SignO
   // 배포 증명서: 결정·승인·감사 기록을 서명된 문서로 이미지에 붙임 (시험 실행 서명기는 붙일 수 없어서 건너뜀)
   if (o.attest && o.signer.attest) {
     try {
-      const predicate = buildPredicate({ result, plan, planSha256: loaded.planSha256, approval: decision.approver === AUTO_APPROVER ? undefined : approval, approvalSha256, auditHead });
+      const predicate = buildPredicate({ result, plan, planSha256: loaded.planSha256, approval: decision.approver === AUTO_APPROVER ? undefined : approval, approvalSha256, auditHead, test });
       await o.signer.attest(imageRef, DEPLOY_PREDICATE_TYPE, predicate);
     } catch (e) {
       await refused(signLogLine({ ...base, result: "refused", approver: decision.approver, reason: "sign_failed", signature_ref: null }, now()));

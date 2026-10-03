@@ -86,6 +86,75 @@
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
     },
+    "test": {
+      "description": "시험 결과를 줬을 때만",
+      "type": "object",
+      "properties": {
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "test_result.json 전체(키 정렬 JSON) 해시"
+        },
+        "passed": {
+          "type": "boolean"
+        },
+        "match": {
+          "type": "object",
+          "properties": {
+            "total": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "matched": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "total",
+            "matched"
+          ],
+          "additionalProperties": false
+        },
+        "conditions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "total": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "matched": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "name",
+              "total",
+              "matched"
+            ],
+            "additionalProperties": false
+          },
+          "description": "조건별(정상·재시작·교체) 재생 결과. 시험 결과에 없으면 빈 배열"
+        }
+      },
+      "required": [
+        "sha256",
+        "passed",
+        "match",
+        "conditions"
+      ],
+      "additionalProperties": false
+    },
     "signature_ref": {
       "type": "string",
       "minLength": 1

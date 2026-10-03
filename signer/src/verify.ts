@@ -35,8 +35,8 @@ export interface VerifyOptions {
   auditPath?: string;
   /** 있으면 이 승인 기록으로 서명했는지까지 확인 (사람 승인일 때) */
   approvalPath?: string;
-  /** 있으면 배포 증명서(in-toto)도 확인. policyPath 를 주면 Rego 정책까지 */
-  attestation?: { policyPath?: string };
+  /** 있으면 배포 증명서(in-toto)도 확인. policyPath 를 주면 Rego 정책까지, testResultPath 를 주면 그 시험 결과로 서명했는지까지 */
+  attestation?: { policyPath?: string; testResultPath?: string };
   /** 있으면 서명한 지 이 시간(ms)이 지난 결과는 거부. signed_at 도 서명 주석에 묶여 있어서 고쳐도 걸림 */
   maxAgeMs?: number;
   now?: () => Date;
@@ -121,7 +121,8 @@ export async function runVerify(o: VerifyOptions): Promise<VerifyOutcome> {
       if (e instanceof SignerError && e.code === "SIGNATURE_INVALID") return fail("attestation_invalid", e.message);
       throw e;
     }
-    const found = findDeployStatement(statements, result);
+    const testSha = o.attestation.testResultPath !== undefined ? sha256Hex(canonicalize(readJson(o.attestation.testResultPath, "test_result"))) : undefined;
+    const found = findDeployStatement(statements, result, testSha);
     if (!found.ok) return fail("attestation_invalid", found.detail);
   }
   return { code: 0, result, imageRef, annotations };
