@@ -39,18 +39,21 @@ export function PageError({ error, compact = false }: { error: unknown; compact?
       </Notice>
     );
   }
+  // 화면 전체를 대신할 때도 다른 화면과 같은 바깥 쉘(.page) 안에 그린다
   return (
-    <section className="card error-state" role="alert">
-      <h2 className="empty-title">{title}</h2>
-      {body && <p className="empty-body">{body}</p>}
-      {detail && <p className="mono small muted">{detail}</p>}
-      {action && (
-        <div>
-          <a className="btn" href={action.href}>
-            {action.label}
-          </a>
-        </div>
-      )}
-    </section>
+    <div className="page">
+      <section className="card error-state" role="alert">
+        <h2 className="empty-title">{title}</h2>
+        {body && <p className="empty-body">{body}</p>}
+        {detail && <p className="mono small muted">{detail}</p>}
+        {action && (
+          <div>
+            <a className="btn" href={action.href}>
+              {action.label}
+            </a>
+          </div>
+        )}
+      </section>
+    </div>
   );
 }

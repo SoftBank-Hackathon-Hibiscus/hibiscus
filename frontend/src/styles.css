@@ -31,11 +31,18 @@
   --radius-sm: 8px;
   --card-pad: 20px 22px;
   --gap: 18px;
-  --content-max: 1080px;
+  /* 모든 화면의 바깥 쉘: 본문 최대폭과 좌우 padding. 상단 바와 본문이 같은 값을 쓴다 */
+  --page-max: 1080px;
+  --page-pad: 20px;
+  --content-max: var(--page-max);
 }
 
 * {
   box-sizing: border-box;
+}
+html {
+  /* 스크롤바가 생겼다 없어져도 가운데 정렬 위치가 흔들리지 않게 자리를 항상 비워 둔다 */
+  scrollbar-gutter: stable;
 }
 html,
 body {
@@ -204,9 +211,9 @@ code {
 }
 /* 본문(.page)과 같은 가로 범위: max-width + 좌우 padding 이 main 과 동일 */
 .topbar-inner {
-  max-width: calc(var(--content-max) + 40px);
+  max-width: calc(var(--page-max) + var(--page-pad) * 2);
   margin: 0 auto;
-  padding: 10px 20px;
+  padding: 10px var(--page-pad);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -404,10 +411,12 @@ code {
   box-shadow: 0 1px 3px rgba(47, 62, 70, 0.15);
 }
 main {
-  padding: 28px 20px 80px;
+  padding: 28px var(--page-pad) 80px;
 }
+/* 바깥 쉘. 좁아야 하는 화면은 이 안에서 .page-narrow 로 내용 폭만 줄인다 (왼쪽 가장자리는 그대로) */
 .page {
-  max-width: var(--content-max);
+  width: 100%;
+  max-width: var(--page-max);
   margin: 0 auto;
   display: flex;
   flex-direction: column;
@@ -1062,7 +1071,7 @@ textarea.input {
   background: rgba(47, 62, 70, 0.32);
 }
 .modal {
-  width: min(760px, calc(100vw - 48px));
+  width: min(760px, 100%);
   max-height: min(78vh, 760px);
   display: flex;
   flex-direction: column;
@@ -1135,7 +1144,8 @@ textarea.input {
 /* ---- home: 서비스 첫 화면 (중앙 hero + pipeline) ---- */
 .home {
   position: relative;
-  max-width: var(--content-max);
+  width: 100%;
+  max-width: var(--page-max);
   margin: 0 auto;
   display: flex;
   flex-direction: column;
@@ -1147,7 +1157,7 @@ textarea.input {
   position: absolute;
   top: -40px;
   left: 50%;
-  width: min(960px, 120vw);
+  width: min(960px, 100%);
   height: 520px;
   transform: translateX(-50%);
   pointer-events: none;
@@ -1753,8 +1763,13 @@ textarea.input {
 }
 
 /* ---- forms (등록 / 새 배포) ---- */
+/* 좁은 내용: 쉘 폭은 유지하고 자식만 왼쪽 정렬로 제한 */
+.page-narrow > * {
+  width: 100%;
+  max-width: var(--narrow-max, 760px);
+}
 .register {
-  max-width: 820px;
+  --narrow-max: 820px;
 }
 .form-grid {
   display: grid;
@@ -1846,9 +1861,7 @@ select.input {
 }
 
 /* ---- connect: 단계 카드 ---- */
-.connect {
-  max-width: 760px;
-}
+/* .connect 는 .page-narrow 기본값(760px) */
 .steps {
   list-style: none;
   margin: 0;
@@ -2049,11 +2062,13 @@ select.input {
   body {
     font-size: 14px;
   }
+  :root {
+    --page-pad: 14px;
+  }
   main {
-    padding: 18px 14px 60px;
+    padding: 18px var(--page-pad) 60px;
   }
   .topbar-inner {
-    padding: 10px 14px;
     gap: 8px;
   }
   .card {

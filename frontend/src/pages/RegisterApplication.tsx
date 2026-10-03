@@ -98,7 +98,7 @@ export function RegisterApplication({ source }: { source: DataSource }) {
   };
 
   return (
-    <div className="page register">
+    <div className="page page-narrow register">
       <PageTitle crumbs={<Crumbs items={[{ label: t('crumbApps'), href: realHref(APPLICATIONS_PATH) }, { label: t('registerApp') }]} />} title={t('registerTitle')} sub={t('registerSub')} />
 
       <Notice tone={source.kind === 'real' ? 'warning' : 'muted'}>{source.kind === 'real' ? t('registerRealNote') : t('registerMockNote')}</Notice>

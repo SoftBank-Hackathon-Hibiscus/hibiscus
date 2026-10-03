@@ -30,7 +30,7 @@ export function Connect({ source, connection, onTokenChange, onRecheck }: { sour
   const startState: StepState = signedIn ? 'ok' : 'idle';
 
   return (
-    <div className="page connect">
+    <div className="page page-narrow connect">
       <PageTitle title={t('connectTitle')} sub={t('connectSub')} />
 
       <ol className="steps">
