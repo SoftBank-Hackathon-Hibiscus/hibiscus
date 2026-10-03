@@ -1,12 +1,11 @@
-import { ConfigService } from '@nestjs/config';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { BackendConfig } from '../../config/configs/backend.config.js';
 import { ParityInputService } from '../parity-input.service.js';
 
 describe('ParityInputService', () => {
   const directories: string[] = [];
+  const service = new ParityInputService();
 
   afterEach(() => {
     for (const directory of directories.splice(0)) {
@@ -14,46 +13,44 @@ describe('ParityInputService', () => {
     }
   });
 
-  it('does not require baseline files in fixture mode', () => {
-    expect(() =>
-      service('fixture', '').assertRegistrationReady('demo'),
-    ).not.toThrow();
+  it('returns undefined when a source revision has no parity files', () => {
+    expect(service.fromSource(source())).toBeUndefined();
   });
 
-  it('accepts a configured registry parity slug', () => {
-    const { inputsFile } = parityFiles('demo');
-    expect(() =>
-      service('registry', inputsFile).assertRegistrationReady('demo'),
-    ).not.toThrow();
+  it('loads and hashes the conventional GitHub parity files', () => {
+    const root = source();
+    const directory = join(root, '.hibiscus', 'parity');
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(join(directory, 'session.jsonl'), '{"index":1}\n');
+    writeFileSync(join(directory, 'noise.json'), '{"rules":[]}\n');
+
+    const first = service.fromSource(root);
+    const second = service.fromSource(root);
+
+    expect(first).toMatchObject({
+      record: join(directory, 'session.jsonl'),
+      noise: join(directory, 'noise.json'),
+      hash: expect.stringMatching(/^[0-9a-f]{64}$/),
+    });
+    expect(second?.hash).toBe(first?.hash);
   });
 
-  it('rejects registration when the registry parity slug is missing', () => {
-    const { inputsFile } = parityFiles('configured');
-    expect(() =>
-      service('registry', inputsFile).assertRegistrationReady('missing'),
-    ).toThrow('Registry parity inputs are not configured');
+  it('rejects an incomplete or malformed parity baseline', () => {
+    const root = source();
+    const directory = join(root, '.hibiscus', 'parity');
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(join(directory, 'session.jsonl'), '{"index":1}\n');
+    expect(() => service.fromSource(root)).toThrow('Both .hibiscus/parity');
+
+    writeFileSync(join(directory, 'noise.json'), '{');
+    expect(() => service.fromSource(root)).toThrow(
+      'Parity noise.json is not valid JSON',
+    );
   });
 
-  function parityFiles(slug: string) {
-    const directory = mkdtempSync(join(tmpdir(), 'parity-inputs-'));
+  function source(): string {
+    const directory = mkdtempSync(join(tmpdir(), 'parity-source-'));
     directories.push(directory);
-    const record = join(directory, 'record.jsonl');
-    const noise = join(directory, 'noise.json');
-    const inputsFile = join(directory, 'inputs.json');
-    writeFileSync(record, '{}\n');
-    writeFileSync(noise, '{}\n');
-    writeFileSync(inputsFile, JSON.stringify({ [slug]: { record, noise } }));
-    return { inputsFile };
-  }
-
-  function service(mode: 'fixture' | 'registry', inputsFile: string) {
-    const config = {
-      get: (key: string) =>
-        ({
-          'backend.parityTestMode': mode,
-          'backend.parityInputsFile': inputsFile,
-        })[key],
-    } as ConfigService<BackendConfig, true>;
-    return new ParityInputService(config);
+    return directory;
   }
 });

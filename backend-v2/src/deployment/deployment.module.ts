@@ -30,11 +30,6 @@ import { ParityInputService } from './parity-input.service.js';
     SignStage,
     DeployStage,
   ],
-  exports: [
-    DeploymentRepository,
-    DeploymentService,
-    CommandRunner,
-    ParityInputService,
-  ],
+  exports: [DeploymentRepository, DeploymentService, CommandRunner],
 })
 export class DeploymentModule {}

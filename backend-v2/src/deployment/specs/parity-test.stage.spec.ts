@@ -4,8 +4,9 @@ import {
   existsSync,
   mkdtempSync,
   mkdirSync,
-  writeFileSync,
+  readFileSync,
   rmSync,
+  writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -22,33 +23,27 @@ import { ParityInputService } from '../parity-input.service.js';
 
 describe('registry parity connection', () => {
   const directories: string[] = [];
+
   afterEach(() => {
     for (const path of directories.splice(0))
       rmSync(path, { recursive: true, force: true });
   });
-  function setup(digestSource: 'registry' | 'placeholder' = 'registry') {
+
+  function setup(
+    digestSource: 'registry' | 'placeholder' = 'registry',
+    withParity = true,
+  ) {
     const root = mkdtempSync(join(tmpdir(), 'parity-stage-'));
     directories.push(root);
     const paths = new DeploymentPaths(root, 'test-run');
     paths.ensure();
     const manifestDir = join(root, 'manifests', 'test-run');
     mkdirSync(manifestDir, { recursive: true });
-    const inputsFile = join(root, 'inputs.json');
-    for (const name of ['record', 'noise'])
-      writeFileSync(join(root, name), '{}');
-    writeFileSync(
-      inputsFile,
-      JSON.stringify({
-        guestbook: {
-          record: join(root, 'record'),
-          noise: join(root, 'noise'),
-          build_manifest_directory: join(root, 'manifests'),
-        },
-      }),
-    );
+    if (withParity) writeParity(root, 'candidate');
     const digest = `sha256:${'a'.repeat(64)}`;
     const context = {
       application: {
+        id: 'application-1',
         name: 'guestbook',
         slug: 'guestbook',
         sourcePath: root,
@@ -57,6 +52,7 @@ describe('registry parity connection', () => {
       },
       deployment: {
         id: 'test-run',
+        applicationId: 'application-1',
         sourceRevision: 'b'.repeat(40),
         imageDigest: digest,
         digestSource,
@@ -82,7 +78,7 @@ describe('registry parity connection', () => {
     const config = {
       get: (key: string) =>
         ({
-          'backend.parityInputsFile': inputsFile,
+          'backend.parityBuildManifestDirectory': join(root, 'manifests'),
           'backend.repoRoot': root,
           'backend.parityPythonCommand': 'python3',
           'backend.parityTimeoutMs': 1000,
@@ -97,7 +93,22 @@ describe('registry parity connection', () => {
         return checkout;
       },
     } as unknown as ModuleRef;
-    const inputs = new ParityInputService(config);
+    const deployments = { findActive: vi.fn().mockReturnValue(undefined) };
+    const applications = {
+      getView: vi.fn().mockReturnValue({
+        healthCheck: { path: '/healthz', timeoutSeconds: 5 },
+      }),
+    };
+    const inputs = new ParityInputService();
+    const create = (run: ReturnType<typeof vi.fn>) =>
+      new ParityTestStage(
+        config,
+        { run },
+        moduleRef,
+        inputs,
+        deployments as never,
+        applications as never,
+      );
     return {
       root,
       context,
@@ -106,68 +117,42 @@ describe('registry parity connection', () => {
       manifestDir,
       digest,
       checkout,
-      moduleRef,
-      inputs,
+      deployments,
+      create,
     };
   }
-  it('rejects a prebuilt manifest from another run before executing a command', async () => {
-    const { context, config, build, manifestDir, moduleRef, inputs } = setup();
+
+  it('rejects a prebuilt manifest from another run before parity execution', async () => {
+    const { context, build, manifestDir, create } = setup();
     writeFileSync(
       join(manifestDir, 'build_manifest.json'),
       JSON.stringify({ ...build, run_id: 'another-run' }),
     );
-    const run = vi.fn();
-    const result = await new ParityTestStage(
-      config,
-      { run },
-      moduleRef,
-      inputs,
-    ).run(context);
+    const run = successfulRunner(context);
+    const result = await create(run).run(context);
     expect(result.status).toBe('failed');
     expect(result.deploymentPatch).toBeUndefined();
-    expect(run).not.toHaveBeenCalled();
+    expect(
+      run.mock.calls.some((call) => call[0].args.includes('backend-test')),
+    ).toBe(false);
   });
+
   it.each([true, false])(
     'verifies source identity only after completed parity (passed=%s)',
     async (passed) => {
-      const { context, config, digest, moduleRef, inputs } = setup();
-      const run = vi.fn().mockImplementation(() => {
-        writeFileSync(
-          join(context.paths.test, 'stage_result.json'),
-          JSON.stringify({
-            status: 'succeeded',
-            exitCode: 0,
-            summary: { stub: false, test_passed: passed },
-          }),
-        );
-        writeFileSync(
-          join(context.paths.test, 'test_result.json'),
-          JSON.stringify({
-            run_id: 'test-run',
-            app: 'guestbook',
-            source_revision: 'b'.repeat(40),
-            digest,
-            passed,
-          }),
-        );
-        return Promise.resolve({
-          code: 0,
-          signal: null,
-          stdout: '',
-          stderr: '',
-          timedOut: false,
-        });
-      });
-      const result = await new ParityTestStage(
-        config,
-        { run },
-        moduleRef,
-        inputs,
-      ).run(context);
+      const { context, digest, create } = setup();
+      const run = successfulRunner(context, passed);
+      const result = await create(run).run(context);
+
       expect(result.status).toBe('succeeded');
       expect(result.summary).toMatchObject({
         stub: false,
         test_passed: passed,
+        parity_baseline: {
+          mode: 'replay',
+          changed: false,
+          candidate_hash: expect.stringMatching(/^[0-9a-f]{64}$/),
+        },
       });
       expect(result.deploymentPatch).toEqual({
         imageDigest: digest,
@@ -176,40 +161,74 @@ describe('registry parity connection', () => {
       });
     },
   );
-  it('does not verify the source after a timeout', async () => {
-    const { context, config, moduleRef, inputs } = setup();
-    const run = vi.fn().mockResolvedValue({
-      code: null,
-      signal: null,
-      stdout: '',
-      stderr: '',
-      timedOut: true,
+
+  it('uses health-only verification when the first revision has no parity files', async () => {
+    const { context, create } = setup('registry', false);
+    const run = successfulRunner(context);
+    const result = await create(run).run(context);
+    const request = JSON.parse(
+      readFileSync(
+        join(context.paths.root, 'test-work', 'parity-request.json'),
+        'utf8',
+      ),
+    ) as Record<string, unknown>;
+
+    expect(result.status).toBe('succeeded');
+    expect(request.format).toBe('premortem-backend-health-v1');
+    expect(request).not.toHaveProperty('record');
+    expect(result.summary).toMatchObject({
+      parity_baseline: { mode: 'health', changed: false },
     });
-    const result = await new ParityTestStage(
-      config,
-      { run },
-      moduleRef,
-      inputs,
-    ).run(context);
-    expect(result.status).toBe('failed');
-    expect(result.deploymentPatch).toBeUndefined();
+  });
+
+  it('replays the active baseline and marks a candidate baseline change', async () => {
+    const { root, context, checkout, deployments, create } = setup();
+    context.application.sourcePath = 'https://github.com/octo/private.git';
+    const candidate = join(root, 'candidate');
+    const active = join(root, 'active');
+    mkdirSync(candidate);
+    mkdirSync(active);
+    writeParity(candidate, 'candidate');
+    writeParity(active, 'active');
+    deployments.findActive.mockReturnValue({
+      id: 'active-deployment',
+      sourceRevision: 'c'.repeat(40),
+    });
+    checkout.checkout
+      .mockResolvedValueOnce(candidate)
+      .mockResolvedValueOnce(active);
+    const run = successfulRunner(context);
+
+    const result = await create(run).run(context);
+    const testResult = JSON.parse(
+      readFileSync(join(context.paths.test, 'test_result.json'), 'utf8'),
+    ) as { facts: { parity_baseline: Record<string, unknown> } };
+    const request = JSON.parse(
+      readFileSync(
+        join(context.paths.root, 'test-work', 'parity-request.json'),
+        'utf8',
+      ),
+    ) as { record: string };
+
+    expect(result.status).toBe('succeeded');
+    expect(request.record).toBe(
+      join(active, '.hibiscus', 'parity', 'session.jsonl'),
+    );
+    expect(testResult.facts.parity_baseline).toMatchObject({
+      mode: 'replay',
+      changed: true,
+      active_source_revision: 'c'.repeat(40),
+      active_hash: expect.stringMatching(/^[0-9a-f]{64}$/),
+      candidate_hash: expect.stringMatching(/^[0-9a-f]{64}$/),
+    });
   });
 
   it('checks out the exact GitHub revision before build and parity', async () => {
-    const {
-      root,
-      context,
-      config,
-      build,
-      digest,
-      checkout,
-      moduleRef,
-      inputs,
-    } = setup('placeholder');
-    context.application.id = 'application-1';
+    const { root, context, build, checkout, create } = setup('placeholder');
     context.application.sourcePath = 'https://github.com/octo/private.git';
     const checkedOut = join(root, 'github-checkout');
     mkdirSync(checkedOut);
+    writeParity(checkedOut, 'candidate');
     const destination = join(context.paths.root, 'test-work', 'source');
     mkdirSync(destination, { recursive: true });
     writeFileSync(join(destination, 'stale'), 'old checkout');
@@ -220,60 +239,9 @@ describe('registry parity connection', () => {
         return Promise.resolve(checkedOut);
       },
     );
-    const run = vi
-      .fn()
-      .mockImplementation((spec: { command: string; args: string[] }) => {
-        if (spec.command === 'git') {
-          return Promise.resolve({
-            code: 0,
-            signal: null,
-            stdout: `${context.deployment.sourceRevision}\n`,
-            stderr: '',
-            timedOut: false,
-          });
-        }
-        if (spec.args.includes('build')) {
-          const buildDir = join(context.paths.root, 'test-work', 'build');
-          mkdirSync(buildDir, { recursive: true });
-          writeFileSync(
-            join(buildDir, 'build_manifest.json'),
-            JSON.stringify(build),
-          );
-        } else {
-          writeFileSync(
-            join(context.paths.test, 'stage_result.json'),
-            JSON.stringify({
-              status: 'succeeded',
-              exitCode: 0,
-              summary: { stub: false, test_passed: true },
-            }),
-          );
-          writeFileSync(
-            join(context.paths.test, 'test_result.json'),
-            JSON.stringify({
-              run_id: context.deployment.id,
-              app: context.application.name,
-              source_revision: context.deployment.sourceRevision,
-              digest,
-              passed: true,
-            }),
-          );
-        }
-        return Promise.resolve({
-          code: 0,
-          signal: null,
-          stdout: '',
-          stderr: '',
-          timedOut: false,
-        });
-      });
+    const run = successfulRunner(context, true, build);
 
-    const result = await new ParityTestStage(
-      config,
-      { run },
-      moduleRef,
-      inputs,
-    ).run(context);
+    const result = await create(run).run(context);
 
     expect(result.status).toBe('succeeded');
     expect(checkout.checkout).toHaveBeenCalledWith(
@@ -286,6 +254,7 @@ describe('registry parity connection', () => {
     )?.[0];
     expect(buildCall?.args).toContain(checkedOut);
   });
+
   it('rejects artifacts checked against the old placeholder and accepts the verified image identity', () => {
     const { context, digest } = setup();
     writeFileSync(
@@ -312,4 +281,77 @@ describe('registry parity connection', () => {
       artifacts.capture(context.paths, execution, context.deployment).error,
     ).toBeUndefined();
   });
+
+  function successfulRunner(
+    context: StageContext,
+    passed = true,
+    build?: Record<string, unknown>,
+  ) {
+    return vi
+      .fn()
+      .mockImplementation((spec: { command: string; args: string[] }) => {
+        if (spec.command === 'git') {
+          return Promise.resolve(result(context.deployment.sourceRevision));
+        }
+        if (spec.args.includes('build')) {
+          const buildDir = join(context.paths.root, 'test-work', 'build');
+          mkdirSync(buildDir, { recursive: true });
+          writeFileSync(
+            join(buildDir, 'build_manifest.json'),
+            JSON.stringify(build),
+          );
+        } else if (spec.args.includes('backend-test')) {
+          mkdirSync(join(context.paths.test, 'parity'), { recursive: true });
+          writeFileSync(
+            join(context.paths.test, 'parity', 'build_manifest.json'),
+            '{}',
+          );
+          writeFileSync(
+            join(context.paths.test, 'stage_result.json'),
+            JSON.stringify({
+              status: 'succeeded',
+              exitCode: 0,
+              summary: { stub: false, test_passed: passed },
+            }),
+          );
+          writeFileSync(
+            join(context.paths.test, 'test_result.json'),
+            JSON.stringify({
+              run_id: context.deployment.id,
+              app: context.application.name,
+              source_revision: context.deployment.sourceRevision,
+              digest: context.deployment.imageDigest,
+              passed,
+              match: { total: 1, matched: passed ? 1 : 0 },
+              failures: [],
+              facts: {},
+            }),
+          );
+        }
+        return Promise.resolve(result(''));
+      });
+  }
+
+  function result(stdout: string) {
+    return {
+      code: 0,
+      signal: null,
+      stdout,
+      stderr: '',
+      timedOut: false,
+    };
+  }
+
+  function writeParity(source: string, marker: string): void {
+    const directory = join(source, '.hibiscus', 'parity');
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(
+      join(directory, 'session.jsonl'),
+      `${JSON.stringify({ index: 1, marker })}\n`,
+    );
+    writeFileSync(
+      join(directory, 'noise.json'),
+      `${JSON.stringify({ rules: [], marker })}\n`,
+    );
+  }
 });

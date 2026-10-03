@@ -31,7 +31,10 @@ export const environmentSchema = z
     SIGNER_MODE: z.enum(['dry', 'real']).default('dry'),
     DEPLOY_MODE: z.enum(['off', 'dry', 'real']).default('off'),
     PARITY_TEST_MODE: z.enum(['fixture', 'registry']).default('fixture'),
-    PARITY_INPUTS_FILE: z.string().default(''),
+    PARITY_BUILD_MANIFEST_DIRECTORY: z
+      .string()
+      .default('')
+      .transform((value) => (value ? resolve(value) : '')),
     PARITY_PYTHON_COMMAND: z.string().min(1).default('python3'),
     PARITY_BUILDER: z.string().default(''),
     PARITY_PLATFORMS: z
@@ -118,7 +121,7 @@ export const backendConfig = registerAs('backend', () => {
     signerMode: env.SIGNER_MODE,
     deployMode: env.DEPLOY_MODE,
     parityTestMode: env.PARITY_TEST_MODE,
-    parityInputsFile: env.PARITY_INPUTS_FILE,
+    parityBuildManifestDirectory: env.PARITY_BUILD_MANIFEST_DIRECTORY,
     parityPythonCommand: env.PARITY_PYTHON_COMMAND,
     parityBuilder: env.PARITY_BUILDER,
     parityPlatforms: env.PARITY_PLATFORMS,
