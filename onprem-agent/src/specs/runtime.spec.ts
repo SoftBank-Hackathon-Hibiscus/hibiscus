@@ -59,6 +59,10 @@ void test("verifies a signed digest and starts a loopback-only candidate", async
   assert.ok(run);
   assert.ok(run.args.includes("127.0.0.1::8080"));
   assert.ok(run.args.includes("hibiscus.managed=true"));
+  assert.deepEqual(
+    run.args.slice(run.args.indexOf("--env"), run.args.indexOf("--env") + 2),
+    ["--env", "DATABASE_URL=postgres://shared.example/app"],
+  );
   assert.equal(run.args.at(-1), job.image);
 });
 
@@ -103,7 +107,10 @@ function candidateJob(): AgentJob {
     digest,
     image: `registry.example/app@${digest}`,
     plan_hash: "c".repeat(64),
-    runtime: { container_port: 8080 },
+    runtime: {
+      container_port: 8080,
+      environment: { DATABASE_URL: "postgres://shared.example/app" },
+    },
     health_check: {
       enabled: true,
       path: "/health",

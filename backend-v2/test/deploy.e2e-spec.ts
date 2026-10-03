@@ -48,7 +48,7 @@ describe('deploy stage (e2e)', () => {
     const record = `echo "$(basename "$0") $* PROJECT_ID=$PROJECT_ID REGION=$REGION SERVICE=$SERVICE PORT=$PORT TAG=$TAG" >> ${log}`;
     write(
       'candidate.sh',
-      `${record}\necho '{"target":"cloud_run","phase":"candidate","result":"ok","revision":"demo-d1","candidate_url":"https://cand---demo-abc.a.run.app"}'`,
+      `${record}\ncat "$4" >> ${log}\necho >> ${log}\necho '{"target":"cloud_run","phase":"candidate","result":"ok","revision":"demo-d1","candidate_url":"https://cand---demo-abc.a.run.app"}'`,
     );
     write(
       'activate.sh',
@@ -141,6 +141,7 @@ describe('deploy stage (e2e)', () => {
         image_repo: imageRepo,
         container_port: 80,
         health_check: { enabled: false },
+        environment: [{ name: 'DATABASE_URL', value: 'postgres://shared/app' }],
       })
       .expect(201);
     const applicationId: string = created.body.application.id;
@@ -360,8 +361,10 @@ describe('deploy stage (e2e)', () => {
 
     const calls = readFileSync(join(directory, 'calls.log'), 'utf8');
     expect(calls).toContain(
-      `candidate.sh ${imageRepo}@${digest}  ${deployment.id} PROJECT_ID=test-project REGION=asia-northeast3 SERVICE=demo PORT=80 TAG=cand`,
+      `candidate.sh ${imageRepo}@${digest}  ${deployment.id} `,
     );
+    expect(calls).toContain('"DATABASE_URL":"postgres://shared/app"');
+    expect(calls).toContain(`"HIB_RUN_ID":"${deployment.id}"`);
     expect(calls).toContain(`-a run_id=${deployment.id}`);
     paths.cleanup();
   });

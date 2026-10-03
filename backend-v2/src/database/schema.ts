@@ -109,6 +109,20 @@ export const healthCheckConfigs = sqliteTable('health_check_configs', {
   updatedAt: text('updated_at').notNull(),
 });
 
+export const applicationEnvironmentVariables = sqliteTable(
+  'application_environment_variables',
+  {
+    applicationId: text('application_id')
+      .notNull()
+      .references(() => applications.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    value: text('value').notNull(),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.applicationId, table.name] })],
+);
+
 export const deployments = sqliteTable(
   'deployments',
   {
@@ -221,6 +235,10 @@ export const agentJobs = sqliteTable('agent_jobs', {
   image: text('image'),
   planHash: text('plan_hash'),
   toDigest: text('to_digest'),
+  environment: text('environment', { mode: 'json' })
+    .$type<Record<string, string>>()
+    .notNull()
+    .default({}),
   createdAt: text('created_at').notNull(),
   deadline: text('deadline').notNull(),
   status: text('status', {
@@ -450,6 +468,7 @@ export const applicationsRelations = relations(
   applications,
   ({ one, many }) => ({
     healthCheck: one(healthCheckConfigs),
+    environmentVariables: many(applicationEnvironmentVariables),
     deployments: many(deployments),
     agentLinks: many(applicationAgents),
     routingTargets: many(routingTargets),
@@ -462,6 +481,16 @@ export const healthCheckConfigsRelations = relations(
   ({ one }) => ({
     application: one(applications, {
       fields: [healthCheckConfigs.applicationId],
+      references: [applications.id],
+    }),
+  }),
+);
+
+export const applicationEnvironmentVariablesRelations = relations(
+  applicationEnvironmentVariables,
+  ({ one }) => ({
+    application: one(applications, {
+      fields: [applicationEnvironmentVariables.applicationId],
       references: [applications.id],
     }),
   }),
@@ -625,6 +654,8 @@ export type DeploymentAuditLog = typeof deploymentAuditLogs.$inferSelect;
 export type User = typeof users.$inferSelect;
 export type Application = typeof applications.$inferSelect;
 export type HealthCheckConfig = typeof healthCheckConfigs.$inferSelect;
+export type ApplicationEnvironmentVariable =
+  typeof applicationEnvironmentVariables.$inferSelect;
 export type Deployment = typeof deployments.$inferSelect;
 export type Agent = typeof agents.$inferSelect;
 export type AgentHeartbeat = typeof agentHeartbeats.$inferSelect;

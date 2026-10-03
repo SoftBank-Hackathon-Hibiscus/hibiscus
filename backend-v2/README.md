@@ -76,6 +76,7 @@ src/
 ```text
 Application (Project)
 ├── HealthCheckConfig (1:1)
+├── ApplicationEnvironmentVariable (1:N)
 ├── Deployment (1:N, version 1, 2, 3...)
 │   ├── PolicyResult (1:1)
 │   └── StageExecution (1:N)
@@ -91,6 +92,21 @@ Application (Project)
 
 Health Check 설정은 Deployment마다 복사하지 않습니다. Application에 한 개를 둡니다.
 따라서 새 Deployment도 현재 Application 설정을 사용합니다.
+
+Application 생성 요청의 `environment`에는 런타임 환경변수를 넣을 수 있습니다.
+`PUT /applications/:id/environment`는 전체 환경변수를 교체합니다. 응답에는 변수 이름만 포함하며 값은 반환하지 않습니다.
+새 배포부터 같은 값이 Cloud Run revision과 On-Prem Docker container에 적용됩니다. `PORT`, `HIB_RUN_ID`, `HIB_DIGEST`는 시스템 관리 값이라 설정할 수 없습니다.
+
+```json
+{
+  "environment": [
+    { "name": "DATABASE_URL", "value": "postgres://..." },
+    { "name": "OBJECT_STORAGE_BUCKET", "value": "hibiscus-demo" }
+  ]
+}
+```
+
+MVP에서는 값이 Backend DB에 저장됩니다. 관리 API 응답과 일반 Job 조회에는 값이 나오지 않습니다. 운영 비밀값은 이후 Secret Manager 참조 방식으로 교체해야 합니다.
 
 Agent token은 생성할 때 한 번만 반환합니다. DB에는 SHA-256 해시만 저장합니다.
 
@@ -288,6 +304,7 @@ Webhook은 원본 요청 바이트의 HMAC-SHA256을 `X-Hub-Signature-256`과 �
 - `GET /applications`
 - `GET /applications/:id`
 - `PATCH /applications/:id/health-check`
+- `PUT /applications/:id/environment`
 - `POST /applications/:id/deployments`
 - `GET /applications/:id/deployments`
 - `GET /deployments/:id`

@@ -40,6 +40,7 @@ function input(overrides: Partial<DeployInput> = {}): DeployInput {
     imageRepo: REPO,
     agentId: 'agent-1',
     healthCheck,
+    environment: {},
     changedBy: 'user-1',
     sign: {
       run_id: RUN,

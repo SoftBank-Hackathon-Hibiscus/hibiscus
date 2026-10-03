@@ -549,6 +549,37 @@ describe('deployment API (e2e)', () => {
     });
   });
 
+  it('stores application environment values without returning them', async () => {
+    const secret = 'postgres://user:password@db.example/app';
+    const created = await api()
+      .post('/applications')
+      .send({
+        name: 'runtime-environment',
+        slug: 'runtime-environment',
+        source_path: './fixtures/runtime-environment',
+        image_repo: 'registry.example/runtime-environment',
+        environment: [
+          { name: 'DATABASE_URL', value: secret },
+          { name: 'APP_MODE', value: 'demo' },
+        ],
+      })
+      .expect(201);
+    expect(created.body.environment).toEqual(['APP_MODE', 'DATABASE_URL']);
+    expect(JSON.stringify(created.body)).not.toContain(secret);
+
+    const updated = await api()
+      .put(`/applications/${created.body.application.id}/environment`)
+      .send({ environment: [{ name: 'DATABASE_URL', value: secret }] })
+      .expect(200);
+    expect(updated.body).toEqual({ environment: ['DATABASE_URL'] });
+    expect(JSON.stringify(updated.body)).not.toContain(secret);
+
+    await api()
+      .put(`/applications/${created.body.application.id}/environment`)
+      .send({ environment: [{ name: 'PORT', value: '9000' }] })
+      .expect(400);
+  });
+
   it('assigns increasing deployment versions per application', async () => {
     const application = await createApplication('versions', false);
     const first = await createDeployment(
@@ -1657,8 +1688,13 @@ describe('deployment API (e2e)', () => {
   });
 
   it('leases one job, stores the contract result and accepts identical retransmissions', async () => {
-    const context = await createAgentContext('agent-mailbox');
-    const input = jobInput(context, 'candidate');
+    const context = await createAgentContext('agent-mailbox', {}, [
+      { name: 'DATABASE_URL', value: 'postgres://shared.example/app' },
+    ]);
+    const input = {
+      ...jobInput(context, 'candidate'),
+      environment: { DATABASE_URL: 'postgres://shared.example/app' },
+    };
     await api().post(`/agents/${context.agentId}/jobs`).send(input).expect(201);
     const duplicate = await api()
       .post(`/agents/${context.agentId}/jobs`)
@@ -1694,6 +1730,12 @@ describe('deployment API (e2e)', () => {
         method: 'GET',
       },
     });
+    expect(job.runtime.environment).toEqual({
+      DATABASE_URL: 'postgres://shared.example/app',
+    });
+    expect(JSON.stringify(duplicate.body)).not.toContain(
+      'postgres://shared.example/app',
+    );
     expect(Date.parse(job.lease_until)).toBeLessThanOrEqual(
       Date.parse(job.deadline),
     );
@@ -1994,8 +2036,15 @@ describe('deployment API (e2e)', () => {
   async function createAgentContext(
     name: string,
     healthCheck: Record<string, unknown> = {},
+    environment: Array<{ name: string; value: string }> = [],
   ) {
-    const application = await createApplication(name, false, healthCheck);
+    const application = await createApplication(
+      name,
+      false,
+      healthCheck,
+      'allow',
+      environment,
+    );
     const deployment = await createDeployment(
       application.application.id,
       'tester',
@@ -2063,6 +2112,7 @@ describe('deployment API (e2e)', () => {
     requiresApproval: boolean,
     healthCheck: Record<string, unknown> = {},
     testTemplate: 'allow' | 'block-test-failed' = 'allow',
+    environment: Array<{ name: string; value: string }> = [],
   ) {
     const response = await api()
       .post('/applications')
@@ -2074,6 +2124,7 @@ describe('deployment API (e2e)', () => {
         requires_approval: requiresApproval,
         test_template: testTemplate,
         health_check: healthCheck,
+        environment,
       })
       .expect(201);
     return response.body;
@@ -2121,6 +2172,8 @@ describe('deployment API (e2e)', () => {
         request(server)
           .patch(url)
           .set('Authorization', `Bearer ${defaultToken}`),
+      put: (url: string) =>
+        request(server).put(url).set('Authorization', `Bearer ${defaultToken}`),
     };
   }
 

@@ -1,7 +1,8 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Put } from '@nestjs/common';
 import {
   CreateApplicationDto,
   IdParamDto,
+  UpdateApplicationEnvironmentDto,
   UpdateHealthCheckDto,
 } from './dto/application.dto.js';
 import { ApplicationService } from './application.service.js';
@@ -31,5 +32,13 @@ export class ApplicationController {
     @Body() input: UpdateHealthCheckDto,
   ) {
     return this.service.updateHealthCheck(params.id, input);
+  }
+
+  @Put(':id/environment')
+  updateEnvironment(
+    @Param() params: IdParamDto,
+    @Body() input: UpdateApplicationEnvironmentDto,
+  ) {
+    return this.service.updateEnvironment(params.id, input);
   }
 }

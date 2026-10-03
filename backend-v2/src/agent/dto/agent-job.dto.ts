@@ -56,6 +56,9 @@ export class CreateAgentJobDto {
   @IsString()
   to_digest?: string;
   @IsOptional()
+  @Allow()
+  environment?: Record<string, string>;
+  @IsOptional()
   @IsISO8601()
   created_at?: string;
   @IsISO8601()

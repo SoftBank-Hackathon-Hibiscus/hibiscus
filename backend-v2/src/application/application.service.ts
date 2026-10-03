@@ -10,7 +10,9 @@ import type { BackendConfig } from '../config/configs/backend.config.js';
 import type { Application, HealthCheckConfig } from '../database/schema.js';
 import { ApplicationRepository } from './application.repository.js';
 import type {
+  ApplicationEnvironmentVariableDto,
   CreateApplicationDto,
+  UpdateApplicationEnvironmentDto,
   UpdateHealthCheckDto,
 } from './dto/application.dto.js';
 
@@ -22,6 +24,7 @@ export class ApplicationService {
   ) {}
 
   create(input: CreateApplicationDto) {
+    this.validateEnvironment(input.environment);
     const publicHost = `${input.slug}.${this.config.get('backend.gatewayBaseDomain', { infer: true })}`;
     if (this.repository.findByPublicHost(publicHost)) {
       throw new ConflictException('Application public host already exists');
@@ -57,7 +60,17 @@ export class ApplicationService {
       createdAt: timestamp,
       updatedAt: timestamp,
     };
-    return this.repository.create(application, healthCheck);
+    return this.repository.create(
+      application,
+      healthCheck,
+      input.environment.map(({ name, value }) => ({
+        applicationId: application.id,
+        name,
+        value,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      })),
+    );
   }
 
   list() {
@@ -98,5 +111,42 @@ export class ApplicationService {
       successThreshold: input.success_threshold,
       failureThreshold: input.failure_threshold,
     });
+  }
+
+  updateEnvironment(id: string, input: UpdateApplicationEnvironmentDto) {
+    if (!this.repository.find(id))
+      throw new NotFoundException('Application not found');
+    this.validateEnvironment(input.environment);
+    const timestamp = new Date().toISOString();
+    return {
+      environment: this.repository.replaceEnvironment(
+        id,
+        input.environment.map(({ name, value }) => ({
+          applicationId: id,
+          name,
+          value,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        })),
+      ),
+    };
+  }
+
+  private validateEnvironment(
+    environment: ApplicationEnvironmentVariableDto[],
+  ) {
+    const names = environment.map(({ name }) => name);
+    if (new Set(names).size !== names.length)
+      throw new BadRequestException(
+        'Environment variable names must be unique',
+      );
+    const reserved = names.find(
+      (name) =>
+        name === 'PORT' || name === 'HIB_RUN_ID' || name === 'HIB_DIGEST',
+    );
+    if (reserved)
+      throw new BadRequestException(
+        `Environment variable ${reserved} is managed by Hibiscus`,
+      );
   }
 }

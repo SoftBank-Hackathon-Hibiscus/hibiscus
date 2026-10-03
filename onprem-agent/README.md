@@ -21,6 +21,7 @@ Result + heartbeat 전송
 - 컨테이너 이름은 `hibiscus-<run_id>-<digest 12자리>` 형식입니다.
 - Docker host port는 자동 할당합니다. `127.0.0.1`에만 바인딩합니다.
 - Application의 `container_port`와 Health Check 설정은 Backend Job 응답에서 받습니다.
+- Application의 런타임 환경변수도 Backend Job 응답에서 받으며 `docker run --env`로 전달합니다.
 - `version_path`가 있으면 Health 성공 뒤 JSON `run_id`가 현재 Job과 같은지 확인합니다.
 - `activate`는 serving 상태를 확정합니다. 실제 외부 트래픽은 Backend Application Route가 전환합니다.
 - 이전 컨테이너는 즉시 삭제하지 않습니다. `rollback` 또는 `discard` Job으로 처리합니다.

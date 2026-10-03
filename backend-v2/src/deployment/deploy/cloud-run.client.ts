@@ -1,4 +1,6 @@
 import { join } from 'node:path';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import {
   CommandRunner,
   parseLastJsonLine,
@@ -28,11 +30,33 @@ export class CloudRunClient implements CloudRunPort {
     private readonly options: CloudRunOptions,
   ) {}
 
-  async candidate(imageRef: string, runId: string) {
-    const out = await this.script<{ revision: string; candidate_url: string }>(
-      'candidate.sh',
-      [imageRef, '', runId],
+  async candidate(
+    imageRef: string,
+    runId: string,
+    environment: Record<string, string>,
+  ) {
+    const directory = mkdtempSync(join(tmpdir(), 'hibiscus-cloudrun-env-'));
+    const environmentFile = join(directory, 'environment.json');
+    writeFileSync(
+      environmentFile,
+      JSON.stringify({
+        ...environment,
+        HIB_RUN_ID: runId,
+        HIB_DIGEST: imageRef.slice(imageRef.indexOf('@') + 1),
+      }),
+      { encoding: 'utf8', mode: 0o600 },
     );
+    let out: Partial<{ revision: string; candidate_url: string }>;
+    try {
+      out = await this.script('candidate.sh', [
+        imageRef,
+        '',
+        runId,
+        environmentFile,
+      ]);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
     if (!out.revision || !out.candidate_url)
       throw new Error('candidate.sh did not return revision and candidate_url');
     return { revision: out.revision, candidateUrl: out.candidate_url };

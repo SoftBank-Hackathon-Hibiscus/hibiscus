@@ -1,5 +1,7 @@
 import { Transform, Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsBoolean,
   IsIn,
   IsInt,
@@ -174,6 +176,15 @@ export class UpdateHealthCheckDto {
   failure_threshold?: number;
 }
 
+export class ApplicationEnvironmentVariableDto {
+  @Matches(/^[A-Z_][A-Z0-9_]{0,63}$/)
+  name: string;
+
+  @IsString()
+  @MaxLength(4096)
+  value: string;
+}
+
 export class CreateApplicationDto {
   @trim()
   @IsString()
@@ -222,4 +233,19 @@ export class CreateApplicationDto {
   @ValidateNested()
   @Type(() => HealthCheckDto)
   health_check: HealthCheckDto = new HealthCheckDto();
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @ValidateNested({ each: true })
+  @Type(() => ApplicationEnvironmentVariableDto)
+  environment: ApplicationEnvironmentVariableDto[] = [];
+}
+
+export class UpdateApplicationEnvironmentDto {
+  @IsArray()
+  @ArrayMaxSize(50)
+  @ValidateNested({ each: true })
+  @Type(() => ApplicationEnvironmentVariableDto)
+  environment: ApplicationEnvironmentVariableDto[];
 }

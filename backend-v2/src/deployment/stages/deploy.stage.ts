@@ -97,6 +97,7 @@ export class DeployStage implements StageRunner {
       sign,
       agentId: agent?.id ?? null,
       healthCheck: view.healthCheck,
+      environment: this.applications.runtimeEnvironment(application.id),
       changedBy: deployment.requester,
     });
 
