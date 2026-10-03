@@ -3,9 +3,10 @@
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { z } from "zod";
-import { checkAuditChain, GENESIS, type AuditCheck } from "./audit.js";
+import { GENESIS, readAuditState, type AuditCheck, type AuditOptions } from "./audit.js";
 import type { BlobSigner, BlobVerifier } from "./cosign.js";
 import { canonicalize, SignerError } from "./io.js";
+import type { AuditLine } from "./schema.js";
 
 const Hex64 = z.string().regex(/^[0-9a-f]{64}$/);
 
@@ -30,19 +31,23 @@ export interface AnchorOptions {
   anchorsPath: string;
   signer: BlobSigner;
   now?: () => Date;
+  audit?: AuditOptions;
 }
 
 /** 지금 체인 끝에 서명해서 anchors 파일에 한 줄 추가. 체인이 깨져 있으면 고정하지 않음 */
 export async function runAnchor(o: AnchorOptions): Promise<AuditAnchor> {
-  let text = "";
+  // 잠금 안에서 체인 전체를 확인한 한 시점의 로그 (쓰는 중인 줄을 반만 읽지 않게). 깨져 있으면 AUDIT_INVALID
+  let lines: AuditLine[];
   try {
-    text = readFileSync(o.auditPath, "utf8");
+    ({ lines } = await readAuditState(o.auditPath, o.audit));
   } catch (e) {
-    if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw new SignerError("AUDIT_INVALID", `감사 로그 파일을 읽지 못함: ${o.auditPath}`);
+    if (e instanceof SignerError && e.code === "AUDIT_INVALID") throw new SignerError("AUDIT_INVALID", `${e.message}. 고쳐진 기록은 고정하지 않음`);
+    throw e;
   }
-  const check = checkAuditChain(text);
-  if (!check.ok) throw new SignerError("AUDIT_INVALID", `감사 로그 ${check.line}번째 줄 (${check.reason}): ${check.detail}. 고쳐진 기록은 고정하지 않음`);
-  const last = check.lines.at(-1);
+  // 이미 있는 고정값과 지금 로그가 다르면 새로 고정하지 않음 (잘리거나 다시 쓴 로그를 정기 고정이 그대로 인정하지 않게)
+  const conflict = existingConflict(o.anchorsPath, lines);
+  if (conflict !== undefined) throw new SignerError("ANCHOR_CONFLICT", `${conflict}. 감사 로그를 먼저 확인할 것 (audit --anchors)`);
+  const last = lines.at(-1);
   const body = { seq: last?.seq ?? 0, head: last?.hash ?? GENESIS, time: (o.now ?? (() => new Date()))().toISOString() };
   const bundle = await o.signer.signBlob(anchorStatement(body));
   const parsed = AuditAnchorSchema.safeParse({ kind: "audit_anchor", ...body, bundle });
@@ -58,6 +63,29 @@ export async function runAnchor(o: AnchorOptions): Promise<AuditAnchor> {
   }
   appendFileSync(o.anchorsPath, (prev !== "" && !prev.endsWith("\n") ? "\n" : "") + JSON.stringify(anchor) + "\n", "utf8");
   return anchor;
+}
+
+/** 이미 있는 고정값 중 지금 로그와 안 맞는 첫 것 (서명 확인은 audit --anchors 에서. 여기서는 seq·head 만) */
+function existingConflict(anchorsPath: string, lines: readonly AuditLine[]): string | undefined {
+  let text: string;
+  try {
+    text = readFileSync(anchorsPath, "utf8");
+  } catch {
+    return undefined; // 처음 고정
+  }
+  for (const [i, raw] of text.split("\n").entries()) {
+    if (raw.trim() === "") continue;
+    let anchor: AuditAnchor;
+    try {
+      anchor = AuditAnchorSchema.parse(JSON.parse(raw));
+    } catch {
+      return `고정값 파일 ${i + 1}번째 줄 형식 오류`;
+    }
+    const head = anchor.seq === 0 ? GENESIS : lines[anchor.seq - 1]?.hash;
+    if (head === undefined) return `${anchor.time} 에 ${anchor.seq}줄까지 고정했는데 지금 로그는 ${lines.length}줄 (끝이 잘림)`;
+    if (head !== anchor.head) return `${anchor.time} 에 고정한 ${anchor.seq}번째 줄 hash 와 지금 hash 가 다름 (다시 씀)`;
+  }
+  return undefined;
 }
 
 export type AnchorBreak = "anchor_invalid" | "anchor_signature_invalid" | "anchor_truncated" | "anchor_mismatch";

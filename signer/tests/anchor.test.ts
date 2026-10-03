@@ -57,6 +57,22 @@ describe("감사 로그 끝 고정 (anchor)", () => {
     expect(await checkAnchors(anchors, chain(audit), signer)).toEqual({ ok: true, anchors: 2 });
   });
 
+  it.each([
+    ["끝을 잘라낸 로그", async (audit: string, _forged: string) => writeFileSync(audit, readFileSync(audit, "utf8").trim().split("\n").slice(0, 1).join("\n") + "\n"), /끝이 잘림/],
+    ["처음부터 다시 쓴 로그", async (audit: string, forged: string) => {
+      await auditLog(forged, 3, "approval_missing");
+      writeFileSync(audit, readFileSync(forged, "utf8"));
+    }, /다시 씀/],
+  ])("이미 있는 고정값과 다른 로그(%s)는 다시 고정하지 않음 (ANCHOR_CONFLICT, 고정값 파일 그대로)", async (_name, tamper, detail) => {
+    const { dir, audit, anchors, signer } = setup();
+    await auditLog(audit, 3);
+    await runAnchor({ auditPath: audit, anchorsPath: anchors, signer });
+    const before = readFileSync(anchors, "utf8");
+    await tamper(audit, join(dir, "forged.jsonl"));
+    await expect(runAnchor({ auditPath: audit, anchorsPath: anchors, signer })).rejects.toMatchObject({ code: "ANCHOR_CONFLICT", message: expect.stringMatching(detail) });
+    expect(readFileSync(anchors, "utf8")).toBe(before);
+  });
+
   it("고정한 뒤 로그가 늘어나는 건 정상", async () => {
     const { audit, anchors, signer } = setup();
     await auditLog(audit, 2);
