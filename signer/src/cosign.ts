@@ -91,8 +91,15 @@ export interface CosignOptions {
 const COSIGN_ENV_NAMES = new Set(["PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "TZ", "DOCKER_CONFIG", "REGISTRY_AUTH_FILE", "TUF_ROOT", "GOOGLE_APPLICATION_CREDENTIALS", "GCE_METADATA_HOST", "GCE_METADATA_IP", "SSL_CERT_FILE", "SSL_CERT_DIR", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy"]);
 const COSIGN_ENV_PREFIXES = ["COSIGN_", "SIGSTORE_", "REKOR_", "CLOUDSDK_", "GOOGLE_", "AWS_", "AZURE_", "VAULT_"];
 
-/** minimalEnv 면 cosign 에 필요한 것만 남긴 환경변수 */
+/**
+ * minimalEnv 면 cosign 에 필요한 것만 남긴 환경변수.
+ * COSIGN_REPOSITORY 가 있으면 멈춤: cosign 이 서명을 그 저장소에서 읽고 써서, 정상 서명만 복사해 둔 그림자 저장소를 가리키면
+ * 이미지 저장소에 붙은 몰래 한 서명이 감사(audit --images)에서 안 보임. signer 는 서명이 이미지 저장소에 붙는 것을 전제로 함
+ */
 export function cosignEnv(options: CosignOptions, env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  if (env.COSIGN_REPOSITORY) {
+    throw new SignerError("COSIGN_ENV_UNSAFE", `COSIGN_REPOSITORY(${env.COSIGN_REPOSITORY})가 설정돼 있어서 멈춤. 서명을 다른 저장소에서 읽고 쓰게 되어 감사 대조를 속일 수 있음`);
+  }
   if (!options.minimalEnv) return env;
   return Object.fromEntries(Object.entries(env).filter(([name]) => COSIGN_ENV_NAMES.has(name) || COSIGN_ENV_PREFIXES.some((p) => name.startsWith(p))));
 }

@@ -404,3 +404,21 @@ describe("CosignVerifier.verifyBlob", () => {
     await expect(new CosignVerifier(pub, bin).verifyBlob("x", {})).rejects.toMatchObject({ code: "KEY_UNAVAILABLE" });
   });
 });
+
+describe("COSIGN_REPOSITORY (서명 저장소 바꾸기)", () => {
+  it("설정돼 있으면 cosign 을 부르지 않고 COSIGN_ENV_UNSAFE (그림자 저장소로 감사 대조를 속이지 못하게)", async () => {
+    const dir = tmp();
+    const key = join(dir, "cosign.key");
+    writeFileSync(key, "dummy");
+    writeFileSync(join(dir, "cosign.pub"), "dummy");
+    const { bin, argsFile } = fakeCosign(dir, { stdout: "[]" });
+    process.env.COSIGN_REPOSITORY = "localhost:5001/shadow";
+    try {
+      await expect(new CosignSigner(key, bin).sign(`${REPO}@${DIGEST}`, {})).rejects.toMatchObject({ code: "COSIGN_ENV_UNSAFE" });
+      await expect(new CosignVerifier(join(dir, "cosign.pub"), bin, { minimalEnv: true }).signatures(`${REPO}@${DIGEST}`)).rejects.toMatchObject({ code: "COSIGN_ENV_UNSAFE" });
+    } finally {
+      delete process.env.COSIGN_REPOSITORY;
+    }
+    expect(existsSync(argsFile)).toBe(false);
+  });
+});
