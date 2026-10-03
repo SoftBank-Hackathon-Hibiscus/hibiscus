@@ -9,15 +9,16 @@ import { deploymentPath, navigate } from '../lib/router';
 
 /**
  * 새 배포 (POST /applications/:id/deployments, CreateDeploymentDto).
+ * GitHub 저장소 앱(requireFullSha)은 40자리 전체 SHA 만 받는다 (lib/forms FULL_SHA_RE 주석).
  * real 에서는 실제 파이프라인이 돌기 때문에 경고를 먼저 보여 준다. mock 은 대기 중(queued) 배포만 만들고 자동으로 진행하지 않는다.
  */
-export function NewDeploymentModal({ source, applicationId, onClose }: { source: DataSource; applicationId: string; onClose: () => void }) {
+export function NewDeploymentModal({ source, applicationId, requireFullSha, onClose }: { source: DataSource; applicationId: string; requireFullSha: boolean; onClose: () => void }) {
   const { t, lang } = useLang();
   const [draft, setDraft] = useState<DeploymentDraft>({ sourceRevision: '', imageDigest: '' });
   const [touched, setTouched] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
-  const errors = useMemo(() => validateDeployment(draft), [draft]);
+  const errors = useMemo(() => validateDeployment(draft, { requireFullSha }), [draft, requireFullSha]);
   const show = (field: keyof DeploymentDraft) => (touched && errors[field] ? t(errors[field]!) : null);
 
   const submit = async (event: React.FormEvent) => {
@@ -45,7 +46,7 @@ export function NewDeploymentModal({ source, applicationId, onClose }: { source:
       <form className="stack" onSubmit={submit} noValidate>
         <p className="small muted">{t('newDeploymentSub')}</p>
         <Notice tone={source.kind === 'real' ? 'warning' : 'muted'}>{source.kind === 'real' ? t('deployRealWarning') : t('deployMockNote')}</Notice>
-        <Field label={t('sourceRevisionLabel')} htmlFor="sourceRevision" hint={t('sourceRevisionHint')} error={show('sourceRevision')}>
+        <Field label={t('sourceRevisionLabel')} htmlFor="sourceRevision" hint={t(requireFullSha ? 'sourceRevisionHintFull' : 'sourceRevisionHint')} error={show('sourceRevision')}>
           <input id="sourceRevision" className="input mono" value={draft.sourceRevision} spellCheck={false} autoFocus placeholder="1f6947dce692de48ef4580b1a3f5366adf66f5ae" onChange={(e) => setDraft((d) => ({ ...d, sourceRevision: e.target.value }))} />
         </Field>
         <div className="fold-list">
