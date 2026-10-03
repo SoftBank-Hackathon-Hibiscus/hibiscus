@@ -37,7 +37,6 @@ export const applications = sqliteTable(
     containerPort: integer('container_port').notNull().default(8080),
     repo: text('repo'),
     defaultBranch: text('default_branch'),
-    policyPath: text('policy_path'),
     testTemplate: text('test_template', {
       enum: ['allow', 'block-test-failed'],
     }).notNull(),
@@ -432,6 +431,9 @@ export const policyResults = sqliteTable('policy_results', {
   targets: text('targets', { mode: 'json' }).$type<string[]>().notNull(),
   failoverAllowed: integer('failover_allowed', { mode: 'boolean' }).notNull(),
   requires: text('requires', { mode: 'json' }).$type<unknown[]>().notNull(),
+  policyPath: text('policy_path'),
+  policyHash: text('policy_hash'),
+  skipped: integer('skipped', { mode: 'boolean' }).notNull().default(false),
   planPath: text('plan_path'),
   piiPath: text('pii_path'),
   planArtifactId: text('plan_artifact_id').references(

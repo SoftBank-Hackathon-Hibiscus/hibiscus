@@ -233,9 +233,6 @@ export function RegisterApplication({ source }: { source: DataSource }) {
                     <option value="block-test-failed">{t('testTemplateBlock')}</option>
                   </select>
                 </Field>
-                <Field label={t('policyPathLabel')} htmlFor="policyPath">
-                  <input id="policyPath" className="input mono" value={draft.policyPath} spellCheck={false} placeholder="policy/policy.yaml" onChange={(e) => setDraft((d) => ({ ...d, policyPath: e.target.value }))} />
-                </Field>
               </div>
             </Collapsible>
           </div>

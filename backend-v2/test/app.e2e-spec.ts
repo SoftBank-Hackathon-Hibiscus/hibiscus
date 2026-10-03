@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   readdirSync,
   rmSync,
   writeFileSync,
@@ -822,7 +823,27 @@ describe('deployment API (e2e)', () => {
         stderr: '정책 실행 실패',
       });
     try {
-      const application = await createApplication('cli-error', false);
+      const source = join(testDirectory, 'cli-error-source');
+      mkdirSync(join(source, '.hibiscus'), { recursive: true });
+      writeFileSync(
+        join(source, '.hibiscus/policy.yaml'),
+        'version: 1\n',
+        'utf8',
+      );
+      const application = (
+        await api()
+          .post('/applications')
+          .send({
+            name: 'cli-error',
+            slug: 'cli-error',
+            source_path: source,
+            image_repo: 'registry.example/cli-error',
+            requires_approval: false,
+            test_template: 'allow',
+            health_check: {},
+          })
+          .expect(201)
+      ).body;
       const deployment = await createDeployment(
         application.application.id,
         'tester',
@@ -869,7 +890,11 @@ describe('deployment API (e2e)', () => {
       config.set('backend.stageMode', 'cli');
       try {
         const source = join(testDirectory, 'cli-source');
-        mkdirSync(source);
+        mkdirSync(join(source, '.hibiscus'), { recursive: true });
+        writeFileSync(
+          join(source, '.hibiscus/policy.yaml'),
+          readFileSync(join(process.cwd(), '../policy/policy.yaml'), 'utf8'),
+        );
         const response = await api()
           .post('/applications')
           .send({
@@ -909,6 +934,11 @@ describe('deployment API (e2e)', () => {
           ]),
         );
         expect(view.policyResult.piiArtifactId).toBeTruthy();
+        expect(view.policyResult).toMatchObject({
+          policyPath: '.hibiscus/policy.yaml',
+          policyHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+          skipped: false,
+        });
         const signed = JSON.parse(
           view.artifacts.find(
             (artifact: { name: string }) => artifact.name === 'sign_result',
@@ -919,20 +949,28 @@ describe('deployment API (e2e)', () => {
           ['deploy', 'sign'],
         );
         expect(readdirSync(join(testDirectory, 'cli'))).toEqual([]);
+        const protectedSource = join(testDirectory, 'cli-protected-source');
+        mkdirSync(join(protectedSource, '.hibiscus'), { recursive: true });
+        writeFileSync(
+          join(protectedSource, '.hibiscus/policy.yaml'),
+          readFileSync(
+            join(
+              process.cwd(),
+              'fixtures/policies/requires-approval.yaml',
+            ),
+            'utf8',
+          ),
+        );
         const protectedApp = await api()
           .post('/applications')
           .send({
             name: 'actual-cli-approval',
             slug: 'actual-cli-approval',
-            source_path: source,
+            source_path: protectedSource,
             image_repo: 'registry.example/actual-cli',
             test_template: 'allow',
             requires_approval: true,
             health_check: {},
-            policy_path: join(
-              process.cwd(),
-              'fixtures/policies/requires-approval.yaml',
-            ),
           })
           .expect(201);
         const protectedDeployment = await createDeployment(
@@ -980,6 +1018,63 @@ describe('deployment API (e2e)', () => {
           approved.auditLogs.map((log: { kind: string }) => log.kind),
         ).toEqual(['deploy', 'sign']);
         expect(readdirSync(join(testDirectory, 'cli'))).toEqual([]);
+
+        const sourceWithoutPolicy = join(
+          testDirectory,
+          'cli-source-without-policy',
+        );
+        mkdirSync(sourceWithoutPolicy);
+        const appWithoutPolicy = await api()
+          .post('/applications')
+          .send({
+            name: 'actual-cli-without-policy',
+            slug: 'actual-cli-without-policy',
+            source_path: sourceWithoutPolicy,
+            image_repo: 'registry.example/actual-cli-without-policy',
+            test_template: 'allow',
+            requires_approval: false,
+            health_check: {},
+          })
+          .expect(201);
+        const deploymentWithoutPolicy = await createDeployment(
+          appWithoutPolicy.body.application.id,
+          'tester',
+        );
+        const skipped = await waitForStatus(
+          deploymentWithoutPolicy.id,
+          'succeeded',
+          20_000,
+        );
+        expect(
+          skipped.stages.find(
+            (stage: { stage: string }) => stage.stage === 'policy',
+          ),
+        ).toMatchObject({
+          status: 'skipped',
+          summary: {
+            decision: 'allow',
+            mode: 'skipped',
+            reason: '.hibiscus/policy.yaml not found',
+          },
+        });
+        expect(skipped.policyResult).toMatchObject({
+          decision: 'allow',
+          targets: ['onprem', 'cloud_run'],
+          failoverAllowed: true,
+          policyPath: '.hibiscus/policy.yaml',
+          policyHash: null,
+          skipped: true,
+          piiArtifactId: null,
+        });
+        expect(
+          JSON.parse(
+            skipped.artifacts.find(
+              (artifact: { name: string }) => artifact.name === 'plan',
+            ).content,
+          ).rules,
+        ).toEqual([
+          expect.objectContaining({ id: 'policy_skipped' }),
+        ]);
       } finally {
         config.set('backend.stageMode', previousMode);
       }

@@ -37,7 +37,6 @@ export class ApplicationService {
       containerPort: input.container_port,
       repo: input.repo ?? null,
       defaultBranch: input.default_branch ?? null,
-      policyPath: input.policy_path ?? null,
       testTemplate: input.test_template,
       requiresApproval: input.requires_approval,
       createdAt: timestamp,

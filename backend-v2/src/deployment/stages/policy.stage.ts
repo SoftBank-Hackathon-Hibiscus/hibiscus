@@ -28,6 +28,7 @@ const exitDecisions: Record<number, Decision> = {
   2: 'needs_approval',
   3: 'block',
 };
+const APPLICATION_POLICY_PATH = '.hibiscus/policy.yaml';
 
 @Injectable()
 export class PolicyStage implements StageRunner {
@@ -103,6 +104,9 @@ export class PolicyStage implements StageRunner {
         targets: plan.targets,
         failoverAllowed: plan.failover_allowed,
         requires: plan.requires ?? [],
+        policyPath: null,
+        policyHash: null,
+        skipped: false,
         planPath: paths.relative(planPath),
         piiPath: null,
       },
@@ -134,6 +138,13 @@ export class PolicyStage implements StageRunner {
         error: 'Tested source snapshot not found',
       };
     }
+    const policyPath = join(sourcePath, APPLICATION_POLICY_PATH);
+    if (!existsSync(policyPath)) {
+      return this.skipMissingPolicy(context);
+    }
+    const policyHash = createHash('sha256')
+      .update(readFileSync(policyPath))
+      .digest('hex');
     const result = await this.runner.run({
       command: npmCommand(this.config),
       cwd: join(repoRoot, 'policy'),
@@ -147,7 +158,7 @@ export class PolicyStage implements StageRunner {
         '--test',
         testResult,
         '--policy',
-        application.policyPath ?? 'policy.yaml',
+        policyPath,
         '--out-dir',
         paths.policy,
         '--log',
@@ -225,6 +236,63 @@ export class PolicyStage implements StageRunner {
         targets: plan.targets,
         failoverAllowed: plan.failover_allowed,
         requires: plan.requires ?? [],
+        policyPath: APPLICATION_POLICY_PATH,
+        policyHash,
+        skipped: false,
+        planPath: paths.relative(planPath),
+        piiPath: null,
+      },
+    };
+  }
+
+  private skipMissingPolicy(context: StageContext): StageOutcome {
+    const { application, deployment, paths } = context;
+    const planWithoutHash = {
+      run_id: deployment.id,
+      app: application.name,
+      digest: deployment.imageDigest,
+      source_revision: deployment.sourceRevision,
+      decision: 'allow' as const,
+      targets: ['onprem', 'cloud_run'],
+      failover_allowed: true,
+      rules: [
+        {
+          id: 'policy_skipped',
+          result: 'matched' as const,
+          reason: `${APPLICATION_POLICY_PATH} not found; policy evaluation skipped`,
+        },
+      ],
+    };
+    const planHash = createHash('sha256')
+      .update(canonicalJson(planWithoutHash))
+      .digest('hex');
+    const plan: Plan = { ...planWithoutHash, plan_hash: planHash };
+    const planPath = join(paths.policy, 'plan.json');
+    writeFileSync(planPath, `${JSON.stringify(plan, null, 2)}\n`, 'utf8');
+    appendFileSync(
+      paths.decisionsLog,
+      `${JSON.stringify({ kind: 'deploy', time: new Date().toISOString(), run_id: plan.run_id, digest: plan.digest, source_revision: plan.source_revision, decision: plan.decision, targets: plan.targets, rule_ids: ['policy_skipped'], plan_hash: planHash })}\n`,
+      'utf8',
+    );
+    return {
+      status: 'skipped',
+      exitCode: 0,
+      artifacts: { plan: paths.relative(planPath) },
+      summary: {
+        decision: plan.decision,
+        mode: 'skipped',
+        reason: `${APPLICATION_POLICY_PATH} not found`,
+      },
+      deploymentPatch: { decision: plan.decision },
+      policyResult: {
+        decision: plan.decision,
+        planHash,
+        targets: plan.targets,
+        failoverAllowed: plan.failover_allowed,
+        requires: [],
+        policyPath: APPLICATION_POLICY_PATH,
+        policyHash: null,
+        skipped: true,
         planPath: paths.relative(planPath),
         piiPath: null,
       },

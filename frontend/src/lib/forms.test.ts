@@ -75,10 +75,6 @@ describe('toGithubApplicationInput', () => {
     expect(Object.keys(input)).not.toContain('source_path');
     expect(Object.keys(input)).not.toContain('policy_path');
   });
-  it('policy_path 는 값이 있을 때만 포함한다', () => {
-    expect(toGithubApplicationInput({ ...valid, policyPath: ' policy/policy.yaml ' }).policy_path).toBe('policy/policy.yaml');
-    expect(toGithubApplicationInput({ ...valid, policyPath: '   ' }).policy_path).toBeUndefined();
-  });
 });
 
 describe('validateDeployment (CreateDeploymentDto 규칙)', () => {

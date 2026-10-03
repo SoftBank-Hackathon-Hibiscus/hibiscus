@@ -211,11 +211,6 @@ export class CreateApplicationDto {
   default_branch?: string;
 
   @IsOptional()
-  @IsString()
-  @IsNotEmpty()
-  policy_path?: string;
-
-  @IsOptional()
   @IsIn(['allow', 'block-test-failed'])
   test_template: 'allow' | 'block-test-failed' = 'allow';
 

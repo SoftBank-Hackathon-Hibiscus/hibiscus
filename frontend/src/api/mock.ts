@@ -245,7 +245,6 @@ export class MockDataSource implements DataSource {
         containerPort: input.container_port ?? 8080,
         repo: repo.full_name,
         defaultBranch: input.branch,
-        policyPath: input.policy_path ?? null,
         testTemplate: input.test_template ?? 'allow',
         requiresApproval: input.requires_approval ?? false,
         createdAt: timestamp,

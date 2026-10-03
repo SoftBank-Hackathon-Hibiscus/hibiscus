@@ -47,7 +47,6 @@ export interface Application {
   containerPort: number;
   repo: string | null;
   defaultBranch: string | null;
-  policyPath: string | null;
   testTemplate: 'allow' | 'block-test-failed';
   requiresApproval: boolean;
   createdAt: string;
@@ -160,6 +159,9 @@ export interface PolicyResult {
   targets: string[];
   failoverAllowed: boolean;
   requires: unknown[];
+  policyPath: string | null;
+  policyHash: string | null;
+  skipped: boolean;
   planPath: string | null;
   piiPath: string | null;
   planArtifactId: string | null;
@@ -290,7 +292,6 @@ export interface GithubApplicationInput {
   slug: string;
   image_repo: string;
   container_port?: number;
-  policy_path?: string;
   test_template?: 'allow' | 'block-test-failed';
   requires_approval?: boolean;
   installation_id: number;
