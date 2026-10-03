@@ -132,7 +132,15 @@ export async function runAuditVerify(o: AuditVerifyOptions): Promise<AuditVerify
 
   let images = 0;
   for (const imageRef of [...refs].sort()) {
-    const sigs = await o.verifier.signatures(imageRef);
+    let sigs: Array<Record<string, string>>;
+    try {
+      sigs = await o.verifier.signatures(imageRef);
+    } catch (e) {
+      if (e instanceof SignerError && e.code === "SIGNATURE_INVALID") {
+        return { code: 1, line: signedAt.get(imageRef)?.[0]?.seq ?? 0, reason: "signature_invalid", detail: e.message };
+      }
+      throw e;
+    }
     const logged = signedAt.get(imageRef) ?? [];
     for (const line of logged) {
       if (!sigs.some((sig) => matches(sig, line))) {

@@ -105,6 +105,7 @@ npm run audit:verify -- --audit sign_audit.jsonl [--images [--image-repo <저장
 | 7 | 위 주석 전부로 `cosign verify` | `signature_invalid` |
 
 - 공개키를 못 읽거나(`KEY_UNAVAILABLE`) 레지스트리에 못 가면(`REGISTRY_UNAVAILABLE`) 검증 실패가 아니라 실행 오류(2)
+- 알 수 없는 실행 실패(`VERIFY_FAILED`)나 잘못된 성공 출력(`VERIFY_OUTPUT_INVALID`)도 실행 오류(2)로 중단한다. 감사 검사에서 이를 빈 서명 목록으로 처리하지 않는다.
 - 한 이미지에 서명이 여러 개면 "주석이 전부 맞는 서명이 하나라도 있으면" 통과 (cosign 규칙). 같은 이미지의 예전 정상 결과도 통과할 수 있어서, 최신인지는 run_id 확인이나 `--plan`으로
 
 ## 감사 로그 (해시 체인)
@@ -131,7 +132,7 @@ npm run audit:verify -- --audit sign_audit.jsonl [--images [--image-repo <저장
 
 ### 감사 로그가 못 잡는 것
 
-- 파일 끝의 거절 줄 자르기·파일 통째 삭제 (signed 줄이 사라진 건 `--images`나 `verify --audit`으로 잡음)
+- 파일 끝의 거절 줄 자르기·파일 통째 삭제. `--images`는 남은 로그에 있는 digest만 조회하므로, 삭제한 signed 줄의 digest가 다른 줄에도 없으면 찾지 못한다. 별도로 보관한 sign_result가 있으면 `verify --audit`으로 해당 서명 줄의 누락을 확인할 수 있다.
 - 마지막 서명 뒤에 붙은 거절 줄은 체인으로만 보호 (anchor 범위 밖)
 - 서명하는 동안 다른 실행이 붙인 줄은 그 서명의 anchor 범위 밖
 - 이미지를 레지스트리에서 지우면 그 signed 줄은 `signature_invalid`로 나옴 (변조와 구분 안 됨)

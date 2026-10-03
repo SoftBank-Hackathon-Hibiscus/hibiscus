@@ -75,7 +75,13 @@ export class CosignVerifier implements ImageVerifier {
   ) {}
 
   async verify(imageRef: string, annotations: Record<string, string>): Promise<void> {
-    await this.run(imageRef, annotations);
+    try {
+      await this.run(imageRef, annotations);
+    } catch (e) {
+      // 단일 결과 검증에서는 서명이 없는 것도 검증 실패다.
+      if (e instanceof SignerError && e.code === "SIGNATURE_NOT_FOUND") throw new SignerError("SIGNATURE_INVALID", e.message);
+      throw e;
+    }
   }
 
   async signatures(imageRef: string): Promise<Array<Record<string, string>>> {
@@ -83,20 +89,23 @@ export class CosignVerifier implements ImageVerifier {
     try {
       stdout = await this.run(imageRef, {});
     } catch (e) {
-      // 서명이 없거나 이 키로 확인되는 게 없음
-      if (e instanceof SignerError && e.code === "SIGNATURE_INVALID") return [];
+      // 서명 부재가 명시된 경우만 빈 목록이다. 검증·실행 오류로 감사 검사를 통과시키지 않는다.
+      if (e instanceof SignerError && e.code === "SIGNATURE_NOT_FOUND") return [];
       throw e;
     }
     // stdout 은 서명 payload 의 JSON 배열. optional 에 -a 주석이 들어 있음
-    const out: Array<Record<string, string>> = [];
-    for (const line of stdout.split("\n")) {
-      if (!line.startsWith("[")) continue;
-      for (const payload of JSON.parse(line) as Array<{ optional?: Record<string, unknown> }>) {
-        const optional = payload.optional ?? {};
-        out.push(Object.fromEntries(Object.entries(optional).filter((kv): kv is [string, string] => typeof kv[1] === "string")));
-      }
+    try {
+      const payloads: unknown = JSON.parse(stdout);
+      if (!Array.isArray(payloads)) throw new Error("JSON 배열이 아님");
+      return payloads.map((payload: unknown) => {
+        if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("서명 payload 형식 오류");
+        const optional: unknown = (payload as { optional?: unknown }).optional ?? {};
+        if (optional === null || typeof optional !== "object" || Array.isArray(optional)) throw new Error("서명 주석 형식 오류");
+        return Object.fromEntries(Object.entries(optional).filter((kv): kv is [string, string] => typeof kv[1] === "string"));
+      });
+    } catch {
+      throw new SignerError("VERIFY_OUTPUT_INVALID", "cosign verify 성공 출력이 서명 payload JSON 배열이 아님");
     }
-    return out;
   }
 
   private async run(imageRef: string, annotations: Record<string, string>): Promise<string> {
@@ -116,7 +125,9 @@ export class CosignVerifier implements ImageVerifier {
       // 키·레지스트리를 못 쓴 건 설정 문제라 실행 오류(2). 나머지(서명 없음, 주석 불일치 등)만 검증 실패(1)
       if (KEY_ERROR_RE.test(stderr)) throw new SignerError("KEY_UNAVAILABLE", `cosign 공개키를 못 읽음: ${stderr}`);
       if (REGISTRY_ERROR_RE.test(stderr)) throw new SignerError("REGISTRY_UNAVAILABLE", `레지스트리에 접근하지 못함: ${stderr}`);
-      throw new SignerError("SIGNATURE_INVALID", `cosign verify 실패${stderr ? `: ${stderr}` : ""}`);
+      if (typeof err.code === "number" && NO_SIGNATURE_RE.test(stderr)) throw new SignerError("SIGNATURE_NOT_FOUND", `cosign verify 실패: ${stderr}`);
+      if (typeof err.code === "number" && SIGNATURE_ERROR_RE.test(stderr)) throw new SignerError("SIGNATURE_INVALID", `cosign verify 실패: ${stderr}`);
+      throw new SignerError("VERIFY_FAILED", `cosign verify 실행 실패${stderr ? `: ${stderr}` : ""}`);
     }
   }
 }
@@ -124,6 +135,8 @@ export class CosignVerifier implements ImageVerifier {
 // cosign v3.1.3 오류 문구 기준
 const KEY_ERROR_RE = /loading verifier from key opts|loading public key/;
 const REGISTRY_ERROR_RE = /dial tcp|connection refused|no such host|i\/o timeout|TLS handshake|UNAUTHORIZED|DENIED/;
+const NO_SIGNATURE_RE = /^(?:Error:\s*)?no signatures found(?:\s|$)/i;
+const SIGNATURE_ERROR_RE = /no matching (?:signatures|attestations)|missing or incorrect annotation|not enough verified log entries|signature verification failed/i;
 
 function lastStderrLine(e: unknown): string {
   return String((e as { stderr?: unknown }).stderr ?? "").trim().split("\n").pop() ?? "";
