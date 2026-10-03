@@ -156,9 +156,9 @@ export function revocationOf(lines: readonly AuditLine[], signed: AuditLine): Au
   return lines.find((l) => l.entry.kind === "revoke" && l.entry.digest === digest && (l.entry.run_id === undefined || l.entry.run_id === run_id));
 }
 
-/** 이 digest 의 서명 전부를 철회한 줄 (새로 서명하지 않음) */
-export function digestRevocation(lines: readonly AuditLine[], digest: string): AuditLine | undefined {
-  return lines.find((l) => l.entry.kind === "revoke" && l.entry.digest === digest && l.entry.run_id === undefined);
+/** 이 실행(digest·run_id)을 서명하면 안 되는 철회 줄. 이미지 전체 철회, 그 실행만 철회(미리 철회 포함) 둘 다 (verify 의 revocationOf 와 같은 기준) */
+export function signRevocation(lines: readonly AuditLine[], digest: string, runId: string): AuditLine | undefined {
+  return lines.find((l) => l.entry.kind === "revoke" && l.entry.digest === digest && (l.entry.run_id === undefined || l.entry.run_id === runId));
 }
 
 /** sign_result 에 해당하는 signed 줄. 같은 게 여러 개면 가장 뒤 */

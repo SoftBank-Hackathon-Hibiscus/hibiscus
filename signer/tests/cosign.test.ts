@@ -322,6 +322,14 @@ describe("CosignVerifier", () => {
     if (code === "POLICY_DENIED") expect((err as Error).message).toContain("expression value, false, is not true");
   });
 
+  it("signatures legacy: --new-bundle-format=false 로 예전 형식(.sig) 서명만 물어봄", async () => {
+    const dir = tmp();
+    const { bin, argsFile } = fakeCosign(dir, { stdout: "[]" });
+    const pub = pubKey(dir);
+    await new CosignVerifier(pub, bin).signatures(`${REPO}@${DIGEST}`, { legacy: true });
+    expect(readFileSync(argsFile, "utf8").trim().split("\n")).toEqual(["verify", "--new-bundle-format=false", "--key", pub, "--", `${REPO}@${DIGEST}`]);
+  });
+
   it("signatures: 증명서처럼 type 을 바꿔도 주석이 있으면 서명으로 셈 (훔친 키로 감사 대조에서 숨기기)", async () => {
     const dir = tmp();
     const stdout = JSON.stringify([{ critical: { type: "x-not-a-signature" }, optional: { run_id: "r-999", audit_head: "0".repeat(64) } }]);

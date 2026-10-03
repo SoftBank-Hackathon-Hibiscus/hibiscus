@@ -166,7 +166,18 @@ describe("audit --images --sweep", () => {
     const { signer, auditPath } = await forked();
     const list = join(tmp(), "digests.txt");
     writeFileSync(list, `sha256:${hex("2")}\n`);
-    const noTags: RegistryLister = { tags: async () => [], digest: async () => "" };
-    expect(await runAuditVerify({ auditPath, verifier: signer, sweep: { lister: noTags, digestsFile: list } })).toMatchObject({ code: 1, reason: "unlogged_signature", swept: { file: 1, added: 1 } });
+    // 목록 파일만이면 태그는 안 훑음 (lister 없음)
+    expect(await runAuditVerify({ auditPath, verifier: signer, sweep: { digestsFile: list } })).toMatchObject({ code: 1, reason: "unlogged_signature", swept: { tags: 0, file: 1, added: 1 } });
+  });
+
+  it("빈 감사 로그를 훑을 땐 저장소를 모르면 ARG_MISSING (로그를 통째로 비워도 조용히 통과하지 않게)", async () => {
+    const signer = new RecordingSigner();
+    const auditPath = join(tmp(), "empty.jsonl");
+    writeFileSync(auditPath, "");
+    await expect(runAuditVerify({ auditPath, verifier: signer, sweep: { lister: new FakeLister(signer) } })).rejects.toMatchObject({ code: "ARG_MISSING" });
+    // 목록 파일 줄에 저장소가 있으면 그 저장소를 앎
+    const list = join(tmp(), "digests.txt");
+    writeFileSync(list, `${REPO}@sha256:${hex("4")}\n`);
+    expect(await runAuditVerify({ auditPath, verifier: signer, sweep: { digestsFile: list } })).toMatchObject({ code: 0, swept: { file: 1 } });
   });
 });

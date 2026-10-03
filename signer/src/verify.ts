@@ -37,6 +37,11 @@ export interface VerifyOptions {
   planSchemaPath?: string;
   /** 있으면 감사 로그 체인과 이 실행의 signed 줄(anchor)까지 확인 */
   auditPath?: string;
+  /**
+   * 있으면 감사 로그를 끝 고정값과도 맞춰 봄. 없으면 로그 끝의 철회·취소·block 줄을 잘라낸 로그로
+   * revoked·취소·--latest 검사를 피할 수 있음 (auditPath 와 같이)
+   */
+  anchors?: { path: string; verifier: BlobVerifier };
   /** 있으면 이 승인 기록으로 서명했는지까지 확인 (사람 승인일 때) */
   approvalPath?: string;
   /** 있으면 배포 증명서(in-toto)도 확인. policyPath 를 주면 Rego 정책까지, testResultPath 를 주면 그 시험 결과로 서명했는지까지 */
@@ -61,6 +66,7 @@ const PLAN_FIELDS = ["run_id", "digest", "plan_hash", "source_revision", "target
 const fail = (reason: VerifyReason, detail: string): VerifyOutcome => ({ code: 1, reason, detail });
 
 export async function runVerify(o: VerifyOptions): Promise<VerifyOutcome> {
+  if (o.anchors !== undefined && o.auditPath === undefined) throw new SignerError("ARG_INVALID", "--anchors 는 감사 로그(--audit)와 같이 써야 함");
   if (o.latest === true && o.auditPath === undefined) throw new SignerError("ARG_MISSING", "--latest 는 감사 로그(--audit)가 있어야 함 (더 새 서명을 감사 로그에서 찾음)");
   const result = parseWith(SignResultSchema, readJson(o.resultPath, "sign_result"), "sign_result");
 
@@ -108,6 +114,10 @@ export async function runVerify(o: VerifyOptions): Promise<VerifyOutcome> {
   if (o.auditPath !== undefined) {
     const check = checkAuditChain(readAuditFile(o.auditPath));
     if (!check.ok) return fail("audit_mismatch", `감사 로그 ${check.line}번째 줄 (${check.reason}): ${check.detail}`);
+    if (o.anchors !== undefined) {
+      const anchored = await checkAnchors(o.anchors.path, check, o.anchors.verifier);
+      if (!anchored.ok) return fail("audit_mismatch", `감사 로그 끝 고정값과 다름 (${anchored.reason}): ${anchored.detail}`);
+    }
     const line = findSignedLine(check.lines, result);
     if (!line) return fail("audit_mismatch", "감사 로그에 이 서명 결과(signed 줄)가 없음");
     if (cancelledHashes(check.lines).has(line.hash)) return fail("audit_mismatch", `서명 뒤 단계(자기 확인·증명서)가 실패해서 취소된 서명 (${line.seq}번째 줄)`);
@@ -215,10 +225,10 @@ export interface AuditVerifyOptions {
   /** 있으면 감사 로그 끝 고정값(anchors 파일)과도 맞춰 봄. 끝을 잘라냈거나 다시 쓴 것을 잡음 */
   anchors?: { path: string; verifier: BlobVerifier };
   /**
-   * 있으면 저장소의 태그를 전부 훑어 로그에 한 번도 안 나온 이미지의 서명도 봄 (훔친 키, 복사한 로그로 한 서명).
-   * digestsFile 은 태그 없는 이미지용 목록, max 는 저장소당 태그 한도
+   * 있으면 로그에 한 번도 안 나온 이미지의 서명도 봄 (훔친 키, 복사한 로그로 한 서명).
+   * lister 가 있으면 저장소 태그를 전부 훑고(max 는 저장소당 태그 한도), digestsFile 은 태그 없는 이미지용 목록
    */
-  sweep?: { lister: RegistryLister; digestsFile?: string; max?: number };
+  sweep?: { lister?: RegistryLister; digestsFile?: string; max?: number };
 }
 
 export type AuditImageReason = "ref_invalid" | "signature_invalid" | "unlogged_signature" | "twin_signature" | "foreign_signature";
@@ -302,7 +312,11 @@ export async function runAuditVerify(o: AuditVerifyOptions): Promise<AuditVerify
     repos.add(repo);
     signedAt.set(imageRef, [...(signedAt.get(imageRef) ?? []), line]);
   }
-  if (repos.size === 0 && lines.length > 0) {
+  // digest 목록 파일에 저장소가 붙은 줄은 그 저장소도 앎
+  const listed = o.sweep?.digestsFile !== undefined ? readDigestsFile(o.sweep.digestsFile) : [];
+  for (const { repo } of listed) if (repo !== undefined) repos.add(repo);
+  // 빈 로그도 훑을 땐 저장소가 있어야 함 (로그를 통째로 비우면 아무것도 안 보고 통과하지 않게)
+  if (repos.size === 0 && (lines.length > 0 || o.sweep !== undefined)) {
     throw new SignerError("ARG_MISSING", "감사 로그에 서명 줄이 없어서 이미지 저장소를 모름. --image-repo 를 주세요");
   }
 
@@ -313,20 +327,37 @@ export async function runAuditVerify(o: AuditVerifyOptions): Promise<AuditVerify
   let swept: SweepCount | undefined;
   if (o.sweep !== undefined) {
     swept = { tags: 0, signature_tags: 0, file: 0, added: 0 };
-    for (const repo of [...repos].sort()) {
-      const found = await sweepDigests(o.sweep.lister, repo, o.sweep.max);
-      swept.tags += found.tags;
-      swept.signature_tags += found.signatureTags;
-      for (const d of found.digests) refs.add(imageRefOf(repo, d));
-    }
-    if (o.sweep.digestsFile !== undefined) {
-      for (const { repo, digest } of readDigestsFile(o.sweep.digestsFile)) {
-        swept.file++;
-        for (const r of repo !== undefined ? [repo] : repos) refs.add(imageRefOf(r, digest));
+    if (o.sweep.lister !== undefined) {
+      for (const repo of [...repos].sort()) {
+        const found = await sweepDigests(o.sweep.lister, repo, o.sweep.max);
+        swept.tags += found.tags;
+        swept.signature_tags += found.signatureTags;
+        for (const d of found.digests) refs.add(imageRefOf(repo, d));
       }
+    }
+    for (const { repo, digest } of listed) {
+      swept.file++;
+      for (const r of repo !== undefined ? [repo] : repos) refs.add(imageRefOf(r, digest));
     }
     swept.added = refs.size - fromLog.size;
   }
+  const cancelled = cancelledHashes(lines);
+  // 엄격 모드·훑기면 예전 형식(.sig) 서명도 따로 물어봄 (새 형식이 있으면 cosign 이 예전 형식을 안 돌려줌)
+  const withLegacy = o.strictImages === true || o.sweep !== undefined;
+  const listSignatures = async (verifier: ImageVerifier, imageRef: string): Promise<Array<Record<string, string>>> => {
+    const current = await verifier.signatures(imageRef);
+    if (!withLegacy) return current;
+    let legacy: Array<Record<string, string>>;
+    try {
+      legacy = await verifier.signatures(imageRef, { legacy: true });
+    } catch (e) {
+      if (e instanceof SignerError && e.code === "SIGNATURE_INVALID") return current; // 믿는 키로 한 예전 형식 서명이 없음
+      throw e;
+    }
+    // 예전 형식만 있는 이미지는 두 결과가 같음 (cosign 이 예전 형식으로 넘어감)
+    const key = (sigs: Array<Record<string, string>>) => sigs.map((s) => canonicalize(s)).sort().join("\n");
+    return key(current) === key(legacy) ? current : [...current, ...legacy];
+  };
   const lineOfHash = new Map<string, number>([[GENESIS, 0], ...lines.map((l) => [l.hash, l.seq] as const)]);
   const matches = sigMatchesLine;
 
@@ -335,20 +366,22 @@ export async function runAuditVerify(o: AuditVerifyOptions): Promise<AuditVerify
   const found = (f: AuditFinding) => findings.push(f);
   let images = 0;
   for (const imageRef of [...refs].sort()) {
+    const logged = signedAt.get(imageRef) ?? [];
+    // 서명 뒤 단계가 실패해서 취소된 줄은 맞는 서명이 없어도 됨 (믿는 키로 안 보이는 서명이라 취소된 경우)
+    const live = logged.filter((line) => !cancelled.has(line.hash));
     let sigs: Array<Record<string, string>>;
     try {
-      sigs = await o.verifier.signatures(imageRef);
+      sigs = await listSignatures(o.verifier, imageRef);
     } catch (e) {
       if (e instanceof SignerError && e.code === "SIGNATURE_INVALID") {
-        // 훑어서 더한 이미지에 믿지 않는 키로만 한 서명은 배포에 못 써서 넘김
-        if (fromLog.has(imageRef)) found({ line: signedAt.get(imageRef)?.[0]?.seq ?? 0, reason: "signature_invalid", image: imageRef, detail: e.message });
+        // 훑어서 더한 이미지, 취소된 서명만 있는 이미지에 믿지 않는 키로만 한 서명은 배포에 못 써서 넘김
+        if (fromLog.has(imageRef) && (live.length > 0 || logged.length === 0)) found({ line: live[0]?.seq ?? 0, reason: "signature_invalid", image: imageRef, detail: e.message });
         images++;
         continue;
       }
       throw e;
     }
-    const logged = signedAt.get(imageRef) ?? [];
-    for (const line of logged) {
+    for (const line of live) {
       if (!sigs.some((sig) => matches(sig, line))) found({ line: line.seq, reason: "signature_invalid", image: imageRef, detail: `이 줄 내용·anchor 와 맞는 이미지 서명이 없음: ${imageRef}` });
     }
     const queriedRepo = encodeImageRepo(imageRef.slice(0, imageRef.lastIndexOf("@")));

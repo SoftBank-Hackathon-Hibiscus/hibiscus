@@ -15,8 +15,11 @@ export interface RevokeOptions {
   audit?: AuditOptions;
 }
 
-/** 철회 줄 한 줄 추가. 그 digest(실행)의 signed 줄이 아직 없어도 미리 철회할 수 있음 (signed 는 그 수) */
-export async function runRevoke(o: RevokeOptions): Promise<{ line: AuditLine; signed: number }> {
+/**
+ * 철회 줄 한 줄 추가. 그 digest(실행)의 signed 줄이 아직 없어도 미리 철회할 수 있음 (signed 는 그 수).
+ * 같은 digest·run_id 철회가 이미 있으면 새로 안 쓰고 그 줄을 돌려줌 (재시도해도 줄이 쌓이지 않게)
+ */
+export async function runRevoke(o: RevokeOptions): Promise<{ line: AuditLine; signed: number; existing: boolean }> {
   const parsed = RevokeSchema.safeParse({
     kind: "revoke",
     time: (o.now ?? (() => new Date()))().toISOString(),
@@ -34,6 +37,8 @@ export async function runRevoke(o: RevokeOptions): Promise<{ line: AuditLine; si
   const signed = lines.filter(
     (l) => l.entry.kind === "sign" && l.entry.result === "signed" && l.entry.digest === o.digest && (o.runId === undefined || l.entry.run_id === o.runId),
   ).length;
+  const already = lines.find((l) => l.entry.kind === "revoke" && l.entry.digest === o.digest && l.entry.run_id === o.runId);
+  if (already !== undefined) return { line: already, signed, existing: true };
   const line = await appendAudit(o.auditPath, parsed.data, undefined, o.audit);
-  return { line, signed };
+  return { line, signed, existing: false };
 }

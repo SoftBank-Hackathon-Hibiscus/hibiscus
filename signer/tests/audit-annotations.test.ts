@@ -84,6 +84,16 @@ describe("쌍둥이 서명 (정상 서명 주석을 복사해서 일부만 바�
     expect(await runAuditVerify({ auditPath, verifier: signer })).toMatchObject({ code: 1, line: 1, reason: "twin_signature", detail: expect.stringMatching(detail) });
   });
 
+  it("audit_head 까지 뺀 쌍둥이는 signer 밖 서명과 같아서 --strict-images 일 때만 unlogged_signature, verify --audit 는 그래도 audit_mismatch", async () => {
+    const { signer, auditPath, outPath } = await signed();
+    const { audit_head: _h, ...copy } = signer.calls[0]!.annotations;
+    await signer.sign(signer.calls[0]!.imageRef, { ...copy, targets: "onprem+cloud_run", failover_allowed: "true" });
+    expect(await runAuditVerify({ auditPath, verifier: signer })).toMatchObject({ code: 0 });
+    expect(await runAuditVerify({ auditPath, verifier: signer, strictImages: true })).toMatchObject({ code: 1, reason: "unlogged_signature" });
+    writeJson(outPath, { ...readJsonFile(outPath), targets: ["onprem", "cloud_run"], failover_allowed: true });
+    expect(await runVerify({ resultPath: outPath, verifier: signer, auditPath })).toMatchObject({ code: 1, reason: "audit_mismatch" });
+  });
+
   it("쌍둥이에 맞춰 targets 를 고친 sign_result 는 verify --audit 에서 audit_mismatch", async () => {
     const { signer, auditPath, outPath } = await twin({ targets: "onprem+cloud_run", failover_allowed: "true" });
     writeJson(outPath, { ...readJsonFile(outPath), targets: ["onprem", "cloud_run"], failover_allowed: true });
@@ -132,6 +142,20 @@ describe("서명 뒤 단계가 실패하면 signed 줄을 취소 줄로 닫음",
     expect(await runAuditVerify({ auditPath, verifier: signer, imageRepo: REPO })).toMatchObject({ code: 0 });
   });
 
+  it("믿는 키로 안 보이는 서명이라 취소된 줄은 맞는 서명이 없어도 됨 (다시 서명하면 audit --images 통과)", async () => {
+    const dir = tmp();
+    const auditPath = join(dir, "sign_audit.jsonl");
+    // 잘못된 키로 서명: 레지스트리에 올라가지만 믿는 키로는 안 보임
+    const wrongKey = new RecordingSigner();
+    const trusted = new RecordingSigner();
+    const run = (signer: RecordingSigner, opts: object) =>
+      runSign({ planPath: plan("allow-onprem"), requester: "alice", imageRepo: REPO, signer, outPath: join(dir, "r.json"), logPath: join(dir, "d.jsonl"), auditPath, now: () => NOW, ...opts });
+    expect((await run(wrongKey, { selfVerifier: trusted })).code).toBe(2);
+    expect(await runAuditVerify({ auditPath, verifier: trusted })).toMatchObject({ code: 0 });
+    expect((await run(trusted, {})).code).toBe(0);
+    expect(await runAuditVerify({ auditPath, verifier: trusted })).toMatchObject({ code: 0, signed: 2 });
+  });
+
   it("취소된 서명의 주석으로 sign_result 를 다시 만들어도 verify --audit 에서 audit_mismatch", async () => {
     const dir = tmp();
     const signer = new RecordingSigner();
@@ -159,5 +183,34 @@ describe("서명 뒤 단계가 실패하면 signed 줄을 취소 줄로 닫음",
     await runSign({ planPath: plan("allow-onprem"), requester: "alice", imageRepo: REPO, signer: new RecordingSigner(), outPath: join(dir, "r.json"), logPath: join(dir, "d.jsonl"), auditPath, selfVerifier: flaky, now: () => NOW });
     write(auditPath, rewrite(tamper(lines(auditPath)) as AuditLine[]));
     expect(checkAuditChain(readFileSync(auditPath, "utf8"))).toMatchObject({ ok: false, reason: "cancel_invalid" });
+  });
+});
+
+describe("예전 형식(.sig) 서명", () => {
+  /** cosign v3 처럼 새 형식이 있으면 기본 목록에 예전 형식을 안 넣는 가짜 레지스트리 */
+  class TwoFormats extends RecordingSigner {
+    legacy: Array<{ imageRef: string; annotations: Record<string, string> }> = [];
+    override async signatures(imageRef: string, o: { legacy?: boolean } = {}): Promise<Array<Record<string, string>>> {
+      const current = await super.signatures(imageRef);
+      const old = this.legacy.filter((c) => c.imageRef === imageRef).map((c) => c.annotations);
+      if (o.legacy === true) return old;
+      return current.length > 0 ? current : old;
+    }
+  }
+
+  it("새 형식 서명이 있는 이미지에 훔친 키로 붙인 예전 형식 서명도 --strict-images 면 봄", async () => {
+    const signer = new TwoFormats();
+    const { auditPath } = await signed(tmp(), signer);
+    signer.legacy.push({ imageRef: signer.calls[0]!.imageRef, annotations: { run_id: "r-999", targets: "onprem+cloud_run" } });
+    expect(await runAuditVerify({ auditPath, verifier: signer })).toMatchObject({ code: 0 });
+    expect(await runAuditVerify({ auditPath, verifier: signer, strictImages: true })).toMatchObject({ code: 1, reason: "unlogged_signature", detail: expect.stringMatching(/r-999/) });
+  });
+
+  it("예전 형식만 있는 이미지는 두 번 세지 않음", async () => {
+    const signer = new TwoFormats();
+    const { auditPath } = await signed(tmp(), signer);
+    // signer 서명을 예전 형식으로 옮김
+    signer.legacy.push(...signer.calls.splice(0));
+    expect(await runAuditVerify({ auditPath, verifier: signer, strictImages: true })).toMatchObject({ code: 0 });
   });
 });

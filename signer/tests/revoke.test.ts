@@ -74,6 +74,31 @@ describe("signer revoke", () => {
     expect((await p.sign(p.planOf("r-2", "d"))).outcome.code).toBe(0);
   });
 
+  it("이 실행만 철회(미리 철회 포함)한 것도 다시 서명하지 않음 (RUN_REVOKED), 같은 철회를 다시 하면 줄이 안 쌓임", async () => {
+    const p = pipeline();
+    const digest = `sha256:${"c".repeat(64)}`;
+    const first = await runRevoke({ auditPath: p.auditPath, digest, runId: "r-1", reason: "mistake", by: "carol" });
+    const again = await runRevoke({ auditPath: p.auditPath, digest, runId: "r-1", reason: "mistake", by: "carol" });
+    expect([first.existing, again.existing, again.line.seq]).toEqual([false, true, first.line.seq]);
+    await expect(p.sign(p.planOf("r-1", "c"))).rejects.toMatchObject({ code: "RUN_REVOKED" });
+    expect(p.signer.calls).toHaveLength(0);
+    expect((await p.sign(p.planOf("r-2", "c"))).outcome.code).toBe(0);
+  });
+
+  it("verify --audit --anchors: 로그 끝의 철회 줄을 잘라낸 로그는 끝 고정값과 달라서 audit_mismatch (anchors 없으면 통과하는 약점)", async () => {
+    const p = pipeline();
+    const { outPath } = await p.sign(plan("allow-onprem"));
+    await runRevoke({ auditPath: p.auditPath, digest: readJsonFile(outPath).digest, reason: "vulnerability", by: "carol" });
+    const anchors = join(p.dir, "anchors.jsonl");
+    await runAnchor({ auditPath: p.auditPath, anchorsPath: anchors, signer: p.signer });
+    writeFileSync(p.auditPath, readFileSync(p.auditPath, "utf8").trim().split("\n")[0] + "\n");
+    expect(await runVerify({ resultPath: outPath, verifier: p.signer, auditPath: p.auditPath })).toMatchObject({ code: 0 });
+    expect(await runVerify({ resultPath: outPath, verifier: p.signer, auditPath: p.auditPath, anchors: { path: anchors, verifier: p.signer } })).toMatchObject({
+      code: 1, reason: "audit_mismatch", detail: expect.stringMatching(/anchor_truncated/),
+    });
+    await expect(runVerify({ resultPath: outPath, verifier: p.signer, anchors: { path: anchors, verifier: p.signer } })).rejects.toMatchObject({ code: "ARG_INVALID" });
+  });
+
   it.each([
     ["digest 형식", { digest: "sha256:abc" }],
     ["reason", { reason: "because" }],

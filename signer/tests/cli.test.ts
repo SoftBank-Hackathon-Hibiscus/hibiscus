@@ -14,7 +14,7 @@ function cli(args: string[], env: Record<string, string> = {}) {
   const r = spawnSync(TSX, ["src/cli.ts", ...args], {
     cwd: ROOT,
     encoding: "utf8",
-    env: { ...process.env, SIGNER_COSIGN_KEY: "", IMAGE_REPO: "", SIGNER_AUDIT_LOG: "", COSIGN_PUBLIC_KEY: "", SIGNER_PUBKEY_SHA256: "", SIGNER_POLICY_SHA256: "", ...env },
+    env: { ...process.env, SIGNER_COSIGN_KEY: "", IMAGE_REPO: "", SIGNER_AUDIT_LOG: "", COSIGN_PUBLIC_KEY: "", SIGNER_PUBKEY_SHA256: "", SIGNER_POLICY_SHA256: "", SIGNER_AUDIT_ANCHORS: "", SIGNER_VERIFY_LATEST: "", SIGNER_AUDIT_SWEEP: "", ...env },
   });
   return { code: r.status, stdout: r.stdout, stderr: r.stderr };
 }
@@ -246,6 +246,12 @@ describe("cli audit", () => {
     expect(r.code).toBe(2);
     expect(r.stderr).toMatch(/ARG_INVALID/);
   });
+
+  it("--sweep-max 는 --sweep 없이 쓰면 ARG_INVALID (2)", () => {
+    const r = cli(["audit", "--audit", auditLog(tmp()), "--images", "--image-repo", "localhost:5001/hib/app", "--sweep-max", "5", "--json"]);
+    expect(r.code).toBe(2);
+    expect(JSON.parse(r.stdout)).toMatchObject({ error: "ARG_INVALID" });
+  });
 });
 
 describe("cli verify --policy-sha256", () => {
@@ -309,5 +315,48 @@ exit 0
     expect(JSON.parse(cli(["verify", "--result", result, "--attestation", "--policy", policy, "--json"], { ...env, SIGNER_POLICY_SHA256: pin }).stdout)).toMatchObject({ error: "POLICY_PIN_MISMATCH" });
     expect(JSON.parse(cli(["verify", "--result", result, "--attestation", "--policy", policy, "--json"], { ...env, SIGNER_POLICY_SHA256: "" }).stdout)).toMatchObject({ code: 1 });
     expect(JSON.parse(cli(["verify", "--result", result, "--policy-sha256", pin, "--json"], env).stdout)).toMatchObject({ error: "ARG_INVALID" });
+  });
+});
+
+describe("cli --json 인자 파싱 오류", () => {
+  it.each([
+    ["verify 옵션 오타", ["verify", "--result", "x.json", "--json", "--polcy", "p.rego"]],
+    ["verify 값 빠짐", ["verify", "--result", "x.json", "--json", "--max-age"]],
+    ["audit 옵션 오타", ["audit", "--audit", "a.jsonl", "--json", "--image"]],
+    ["reconcile 옵션 오타", ["reconcile", "--json", "--bogus"]],
+  ])("%s 도 JSON 한 줄 (ARG_INVALID)", (_name, args) => {
+    const r = cli(args);
+    expect(r.code).toBe(2);
+    expect(JSON.parse(r.stdout)).toMatchObject({ ok: false, code: 2, error: "ARG_INVALID" });
+  });
+
+  it("verify --anchors 를 --audit 없이 주면 ARG_INVALID, SIGNER_AUDIT_ANCHORS 만 켜져 있으면 무시", () => {
+    const r = cli(["verify", "--result", join(tmp(), "none.json"), "--anchors", "a.jsonl", "--json"]);
+    expect(JSON.parse(r.stdout)).toMatchObject({ error: "ARG_INVALID" });
+    const env = cli(["verify", "--result", join(tmp(), "none.json"), "--json"], { SIGNER_AUDIT_ANCHORS: "a.jsonl" });
+    expect(JSON.parse(env.stdout)).toMatchObject({ error: "READ_FAILED" });
+  });
+});
+
+describe("cli revoke", () => {
+  it("SIGNER_AUDIT_ANCHORS 가 켜져 있는데 --key 가 없으면 철회 줄을 쓰기 전에 ARG_MISSING", () => {
+    const dir = tmp();
+    const audit = join(dir, "a.jsonl");
+    writeFileSync(audit, "");
+    const r = cli(["revoke", "--audit", audit, "--digest", `sha256:${"c".repeat(64)}`, "--reason", "mistake", "--by", "carol"], { SIGNER_AUDIT_ANCHORS: join(dir, "anchors.jsonl") });
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/ARG_MISSING/);
+    expect(readFileSync(audit, "utf8")).toBe("");
+  });
+
+  it("같은 철회를 두 번 해도 줄은 하나 (이미 철회돼 있음)", () => {
+    const dir = tmp();
+    const audit = join(dir, "a.jsonl");
+    const args = ["revoke", "--audit", audit, "--digest", `sha256:${"c".repeat(64)}`, "--run-id", "r-1", "--reason", "mistake", "--by", "carol"];
+    expect(cli(args).code).toBe(0);
+    const again = cli(args);
+    expect(again.code).toBe(0);
+    expect(again.stdout).toContain("이미 철회돼 있음");
+    expect(readFileSync(audit, "utf8").trim().split("\n")).toHaveLength(1);
   });
 });

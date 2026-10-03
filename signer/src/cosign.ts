@@ -166,11 +166,19 @@ export class CosignSigner implements ImageSigner, BlobSigner {
   }
 }
 
+export interface SignatureListOptions {
+  /**
+   * 예전 형식(.sig 태그) 서명만. cosign v3 는 새 형식 서명이 하나라도 있으면 예전 형식을 안 돌려줘서,
+   * 훔친 키로 --new-bundle-format=false 로 붙인 서명은 따로 물어봐야 보임
+   */
+  legacy?: boolean;
+}
+
 export interface ImageVerifier {
   /** 주석이 전부 맞는 서명이 하나라도 있으면 통과. 아니면 SIGNATURE_INVALID */
   verify(imageRef: string, annotations: Record<string, string>): Promise<void>;
   /** 이 키로 확인되는 서명 전부의 주석. 서명이 없으면 빈 배열 */
-  signatures(imageRef: string): Promise<Array<Record<string, string>>>;
+  signatures(imageRef: string, o?: SignatureListOptions): Promise<Array<Record<string, string>>>;
   /**
    * 이 키로 확인되는 배포 증명서(in-toto Statement) 전부. policyPath 를 주면 cosign 이 Rego 정책도 검사.
    * 증명서가 없거나 서명이 안 맞으면 SIGNATURE_INVALID, 정책에 걸리면 POLICY_DENIED
@@ -195,10 +203,12 @@ export class CosignVerifier implements ImageVerifier, BlobVerifier {
     }
   }
 
-  async signatures(imageRef: string): Promise<Array<Record<string, string>>> {
+  async signatures(imageRef: string, o: SignatureListOptions = {}): Promise<Array<Record<string, string>>> {
     let stdout: string;
+    const args = this.verifyArgs({}, imageRef);
+    if (o.legacy === true) args.splice(1, 0, "--new-bundle-format=false");
     try {
-      stdout = await this.run(this.verifyArgs({}, imageRef));
+      stdout = await this.run(args);
     } catch (e) {
       // 서명 부재가 명시된 경우만 빈 목록이다. 검증·실행 오류로 감사 검사를 통과시키지 않는다.
       if (e instanceof SignerError && e.code === "SIGNATURE_NOT_FOUND") return [];
@@ -389,12 +399,12 @@ export class MultiKeyVerifier implements ImageVerifier, BlobVerifier {
     throw firstConfigError(errors) ?? new SignerError("SIGNATURE_INVALID", `믿는 공개키로 확인되는 서명이 없음: ${messages(errors)}`);
   }
 
-  async signatures(imageRef: string): Promise<Array<Record<string, string>>> {
+  async signatures(imageRef: string, o: SignatureListOptions = {}): Promise<Array<Record<string, string>>> {
     const all: Array<Record<string, string>> = [];
     const invalid: unknown[] = [];
     for (const v of this.verifiers) {
       try {
-        all.push(...(await v.signatures(imageRef)));
+        all.push(...(await v.signatures(imageRef, o)));
       } catch (e) {
         // 키 교체 중엔 이미지가 다른 키로만 서명돼 있어서 이 키로는 서명이 안 맞음
         // (cosign v3: accepted signatures do not match threshold). 다른 키로 서명이 확인됐을 때만 넘어감

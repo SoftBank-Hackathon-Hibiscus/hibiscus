@@ -135,12 +135,16 @@ async function main(argv: string[]): Promise<number> {
   try {
     ({ values } = parseArgs({ args: rest, options: OPTIONS }));
   } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    const loose = parseArgs({ args: rest, options: OPTIONS, strict: false, allowPositionals: true }).values;
     // 모르는 옵션·값 빠짐·위치 인자로 끝나도 sign 이면 예전 sign_result 를 지움 (아래 required() 오류와 같게)
-    if (command === "sign") {
-      const loose = parseArgs({ args: rest, options: OPTIONS, strict: false, allowPositionals: true }).values.out;
-      rmSync(typeof loose === "string" && loose !== "" ? loose : "sign_result.json", { force: true });
+    if (command === "sign") rmSync(typeof loose.out === "string" && loose.out !== "" ? loose.out : "sign_result.json", { force: true });
+    // --json 이면 인자 오류도 JSON 한 줄로
+    if (loose.json === true && (command === "verify" || command === "audit" || command === "reconcile")) {
+      console.log(JSON.stringify({ ok: false, code: 2, error: "ARG_INVALID", message }));
+      return 2;
     }
-    throw new SignerError("ARG_INVALID", `${e instanceof Error ? e.message : String(e)}\n\n${USAGE}`);
+    throw new SignerError("ARG_INVALID", `${message}\n\n${USAGE}`);
   }
   const planSchema = values["plan-schema"] ?? DEFAULT_PLAN_SCHEMA;
   const noTlog = values["no-tlog"] === true || process.env.SIGNER_NO_TLOG === "1";
@@ -150,6 +154,7 @@ async function main(argv: string[]): Promise<number> {
   // 빈 환경변수는 없는 것으로 봄 (backend 기본값이 '' 인 경우가 있음)
   // 빈 플래그(--audit "")도 없는 것으로 봄
   const auditPath = values.audit || process.env.SIGNER_AUDIT_LOG || undefined;
+  const anchorsPath = values.anchors || process.env.SIGNER_AUDIT_ANCHORS || undefined;
   // 믿는 공개키. 키 교체 중이면 여러 개 (--pub 여러 번 또는 COSIGN_PUBLIC_KEY=a.pub,b.pub)
   const list = (values_: string[] | undefined, env: string | undefined): string[] =>
     values_?.filter(Boolean).length ? values_.filter(Boolean) : (env ?? "").split(",").map((v) => v.trim()).filter(Boolean);
@@ -236,6 +241,7 @@ async function main(argv: string[]): Promise<number> {
     let keys: ReturnType<typeof fingerprints>;
     let policySha256: string | undefined;
     let policyDir: string | undefined;
+    const verifyAnchors = auditPath !== undefined ? anchorsPath : values.anchors || undefined;
     try {
       if (values["test-result"] !== undefined && values.attestation !== true) throw new SignerError("ARG_INVALID", "--test-result 는 --attestation 과 같이 써야 함 (시험 결과는 증명서에 들어 있음)");
       if (values.policy !== undefined && values.attestation !== true) throw new SignerError("ARG_INVALID", "--policy 는 --attestation 과 같이 써야 함 (정책은 배포 증명서에 적용, 없으면 정책 검사를 안 함)");
@@ -263,6 +269,8 @@ async function main(argv: string[]): Promise<number> {
         ...(values.latest === true || process.env.SIGNER_VERIFY_LATEST === "1" ? { latest: true } : {}),
         planSchemaPath: planSchema,
         ...(auditPath !== undefined ? { auditPath } : {}),
+        // 고정값은 감사 로그를 볼 때만. 플래그로 줬는데 --audit 가 없으면 runVerify 가 ARG_INVALID
+        ...(verifyAnchors !== undefined ? { anchors: { path: verifyAnchors, verifier: trustedVerifier() } } : {}),
       });
       keys = fingerprints();
     } catch (e) {
@@ -296,6 +304,7 @@ async function main(argv: string[]): Promise<number> {
                   plan: values.plan !== undefined,
                   approval: Boolean(values.approval),
                   audit: auditPath !== undefined,
+                  anchors: auditPath !== undefined && verifyAnchors !== undefined,
                   attestation: values.attestation === true ? { policy: policyPath, policy_sha256: `sha256:${policySha256}`, policy_pinned: policyPins.length > 0 } : false,
                   max_age_min: maxAgeMs !== undefined ? maxAgeMs / 60_000 : null,
                 },
@@ -318,14 +327,13 @@ async function main(argv: string[]): Promise<number> {
         console.log(`  정책 지문: sha256:${policySha256}${policyPins.length > 0 ? " (고정값에 있음)" : ""}`);
       }
       if (maxAgeMs !== undefined) console.log(`  유효기간: ${maxAgeMs / 60_000}분 안에 서명함`);
+      if (auditPath !== undefined) console.log(`  감사 로그: signed 줄 일치${verifyAnchors !== undefined ? ", 끝 고정값 일치" : " (끝 고정값은 안 봄, --anchors 로 같이 확인 권장)"}`);
       for (const k of keys) console.log(`  공개키 지문: ${k.sha256}${pinnedPub !== undefined ? " (고정값에 있음)" : ""}  ${k.path}`);
     } else {
       console.error(`[signer] 서명 확인 실패 (${outcome.reason}): ${outcome.detail}`);
     }
     return outcome.code;
   }
-
-  const anchorsPath = values.anchors || process.env.SIGNER_AUDIT_ANCHORS || undefined;
 
   if (command === "anchor") {
     const log = required(auditPath, "audit");
@@ -338,6 +346,8 @@ async function main(argv: string[]): Promise<number> {
 
   if (command === "revoke") {
     const log = required(auditPath, "audit");
+    // 끝 고정까지 할 거면 키부터 확인 (철회 줄만 쓰고 실행 오류로 끝나 재시도 때 줄이 또 쌓이지 않게)
+    const anchorSigner = anchorsPath !== undefined ? new CosignSigner(required(values.key ?? process.env.SIGNER_COSIGN_KEY, "key"), "cosign", cosignOptions) : undefined;
     const r = await runRevoke({
       auditPath: log,
       digest: required(values.digest, "digest"),
@@ -347,12 +357,19 @@ async function main(argv: string[]): Promise<number> {
       note: values.note || undefined,
     });
     const e = r.line.entry;
-    if (e.kind === "revoke") console.log(`[signer] 서명 철회: 감사 로그 ${r.line.seq}번째 줄, ${e.run_id !== undefined ? `run_id=${e.run_id} ` : "이미지 전체 "}${e.digest} (${e.reason}, ${e.by})`);
+    if (e.kind === "revoke") {
+      console.log(`[signer] 서명 철회${r.existing ? " (이미 철회돼 있음)" : ""}: 감사 로그 ${r.line.seq}번째 줄, ${e.run_id !== undefined ? `run_id=${e.run_id} ` : "이미지 전체 "}${e.digest} (${e.reason}, ${e.by})`);
+    }
     if (r.signed === 0) console.error("[signer] 경고: 감사 로그에 이 이미지(실행)의 signed 줄이 아직 없음 (미리 철회함)");
     // 고정값 파일을 주면 바로 끝 고정 (철회 줄을 잘라내면 anchor_truncated)
-    if (anchorsPath !== undefined) {
-      const anchor = await runAnchor({ auditPath: log, anchorsPath, signer: new CosignSigner(required(values.key ?? process.env.SIGNER_COSIGN_KEY, "key"), "cosign", cosignOptions) });
-      console.log(`  끝 고정: ${anchor.seq}줄 (${anchorsPath})`);
+    if (anchorSigner !== undefined && anchorsPath !== undefined) {
+      try {
+        const anchor = await runAnchor({ auditPath: log, anchorsPath, signer: anchorSigner });
+        console.log(`  끝 고정: ${anchor.seq}줄 (${anchorsPath})`);
+      } catch (err) {
+        console.error(`[signer] 철회는 ${r.line.seq}번째 줄에 기록됨. 끝 고정만 실패해서 signer anchor 로 다시 고정할 것: ${err instanceof Error ? err.message : String(err)}`);
+        return 2;
+      }
     }
     return 0;
   }
@@ -370,6 +387,7 @@ async function main(argv: string[]): Promise<number> {
       if ((values.sweep === true || values["digests-file"] !== undefined || values["sweep-max"] !== undefined) && values.images !== true) {
         throw new SignerError("ARG_INVALID", "--sweep·--digests-file·--sweep-max 는 --images 와 같이 써야 함");
       }
+      if (values["sweep-max"] !== undefined && !sweep) throw new SignerError("ARG_INVALID", "--sweep-max 는 --sweep 과 같이 써야 함 (태그 훑기 한도)");
       const sweepMax = values["sweep-max"] !== undefined ? Number(values["sweep-max"]) : undefined;
       if (sweepMax !== undefined && !(Number.isInteger(sweepMax) && sweepMax > 0)) throw new SignerError("ARG_INVALID", `--sweep-max 는 양의 정수: ${values["sweep-max"]}`);
       const imageRepo = values["image-repo"] || process.env.IMAGE_REPO || undefined;
@@ -381,7 +399,8 @@ async function main(argv: string[]): Promise<number> {
         ...(values.images === true && (sweep || values["digests-file"] !== undefined)
           ? {
               sweep: {
-                lister: new CraneLister("crane", cosignOptions),
+                // --digests-file 만 주면 태그는 안 훑음 (태그가 한도를 넘는 저장소를 목록 파일로 나눠 볼 수 있게)
+                ...(sweep ? { lister: new CraneLister("crane", cosignOptions) } : {}),
                 ...(values["digests-file"] !== undefined ? { digestsFile: values["digests-file"] } : {}),
                 ...(sweepMax !== undefined ? { max: sweepMax } : {}),
               },

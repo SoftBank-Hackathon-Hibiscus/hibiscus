@@ -16,7 +16,8 @@ done
 
 # 사용자 환경변수가 시연 결과를 바꾸지 않게 비움
 unset SIGNER_COSIGN_KEY SIGNER_AUDIT_LOG SIGNER_AUDIT_ANCHORS SIGNER_PUBKEY_SHA256 COSIGN_PUBLIC_KEY IMAGE_REPO \
-  SIGNER_SELF_VERIFY SIGNER_ATTEST SIGNER_MINIMAL_ENV SIGNER_STRICT_KEY_PERMS SIGNER_MAX_AGE_MIN SIGNER_APPROVAL_TTL_MIN
+  SIGNER_SELF_VERIFY SIGNER_ATTEST SIGNER_MINIMAL_ENV SIGNER_STRICT_KEY_PERMS SIGNER_MAX_AGE_MIN SIGNER_APPROVAL_TTL_MIN \
+  SIGNER_NO_TLOG SIGNER_VERIFY_LATEST SIGNER_POLICY_SHA256 SIGNER_AUDIT_SWEEP
 
 PORT="${DEMO_PORT:-5055}"
 REG="localhost:$PORT/hib/todo"
@@ -193,6 +194,16 @@ check 0 "(약점) 복사한 로그로 한 서명·signer 밖 새 이미지 서�
   signer audit --audit "$W/audit-b.jsonl" --images --strict-images --image-repo "$REG2" "${VERIFY[@]}"
 check 1 "--sweep: 저장소 태그를 다 훑어서 두 건 다 찾음" \
   signer audit --audit "$W/audit-b.jsonl" --images --strict-images --sweep --image-repo "$REG2" "${VERIFY[@]}"
+# 훔친 키로 예전 형식(.sig) 서명: cosign v3 는 새 형식 서명이 있으면 기본 목록에 예전 형식을 안 넣음
+REG3="localhost:$PORT/hib/legacy"
+echo l1 >"$W/l1" && tar cf "$W/l1.tar" -C "$W" l1 && crane append -f "$W/l1.tar" -t "$REG3:l1" >/dev/null 2>&1
+L1="$(crane digest "$REG3:l1")"
+edit fixtures/plans/allow-onprem.plan.json "$W/plan-l1.json" "o.run_id='r-301';o.digest='$L1'"
+env SIGNER_COSIGN_KEY="$KEY" "${SIGNER[@]}" sign --plan "$W/plan-l1.json" --requester alice --image-repo "$REG3" --log "$W/decisions-l.jsonl" --no-tlog \
+  --audit "$W/audit-l.jsonl" --out "$W/sl1.json" >/dev/null 2>&1
+cosign sign --yes --key "$KEY" --use-signing-config=false --tlog-upload=false --new-bundle-format=false -a run_id=r-997 -a targets=onprem+cloud_run "$REG3@$L1" >/dev/null 2>&1
+check 1 "훔친 키로 예전 형식(.sig) 서명을 붙임: --strict-images 가 예전 형식도 따로 물어봐서 찾음" \
+  signer audit --audit "$W/audit-l.jsonl" --images --strict-images --image-repo "$REG3" "${VERIFY[@]}"
 
 # --- 증명서 정책 ---
 step "공격 4. 시험에 실패한 이미지 배포"
@@ -239,7 +250,11 @@ signer revoke --audit "$W/audit.jsonl" --digest "$D2" --reason vulnerability --b
 check 1 "v2 를 철회한 뒤 v2 결과로 배포" \
   signer verify --result "$W/sr2.json" --audit "$W/audit.jsonl" "${VERIFY[@]}"
 sed '$d' "$W/audit.jsonl" >"$W/audit-unrevoke.jsonl"
-check 1 "철회 줄을 지운 감사 로그 (끝 고정값과 맞춰 봄)" \
+check 0 "(약점) 철회 줄을 지운 감사 로그로 v2 배포 확인: 끝 고정값을 안 보면 통과" \
+  signer verify --result "$W/sr2.json" --audit "$W/audit-unrevoke.jsonl" "${VERIFY[@]}"
+check 1 "같은 로그로 배포 확인 + 끝 고정값 (--anchors)" \
+  signer verify --result "$W/sr2.json" --audit "$W/audit-unrevoke.jsonl" --anchors "$W/anchors.jsonl" "${VERIFY[@]}"
+check 1 "같은 로그를 감사 (끝 고정값과 맞춰 봄)" \
   signer audit --audit "$W/audit-unrevoke.jsonl" --anchors "$W/anchors.jsonl" "${VERIFY[@]}"
 check 2 "철회한 이미지를 다시 서명 요청" \
   env SIGNER_COSIGN_KEY="$KEY" "${SIGNER[@]}" sign --plan "$W/plan2.json" "${SIGN[@]}" --out "$W/x.json"

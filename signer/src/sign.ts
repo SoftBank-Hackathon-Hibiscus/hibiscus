@@ -4,7 +4,7 @@ import { existsSync, rmSync } from "node:fs";
 import { NO_APPROVAL, signAnnotations } from "./annotations.js";
 import { buildPredicate, DEPLOY_PREDICATE_TYPE, loadTestEvidence } from "./attestation.js";
 import { loadApproval } from "./approval.js";
-import { appendAudit, digestRevocation, readAuditState, type AuditOptions } from "./audit.js";
+import { appendAudit, readAuditState, signRevocation, type AuditOptions } from "./audit.js";
 import { imageRefOf, type ImageSigner, type ImageVerifier } from "./cosign.js";
 import { decideSign } from "./decide.js";
 import { appendSignLog, canonicalize, sha256Hex, SignerError, signLogLine, writeJson } from "./io.js";
@@ -106,10 +106,12 @@ async function signOnce(o: SignOptions, seen: { runId?: string }): Promise<SignO
   // 감사 로그를 켰으면 서명 직전 체인 끝을 서명에도 남김 (체인을 통째로 다시 계산하면 서명과 안 맞게)
   const state = o.auditPath ? await readAuditState(o.auditPath, o.audit) : undefined;
   const auditHead = state?.head;
-  // 이미지 전체를 철회했으면 다시 서명하지 않음 (철회는 되돌리지 않음, 새로 빌드해야 함)
-  const revoked = state ? digestRevocation(state.lines, plan.digest) : undefined;
+  // 철회한 이미지·실행은 다시 서명하지 않음 (철회는 되돌리지 않음. 이미지 전체면 새로 빌드, 실행만이면 새 실행으로)
+  const revoked = state ? signRevocation(state.lines, plan.digest, plan.run_id) : undefined;
   if (revoked !== undefined && revoked.entry.kind === "revoke") {
-    throw new SignerError("DIGEST_REVOKED", `감사 로그 ${revoked.seq}번째 줄에서 이 이미지의 서명을 전부 철회함 (${revoked.entry.reason}, ${revoked.entry.by}): ${plan.digest}`);
+    const r = revoked.entry;
+    if (r.run_id === undefined) throw new SignerError("DIGEST_REVOKED", `감사 로그 ${revoked.seq}번째 줄에서 이 이미지의 서명을 전부 철회함 (${r.reason}, ${r.by}): ${plan.digest}`);
+    throw new SignerError("RUN_REVOKED", `감사 로그 ${revoked.seq}번째 줄에서 이 실행을 철회함 (${r.reason}, ${r.by}): ${plan.run_id} ${plan.digest}`);
   }
   // 사람 승인이면 그 승인 기록(누가, 언제)까지 서명에 묶음. 자동 승인이면 none
   const approvalSha256 = decision.approver === AUTO_APPROVER || !approval ? NO_APPROVAL : sha256Hex(canonicalize(approval));
