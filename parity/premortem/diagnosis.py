@@ -16,10 +16,10 @@ from .ai.provider import AnalysisResult
 from .ai.schema_subset import api_subset
 from .errors import PremortemError
 from .evidence import utc_now
-from .jsonio import load_json, write_json_atomic, write_text_atomic
+from .jsonio import load_json, loads_strict, write_json_atomic, write_text_atomic
 from .paths import resolve_inside
 from .redact import redact
-from .snapshot import sha256_bytes, sha256_file, verify_source_tree
+from .snapshot import sha256_bytes, verify_source_tree
 
 PROMPT_PATH = Path(__file__).with_name("ai") / "diagnosis.txt"
 TEMPLATE_PATH = Path(__file__).with_name("diagnosis.html")
@@ -108,12 +108,17 @@ def build_input(bundle, source_paths):
     required = {"result.json", "build_manifest.json", "verified.diagnostics.json"}
     artifacts = execution.get("artifacts", {})
     require(required <= artifacts.keys(), "실행 기록에 필수 산출물 해시가 없습니다")
+    verified = {}
     for name, digest in artifacts.items():
-        require(sha256_file(resolve_inside(bundle, name)) == digest, "실행 산출물 해시 불일치")
-    build = load_json(bundle / "build_manifest.json")
-    result = load_json(bundle / "result.json")
-    diagnostic = load_json(bundle / "verified.diagnostics.json")
-    verify_source_tree(bundle / "source", build["source"]["tree_sha256"])
+        content = resolve_inside(bundle, name).read_bytes()
+        require(sha256_bytes(content) == digest, "실행 산출물 해시 불일치")
+        if name in required:
+            # Parse exactly the bytes that passed the hash check, never reopen the file.
+            verified[name] = loads_strict(content.decode("utf-8"))
+    build = verified["build_manifest.json"]
+    result = verified["result.json"]
+    diagnostic = verified["verified.diagnostics.json"]
+    source_hashes = verify_source_tree(bundle / "source", build["source"]["tree_sha256"])
     require(execution["run_id"] == build["run_id"] == diagnostic["run_id"], "실행 ID 불일치")
     require(execution["source_revision"] == build["source"]["commit"] == diagnostic["source_revision"], "소스 커밋 불일치")
     commit = result.get("commit", "")
@@ -147,12 +152,17 @@ def build_input(bundle, source_paths):
     for path in source_paths:
         require(path.endswith(".py"), "현재 진단 입력은 Python 소스만 지원합니다")
         source = resolve_inside(bundle / "source", path)
-        text = source.read_text(encoding="utf-8")
+        content = source.read_bytes()
+        digest = sha256_bytes(content)
+        require(digest == source_hashes.get(path), "소스 검사 후 분석할 파일이 바뀌었습니다")
+        # Keep decoding, sanitization, and the recorded hash bound to this byte buffer.
+        # Preserve read_text's universal-newline behavior for existing recorded inputs.
+        text = content.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
         require(len(text) <= 60000, "소스가 분석 크기 한도를 넘었습니다")
         hidden = hide_python_notes(text)
         source_text = redact(hidden)
         require(len(hidden.splitlines()) == len(source_text.splitlines()), "비밀값 제거로 줄 번호가 바뀌어 분석을 중단합니다")
-        sources.append({"path": path, "sha256": sha256_file(source), "line_start": 1, "content": source_text})
+        sources.append({"path": path, "sha256": digest, "line_start": 1, "content": source_text})
     return {
         "format": "hibiscus-diagnosis-input-v1", "run_id": execution["run_id"],
         "source_revision": execution["source_revision"], "source_tree_sha256": build["source"]["tree_sha256"],
@@ -233,6 +243,9 @@ def main(argv=None):
     modes.add_argument("--recorded", type=Path, help="같은 입력에 대한 이전 실제 분석 사용 (호출 없음)")
     args = parser.parse_args(argv)
     try:
+        args.bundle = args.bundle.resolve()
+        args.out = args.out.resolve()
+        require(not args.out.is_relative_to(args.bundle), "진단 출력은 원본 실행 폴더 밖에 저장해야 합니다")
         payload = build_input(args.bundle, args.source)
         args.out.mkdir(parents=True, exist_ok=False)
         write_json_atomic(args.out / "diagnosis_input.json", payload)

@@ -4,13 +4,14 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from premortem.ai.provider import AnalysisResult
 from premortem.ai.schema_subset import api_subset
 from premortem.diagnosis import analyze, build_input, canonical, check_output, hide_python_notes, main, render_report, sanitized
 from premortem.errors import PremortemError
 from premortem.jsonio import load_json
-from premortem.snapshot import sha256_bytes, sha256_file
+from premortem.snapshot import sha256_bytes, sha256_file, tree_hash, tree_listing, verify_source_tree
 
 FIXTURE = Path(__file__).resolve().parents[2] / "examples" / "diagnosis" / "guestbook"
 
@@ -98,6 +99,110 @@ class DiagnosisTests(unittest.TestCase):
             f.write("\nSESSIONS = {'x': 'y'}\n")
         with self.assertRaises(PremortemError):
             build_input(self.bundle, ["app.py"])
+
+    def test_output_inside_bundle_rejected_before_writes_or_model_call(self):
+        before = {p.relative_to(self.bundle): p.read_bytes() for p in self.bundle.rglob("*") if p.is_file()}
+        for out in (self.bundle, self.bundle / "source" / "report", self.bundle / "reports" / "new",
+                    self.bundle / "missing" / ".." / "source" / "report"):
+            with self.subTest(out=out), patch("premortem.diagnosis.AnthropicMessagesProvider.from_environment") as provider:
+                self.assertEqual(1, main(["--bundle", str(self.bundle), "--source", "app.py",
+                                          "--out", str(out), "--live"]))
+                provider.assert_not_called()
+        after = {p.relative_to(self.bundle): p.read_bytes() for p in self.bundle.rglob("*") if p.is_file()}
+        self.assertEqual(before, after)
+        self.assertEqual(self.payload, build_input(self.bundle, ["app.py"]))
+
+    def test_output_alias_into_bundle_rejected(self):
+        alias = self.root / "source-alias"
+        try:
+            alias.symlink_to(self.bundle / "source", target_is_directory=True)
+        except OSError as error:
+            self.skipTest(f"Symlinks unavailable: {error}")
+        self.assertEqual(1, main(["--bundle", str(self.bundle), "--source", "app.py",
+                                  "--out", str(alias / "report")]))
+        self.assertFalse((self.bundle / "source" / "report").exists())
+
+    def test_source_changed_after_tree_check_rejected_before_model_call(self):
+        def change_after_check(source, digest):
+            hashes = verify_source_tree(source, digest)
+            with (source / "app.py").open("a") as stream:
+                stream.write("\nAFTER_CHECK_MARKER = True\n")
+            return hashes
+
+        out = self.root / "report"
+        with patch("premortem.diagnosis.verify_source_tree", side_effect=change_after_check), \
+                patch("premortem.diagnosis.AnthropicMessagesProvider.from_environment") as provider:
+            self.assertEqual(1, main(["--bundle", str(self.bundle), "--source", "app.py",
+                                      "--out", str(out), "--live"]))
+            provider.assert_not_called()
+        self.assertFalse(out.exists())
+
+    def test_source_content_and_hash_remain_bound_after_read(self):
+        def change_after_read(text):
+            with (self.bundle / "source" / "app.py").open("a") as stream:
+                stream.write("\nAFTER_READ_MARKER = True\n")
+            return hide_python_notes(text)
+
+        with patch("premortem.diagnosis.hide_python_notes", side_effect=change_after_read):
+            payload = build_input(self.bundle, ["app.py"])
+        self.assertEqual(self.payload, payload)
+        self.assertNotEqual(payload["sources"][0]["sha256"], sha256_file(self.bundle / "source" / "app.py"))
+
+    def test_crlf_source_keeps_recorded_text_normalization(self):
+        source = self.bundle / "source" / "app.py"
+        content = source.read_bytes().replace(b"\n", b"\r\n")
+        source.write_bytes(content)
+        build_path = self.bundle / "build_manifest.json"
+        build = load_json(build_path)
+        build["source"]["tree_sha256"] = tree_hash(tree_listing(self.bundle / "source")[0])
+        build_path.write_text(json.dumps(build), encoding="utf-8")
+        self.rehash("build_manifest.json")
+        payload = build_input(self.bundle, ["app.py"])
+        self.assertEqual(self.payload["sources"][0]["content"], payload["sources"][0]["content"])
+        self.assertEqual(sha256_bytes(content), payload["sources"][0]["sha256"])
+
+    def test_artifact_parsing_uses_hashed_bytes_even_if_file_changes(self):
+        for name in ("result.json", "build_manifest.json", "verified.diagnostics.json"):
+            with self.subTest(name=name):
+                path = self.bundle / name
+                original = path.read_bytes()
+                altered = json.loads(original)
+                if name == "result.json":
+                    altered["mismatches"][0]["actual"] = "AFTER_CHECK_MARKER"
+                elif name == "build_manifest.json":
+                    altered["created_at"] = "AFTER_CHECK_MARKER"
+                else:
+                    altered["target_binding_verified"] = False
+                changed = []
+
+                def change_after_hash(content):
+                    digest = sha256_bytes(content)
+                    if content == original:
+                        path.write_text(json.dumps(altered), encoding="utf-8")
+                        changed.append(name)
+                    return digest
+
+                try:
+                    with patch("premortem.diagnosis.sha256_bytes", side_effect=change_after_hash):
+                        payload = build_input(self.bundle, ["app.py"])
+                    self.assertEqual([name], changed)
+                    self.assertEqual(self.payload, payload)
+                finally:
+                    path.write_bytes(original)
+
+    def test_changed_bytes_read_from_artifact_rejected_before_model_call(self):
+        read_bytes = Path.read_bytes
+        def change_before_check(path):
+            content = read_bytes(path)
+            return content + b" " if path == self.bundle / "result.json" else content
+
+        out = self.root / "report"
+        with patch.object(Path, "read_bytes", change_before_check), \
+                patch("premortem.diagnosis.AnthropicMessagesProvider.from_environment") as provider:
+            self.assertEqual(1, main(["--bundle", str(self.bundle), "--source", "app.py",
+                                      "--out", str(out), "--live"]))
+            provider.assert_not_called()
+        self.assertFalse(out.exists())
 
     def test_different_image_is_rejected_even_if_artifact_hash_updated(self):
         path = self.bundle / "build_manifest.json"
