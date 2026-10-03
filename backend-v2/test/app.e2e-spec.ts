@@ -31,7 +31,7 @@ import { AuthRedirectService } from '../src/auth/auth-redirect.service.js';
 import { UserService } from '../src/user/user.service.js';
 import { DatabaseService } from '../src/database/database.service.js';
 import { AgentRepository } from '../src/agent/agent.repository.js';
-import { agentJobs, agents } from '../src/database/schema.js';
+import { agentJobs, agents, stageExecutions } from '../src/database/schema.js';
 import { eq } from 'drizzle-orm';
 import { createServer } from 'node:http';
 import { connect } from 'node:net';
@@ -1117,6 +1117,76 @@ describe('deployment API (e2e)', () => {
     } finally {
       scratch.cleanup();
     }
+  });
+
+  it('redacts deployment snapshot secrets from stored and historical diagnostics', async () => {
+    const secret = 'hunter2xyz';
+    const testSecret = 'test-snapshot-secret';
+    const application = await api()
+      .post('/applications')
+      .send({
+        name: 'redaction-review',
+        slug: 'redaction-review',
+        source_path: './fixtures/redaction-review',
+        image_repo: 'registry.example/redaction-review',
+        environment: [{ name: 'DB_PASS', value: secret }],
+        test_environment: [{ name: 'TEST_PASS', value: testSecret }],
+      })
+      .expect(201);
+    const deployment = await createDeployment(
+      application.body.application.id,
+      'review-requester',
+    );
+    const view = await waitForStatus(deployment.id, 'succeeded');
+    const stage = view.stages[0];
+    const repository = app.get(DeploymentRepository);
+    repository.updateStage(stage.id, {
+      summary: {
+        stdout_tail: `DB_PASS ${secret}`,
+        stderr_tail: `postgres://app:${testSecret}@db`,
+        normal: 'build failed',
+      },
+    });
+    const stored = app
+      .get(DatabaseService)
+      .db.select()
+      .from(stageExecutions)
+      .where(eq(stageExecutions.id, stage.id))
+      .get()!;
+    expect(JSON.stringify(stored.summary)).not.toContain(secret);
+    expect(JSON.stringify(stored.summary)).not.toContain(testSecret);
+    // Simulate an old unredacted DB row, then change current app settings.
+    app
+      .get(DatabaseService)
+      .db.update(stageExecutions)
+      .set({
+        summary: {
+          stdout_tail: `mysql+pymysql://app:${secret}@db`,
+          stderr_tail: `DB_PASS ${testSecret}`,
+          normal: 'build failed',
+        },
+        error: secret,
+      })
+      .where(eq(stageExecutions.id, stage.id))
+      .run();
+    await api()
+      .patch(`/applications/${application.body.application.id}/settings`)
+      .send({
+        health_check: {
+          enabled: true,
+          path: '/ready',
+          interval_seconds: 10,
+          timeout_seconds: 3,
+        },
+        environment: [{ name: 'DB_PASS', value: 'changed-secret' }],
+        test_environment: [],
+      })
+      .expect(200);
+    const result = await api().get(`/deployments/${deployment.id}`).expect(200);
+    expect(JSON.stringify(result.body)).not.toContain(secret);
+    expect(JSON.stringify(result.body)).not.toContain(testSecret);
+    expect(result.body.deployment.id).toBe(deployment.id);
+    expect(result.body.stages[0].summary.normal).toBe('build failed');
   });
 
   it('persists redacted parity build diagnostics without entering policy or verifying the source', async () => {
@@ -2589,7 +2659,10 @@ describe('deployment API (e2e)', () => {
         request(server)
           .patch(url)
           .set('Authorization', `Bearer ${defaultToken}`),
-      delete: (url: string) => request(server).delete(url).set('Authorization', `Bearer ${defaultToken}`),
+      delete: (url: string) =>
+        request(server)
+          .delete(url)
+          .set('Authorization', `Bearer ${defaultToken}`),
       put: (url: string) =>
         request(server).put(url).set('Authorization', `Bearer ${defaultToken}`),
     };

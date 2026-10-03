@@ -435,6 +435,7 @@ export function ApplicationDetail({
           source={source}
           app={snap.app}
           deployments={snap.deployments}
+          servingDeploymentId={snap.route?.target.deploymentId}
           onSaved={poll.refresh}
         />
       )}

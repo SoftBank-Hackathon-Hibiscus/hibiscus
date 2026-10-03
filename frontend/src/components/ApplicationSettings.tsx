@@ -15,15 +15,21 @@ import {
 } from "../lib/healthCheck";
 import { deploymentPath, navigate } from "../lib/router";
 import { useLang } from "../lib/i18n";
-import { prepareSettingsEnvironment, type SettingsRow } from "../lib/settings";
+import {
+  prepareSettingsEnvironment,
+  settingsDeploymentRevision,
+  type SettingsRow,
+} from "../lib/settings";
 export function ApplicationSettings({
   app,
   deployments,
+  servingDeploymentId,
   source,
   onSaved,
 }: {
   app: ApplicationView;
   deployments: Deployment[];
+  servingDeploymentId?: string;
   source: DataSource;
   onSaved: () => void;
 }) {
@@ -129,6 +135,9 @@ export function ApplicationSettings({
     setBusy(true);
     let saved = false;
     try {
+      const revision = deploy
+        ? settingsDeploymentRevision(deployments, servingDeploymentId)
+        : undefined;
       const updated = await source.updateApplicationSettings(
         app.application.id,
         {
@@ -157,7 +166,7 @@ export function ApplicationSettings({
       onSaved();
       if (deploy) {
         const created = await source.createDeployment(app.application.id, {
-          source_revision: deployments[0]?.sourceRevision || "",
+          source_revision: revision!,
         });
         navigate(deploymentPath(created.id));
       } else

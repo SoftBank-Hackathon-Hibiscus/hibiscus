@@ -31,3 +31,16 @@ describe("deployment settings environment", () => {
     ).toThrow();
   });
 });
+
+import { settingsDeploymentRevision } from "./settings";
+it("redeploys the routed commit instead of the latest cancelled commit", () => {
+  const deployments = [
+    { id: "v3", sourceRevision: "cancelled" },
+    { id: "v2", sourceRevision: "serving" },
+  ];
+  expect(settingsDeploymentRevision(deployments, "v2")).toBe("serving");
+  expect(() => settingsDeploymentRevision(deployments)).toThrow(
+    "현재 서비스 배포가 없습니다",
+  );
+  expect(() => settingsDeploymentRevision(deployments, "missing")).toThrow();
+});

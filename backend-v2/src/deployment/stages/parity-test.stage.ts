@@ -78,6 +78,10 @@ export class ParityTestStage {
     deployment,
     paths,
   }: StageContext): Promise<StageOutcome> {
+    const secrets = [
+      ...Object.values(this.deployments.environment(deployment.id, 'runtime')),
+      ...Object.values(this.deployments.environment(deployment.id, 'test')),
+    ];
     try {
       if (!/^[a-f0-9]{40}$/.test(deployment.sourceRevision)) {
         throw new Error(
@@ -100,7 +104,9 @@ export class ParityTestStage {
       ) => {
         const result = await this.runner.run(spec);
         if (result.timedOut || result.code !== 0) {
-          throw new ParityCommandError(commandDiagnostics(phase, result));
+          throw new ParityCommandError(
+            commandDiagnostics(phase, result, secrets),
+          );
         }
         return result;
       };
@@ -286,7 +292,7 @@ export class ParityTestStage {
           : {}),
         error:
           error instanceof Error
-            ? diagnosticTail(error.message)
+            ? diagnosticTail(error.message, secrets)
             : 'Unable to run registry parity',
       };
     }

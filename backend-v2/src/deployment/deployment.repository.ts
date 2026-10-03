@@ -1,3 +1,4 @@
+import { redactDeploymentOutput } from '../infrastructure/command-diagnostics.js';
 import { Injectable } from '@nestjs/common';
 import { and, asc, desc, eq, inArray, ne, or, isNull, sql } from 'drizzle-orm';
 import { DatabaseService } from '../database/database.service.js';
@@ -311,9 +312,28 @@ export class DeploymentRepository {
     id: string,
     patch: Partial<typeof stageExecutions.$inferInsert>,
   ): void {
+    const stage = this.database.db
+      .select()
+      .from(stageExecutions)
+      .where(eq(stageExecutions.id, id))
+      .get();
+    const secrets = stage
+      ? [
+          ...Object.values(this.environment(stage.deploymentId, 'runtime')),
+          ...Object.values(this.environment(stage.deploymentId, 'test')),
+        ]
+      : [];
     this.database.db
       .update(stageExecutions)
-      .set(patch)
+      .set({
+        ...patch,
+        ...(patch.summary !== undefined
+          ? { summary: redactDeploymentOutput(patch.summary, secrets) }
+          : {}),
+        ...(patch.error
+          ? { error: redactDeploymentOutput(patch.error, secrets) }
+          : {}),
+      })
       .where(eq(stageExecutions.id, id))
       .run();
   }

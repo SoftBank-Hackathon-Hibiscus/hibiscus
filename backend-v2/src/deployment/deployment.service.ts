@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { redactDeploymentView } from '../infrastructure/command-diagnostics.js';
 import { ConfigService } from '@nestjs/config';
 import { createHash, randomUUID } from 'node:crypto';
 import type { BackendConfig } from '../config/configs/backend.config.js';
@@ -72,7 +73,9 @@ export class DeploymentService {
     if (!this.applications.find(applicationId)) {
       throw new NotFoundException('Application not found');
     }
-    return this.repository.list(applicationId);
+    return this.repository
+      .list(applicationId)
+      .map((deployment) => this.redacted(deployment.id, deployment));
   }
 
   latestSourceRevision(applicationId: string): string {
@@ -87,19 +90,38 @@ export class DeploymentService {
   get(id: string) {
     const view = this.repository.getView(id);
     if (!view) throw new NotFoundException('Deployment not found');
-    return view;
+    return this.redacted(id, view);
+  }
+
+  private redacted<T>(id: string, value: T): T {
+    const deployment = this.repository.find(id);
+    const secrets = [
+      ...Object.values(this.repository.environment(id, 'runtime')),
+      ...Object.values(this.repository.environment(id, 'test')),
+      ...(deployment
+        ? Object.values(
+            this.applications.runtimeEnvironment(deployment.applicationId),
+          )
+        : []),
+      ...(deployment
+        ? Object.values(
+            this.applications.testEnvironment(deployment.applicationId),
+          )
+        : []),
+    ];
+    return redactDeploymentView(value, secrets);
   }
 
   cancel(id: string): Deployment {
     const deployment = this.repository.find(id);
     if (!deployment) throw new NotFoundException('Deployment not found');
-    if (deployment.status === 'cancelled') return deployment;
+    if (deployment.status === 'cancelled') return this.redacted(id, deployment);
     if (!this.repository.cancel(id)) {
       throw new ConflictException(
         'Deployment cannot be cancelled after deploy starts or after completion',
       );
     }
-    return this.repository.find(id)!;
+    return this.redacted(id, this.repository.find(id)!);
   }
 
   rollback(id: string, requesterId: string): Deployment {
@@ -152,6 +174,6 @@ export class DeploymentService {
     if (!this.repository.approve(id, approverId)) {
       throw new ConflictException('Deployment is not awaiting approval');
     }
-    return this.repository.find(id)!;
+    return this.redacted(id, this.repository.find(id)!);
   }
 }

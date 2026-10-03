@@ -1,3 +1,4 @@
+import { redactDeploymentOutput } from '../../infrastructure/command-diagnostics.js';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHash } from 'node:crypto';
@@ -129,7 +130,8 @@ export class PolicyStage implements StageRunner {
         ? join(paths.test, 'parity', 'source')
         : application.sourcePath;
     if (
-      this.config.get('backend.parityTestMode', { infer: true }) === 'registry' &&
+      this.config.get('backend.parityTestMode', { infer: true }) ===
+        'registry' &&
       !existsSync(sourcePath)
     ) {
       return {
@@ -187,7 +189,20 @@ export class PolicyStage implements StageRunner {
         exitCode: result.code,
         artifacts: {},
         error: `Policy CLI failed with exit code ${result.code ?? 'unknown'}`,
-        summary: { stdout: tail(result.stdout), stderr: tail(result.stderr) },
+        summary: {
+          stdout: tail(
+            redactDeploymentOutput(
+              result.stdout,
+              context.diagnosticSecrets ?? [],
+            ),
+          ),
+          stderr: tail(
+            redactDeploymentOutput(
+              result.stderr,
+              context.diagnosticSecrets ?? [],
+            ),
+          ),
+        },
       };
     }
     const planPath = join(paths.policy, 'plan.json');

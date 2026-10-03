@@ -24,3 +24,15 @@ export function prepareSettingsEnvironment(
     return { name, ...(row.stored && !row.value ? {} : { value: row.value }) };
   });
 }
+
+export function settingsDeploymentRevision(
+  deployments: { id: string; sourceRevision: string }[],
+  servingDeploymentId?: string,
+): string {
+  const serving = deployments.find((item) => item.id === servingDeploymentId);
+  if (!serving)
+    throw new Error(
+      "현재 서비스 배포가 없습니다. 새 배포에서 커밋을 선택하세요.",
+    );
+  return serving.sourceRevision;
+}

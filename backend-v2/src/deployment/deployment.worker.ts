@@ -192,6 +192,10 @@ export class DeploymentWorker
     mkdirSync(paths[runner.name], { recursive: true });
 
     const context: StageContext = {
+      diagnosticSecrets: [
+        ...Object.values(this.repository.environment(deployment.id, 'runtime')),
+        ...Object.values(this.repository.environment(deployment.id, 'test')),
+      ],
       application,
       deployment: this.requiredDeployment(deployment.id),
       paths,

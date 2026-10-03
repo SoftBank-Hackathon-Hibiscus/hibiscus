@@ -126,12 +126,7 @@ export class GithubService {
     const link = this.database.db
       .select()
       .from(githubApplicationLinks)
-      .where(
-        and(
-          eq(githubApplicationLinks.applicationId, applicationId),
-          eq(githubApplicationLinks.userId, userId),
-        ),
-      )
+      .where(eq(githubApplicationLinks.applicationId, applicationId))
       .get();
     if (!link) throw new NotFoundException('Linked application not found');
     const repo = await this.authorizedRepository(
