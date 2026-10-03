@@ -7,6 +7,7 @@ import { createApproval } from "./approval.js";
 import { CosignSigner, CosignVerifier, DryRunSigner, isKmsKey, MultiKeyVerifier, type BlobVerifier, type ImageVerifier } from "./cosign.js";
 import { runAnchor } from "./anchor.js";
 import { runRevoke } from "./revoke.js";
+import { CraneLister } from "./registry.js";
 import { SignerError, writeJson } from "./io.js";
 import { DEFAULT_PLAN_SCHEMA, loadPlan } from "./plan.js";
 import { checkPublicKeyPins, looseKeyPermissions, publicKeyFingerprint, readPolicy } from "./keys.js";
@@ -24,7 +25,8 @@ const USAGE = `사용법
   npx tsx src/cli.ts verify --result <sign_result.json> [--plan <plan.json>] [--approval <approval.json>] [--audit <감사 로그>] [--image-repo <저장소>]
                             [--attestation [--policy <deploy.rego>] [--policy-sha256 <지문>] [--test-result <test_result.json>]] [--max-age <분>] [--json]
                             [--latest] [--pub <cosign.pub>] [--pubkey-sha256 <지문>] [--no-tlog] [--plan-schema <Plan.schema.json>]
-  npx tsx src/cli.ts audit --audit <감사 로그> [--anchors <고정값 파일>] [--images [--strict-images] [--image-repo <저장소>]] [--pub <cosign.pub>] [--no-tlog]
+  npx tsx src/cli.ts audit --audit <감사 로그> [--anchors <고정값 파일>] [--images [--strict-images] [--image-repo <저장소>]
+                           [--sweep [--sweep-max <N>]] [--digests-file <파일>]] [--json] [--pub <cosign.pub>] [--no-tlog]
   npx tsx src/cli.ts fingerprint [--pub <cosign.pub>] [--pubkey-sha256 <지문>] | --policy <정책.rego> [--policy-sha256 <지문>]
   npx tsx src/cli.ts anchor --audit <감사 로그> [--anchors <고정값 파일>] (--key <cosign.key>) [--no-tlog]
   npx tsx src/cli.ts revoke --audit <감사 로그> --digest <sha256:…> [--run-id <id>] --reason <vulnerability|policy_changed|key_compromise|mistake>
@@ -63,6 +65,9 @@ const USAGE = `사용법
   --images      레지스트리 서명과 맞춰 봄: signed 줄마다 맞는 서명이 있는지, audit_head 가 붙은 서명이 전부 로그에 있는지
                 (체인을 통째로 다시 계산하거나 signed 줄을 지우거나 거절로 바꾼 것도 잡음). 거절 줄 digest 는 --image-repo 저장소에서 찾음
   --strict-images --images 와 같이: audit_head 없는 서명(감사 로그 없이 한 서명)도 로그에 없는 서명으로 봄. 키 도용 감지
+  --sweep       --images 와 같이: 저장소 태그를 crane 으로 전부 훑어서 로그에 한 번도 안 나온 이미지의 서명도 봄. 없으면 SIGNER_AUDIT_SWEEP=1
+  --sweep-max   저장소당 태그 한도 (기본 1000). 넘으면 일부만 보고 통과시키지 않고 멈춤 (SWEEP_TRUNCATED)
+  --digests-file 태그 없는 이미지 digest 목록 (한 줄에 sha256:<hex> 또는 <저장소>@sha256:<hex>)
 
 종료 코드: 0 서명함·확인함 / 1 서명 거절·확인 실패 / 2 실행 오류`;
 
@@ -113,6 +118,9 @@ const OPTIONS = {
   by: { type: "string" },
   note: { type: "string" },
   latest: { type: "boolean", default: false },
+  sweep: { type: "boolean", default: false },
+  "digests-file": { type: "string" },
+  "sweep-max": { type: "string" },
   json: { type: "boolean", default: false },
 } as const;
 
@@ -345,18 +353,52 @@ async function main(argv: string[]): Promise<number> {
   }
 
   if (command === "audit") {
-    if (values["strict-images"] === true && values.images !== true) throw new SignerError("ARG_INVALID", "--strict-images 는 --images 와 같이 써야 함 (레지스트리 서명을 볼 때만 의미 있음)");
-    const imageRepo = values["image-repo"] || process.env.IMAGE_REPO || undefined;
-    const outcome = await runAuditVerify({
-      auditPath: required(auditPath, "audit"),
-      ...(values.images === true ? { verifier: trustedVerifier(), strictImages: values["strict-images"] === true } : {}),
-      ...(imageRepo !== undefined ? { imageRepo } : {}),
-      ...(anchorsPath !== undefined ? { anchors: { path: anchorsPath, verifier: trustedVerifier() } } : {}),
-    });
+    const json = values.json === true;
+    const sweep = values.sweep === true || process.env.SIGNER_AUDIT_SWEEP === "1";
+    const jsonError = (e: unknown): number => {
+      console.log(JSON.stringify({ ok: false, code: 2, error: e instanceof SignerError ? e.code : "INTERNAL", message: e instanceof Error ? e.message : String(e) }));
+      return 2;
+    };
+    let outcome: Awaited<ReturnType<typeof runAuditVerify>>;
+    try {
+      if (values["strict-images"] === true && values.images !== true) throw new SignerError("ARG_INVALID", "--strict-images 는 --images 와 같이 써야 함 (레지스트리 서명을 볼 때만 의미 있음)");
+      if ((values.sweep === true || values["digests-file"] !== undefined || values["sweep-max"] !== undefined) && values.images !== true) {
+        throw new SignerError("ARG_INVALID", "--sweep·--digests-file·--sweep-max 는 --images 와 같이 써야 함");
+      }
+      const sweepMax = values["sweep-max"] !== undefined ? Number(values["sweep-max"]) : undefined;
+      if (sweepMax !== undefined && !(Number.isInteger(sweepMax) && sweepMax > 0)) throw new SignerError("ARG_INVALID", `--sweep-max 는 양의 정수: ${values["sweep-max"]}`);
+      const imageRepo = values["image-repo"] || process.env.IMAGE_REPO || undefined;
+      outcome = await runAuditVerify({
+        auditPath: required(auditPath, "audit"),
+        ...(values.images === true ? { verifier: trustedVerifier(), strictImages: values["strict-images"] === true } : {}),
+        ...(imageRepo !== undefined ? { imageRepo } : {}),
+        ...(anchorsPath !== undefined ? { anchors: { path: anchorsPath, verifier: trustedVerifier() } } : {}),
+        ...(values.images === true && (sweep || values["digests-file"] !== undefined)
+          ? {
+              sweep: {
+                lister: new CraneLister("crane", cosignOptions),
+                ...(values["digests-file"] !== undefined ? { digestsFile: values["digests-file"] } : {}),
+                ...(sweepMax !== undefined ? { max: sweepMax } : {}),
+              },
+            }
+          : {}),
+      });
+    } catch (e) {
+      if (json) return jsonError(e);
+      throw e;
+    }
+    if (json) {
+      console.log(JSON.stringify(outcome.code === 0 ? { ok: true, ...outcome } : { ok: false, ...outcome }));
+      return outcome.code;
+    }
     if (outcome.code === 0) {
       console.log(`[signer] 감사 로그 이상 없음: ${outcome.lines}줄, head=${outcome.head}${outcome.revoked > 0 ? `, 철회 ${outcome.revoked}건` : ""}`);
       if (outcome.anchors !== undefined) console.log(`  끝 고정값 ${outcome.anchors}개와 일치 (잘리거나 다시 쓴 흔적 없음)`);
       if (values.images === true) console.log(`  이미지 ${outcome.images}개 확인: signed 줄 ${outcome.signed}개 모두 서명과 일치, 로그에 없는 서명 없음`);
+      if (outcome.swept !== undefined) console.log(`  레지스트리 훑기: 태그 ${outcome.swept.tags}개(서명 태그 ${outcome.swept.signature_tags}개), 목록 파일 ${outcome.swept.file}개, 로그에 없던 이미지 ${outcome.swept.added}개 더 확인`);
+    } else if (outcome.findings !== undefined && outcome.findings.length > 0) {
+      console.error(`[signer] 감사 로그 문제 ${outcome.findings.length}건 (이미지 ${outcome.images ?? 0}개 확인)`);
+      for (const f of outcome.findings) console.error(`  ${f.line > 0 ? `${f.line}번째 줄 ` : ""}(${f.reason}): ${f.detail}`);
     } else {
       const where = outcome.line > 0 ? `${outcome.line}번째 줄` : "";
       console.error(`[signer] 감사 로그 ${where}${where ? " " : ""}문제 (${outcome.reason}): ${outcome.detail}`);

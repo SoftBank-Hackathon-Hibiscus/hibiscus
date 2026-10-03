@@ -6,6 +6,7 @@ import { checkAnchors, type AnchorBreak } from "./anchor.js";
 import { DEPLOY_PREDICATE_TYPE, findDeployStatement } from "./attestation.js";
 import { cancelledHashes, checkAuditChain, findSignedLine, GENESIS, readAuditFile, revocationOf, type AuditBreak } from "./audit.js";
 import { imageRefOf, type BlobVerifier, type ImageVerifier } from "./cosign.js";
+import { readDigestsFile, sweepDigests, type RegistryLister } from "./registry.js";
 import { canonicalize, parseWith, readJson, sha256Hex, SignerError } from "./io.js";
 import { DEFAULT_PLAN_SCHEMA, loadPlan } from "./plan.js";
 import { AUTO_APPROVER, SignResultSchema, type AuditLine, type SignResult } from "./schema.js";
@@ -213,6 +214,11 @@ export interface AuditVerifyOptions {
   strictImages?: boolean;
   /** 있으면 감사 로그 끝 고정값(anchors 파일)과도 맞춰 봄. 끝을 잘라냈거나 다시 쓴 것을 잡음 */
   anchors?: { path: string; verifier: BlobVerifier };
+  /**
+   * 있으면 저장소의 태그를 전부 훑어 로그에 한 번도 안 나온 이미지의 서명도 봄 (훔친 키, 복사한 로그로 한 서명).
+   * digestsFile 은 태그 없는 이미지용 목록, max 는 저장소당 태그 한도
+   */
+  sweep?: { lister: RegistryLister; digestsFile?: string; max?: number };
 }
 
 export type AuditImageReason = "ref_invalid" | "signature_invalid" | "unlogged_signature" | "twin_signature" | "foreign_signature";
@@ -235,9 +241,26 @@ function annotationDiff(expected: Record<string, string>, sig: Record<string, st
     .join(", ");
 }
 
+export interface AuditFinding {
+  line: number;
+  reason: AuditImageReason;
+  image: string;
+  run_id?: string;
+  detail: string;
+}
+
+/** 훑기로 본 것 */
+export interface SweepCount {
+  tags: number;
+  signature_tags: number;
+  file: number;
+  /** 감사 로그에 없던 이미지 중 새로 확인한 수 */
+  added: number;
+}
+
 export type AuditVerifyOutcome =
-  | { code: 0; lines: number; head: string; signed: number; images: number; revoked: number; anchors?: number }
-  | { code: 1; line: number; reason: AuditBreak | AuditImageReason | AnchorBreak; detail: string };
+  | { code: 0; lines: number; head: string; signed: number; images: number; revoked: number; anchors?: number; swept?: SweepCount }
+  | { code: 1; line: number; reason: AuditBreak | AuditImageReason | AnchorBreak; detail: string; findings?: AuditFinding[]; images?: number; swept?: SweepCount };
 
 /**
  * 1) 체인이 이어지는지 2) (verifier 가 있으면) signed 줄마다 그 내용·anchor 와 맞는 이미지 서명이 있는지
@@ -283,12 +306,33 @@ export async function runAuditVerify(o: AuditVerifyOptions): Promise<AuditVerify
     throw new SignerError("ARG_MISSING", "감사 로그에 서명 줄이 없어서 이미지 저장소를 모름. --image-repo 를 주세요");
   }
 
-  // 확인할 이미지: signed 줄 이미지 + 모든 줄 digest × 알고 있는 저장소
+  // 확인할 이미지: signed 줄 이미지 + 모든 줄 digest × 알고 있는 저장소 (+ 훑기면 레지스트리의 이미지 전부)
   const refs = new Set(signedAt.keys());
   for (const line of lines) if (line.entry.kind === "sign") for (const repo of repos) refs.add(imageRefOf(repo, line.entry.digest));
+  const fromLog = new Set(refs);
+  let swept: SweepCount | undefined;
+  if (o.sweep !== undefined) {
+    swept = { tags: 0, signature_tags: 0, file: 0, added: 0 };
+    for (const repo of [...repos].sort()) {
+      const found = await sweepDigests(o.sweep.lister, repo, o.sweep.max);
+      swept.tags += found.tags;
+      swept.signature_tags += found.signatureTags;
+      for (const d of found.digests) refs.add(imageRefOf(repo, d));
+    }
+    if (o.sweep.digestsFile !== undefined) {
+      for (const { repo, digest } of readDigestsFile(o.sweep.digestsFile)) {
+        swept.file++;
+        for (const r of repo !== undefined ? [repo] : repos) refs.add(imageRefOf(r, digest));
+      }
+    }
+    swept.added = refs.size - fromLog.size;
+  }
   const lineOfHash = new Map<string, number>([[GENESIS, 0], ...lines.map((l) => [l.hash, l.seq] as const)]);
   const matches = sigMatchesLine;
 
+  // 첫 문제에서 멈추지 않고 전부 모음 (계속 남는 문제 하나가 뒤 이미지 검사를 가리지 않게)
+  const findings: AuditFinding[] = [];
+  const found = (f: AuditFinding) => findings.push(f);
   let images = 0;
   for (const imageRef of [...refs].sort()) {
     let sigs: Array<Record<string, string>>;
@@ -296,44 +340,48 @@ export async function runAuditVerify(o: AuditVerifyOptions): Promise<AuditVerify
       sigs = await o.verifier.signatures(imageRef);
     } catch (e) {
       if (e instanceof SignerError && e.code === "SIGNATURE_INVALID") {
-        return { code: 1, line: signedAt.get(imageRef)?.[0]?.seq ?? 0, reason: "signature_invalid", detail: e.message };
+        // 훑어서 더한 이미지에 믿지 않는 키로만 한 서명은 배포에 못 써서 넘김
+        if (fromLog.has(imageRef)) found({ line: signedAt.get(imageRef)?.[0]?.seq ?? 0, reason: "signature_invalid", image: imageRef, detail: e.message });
+        images++;
+        continue;
       }
       throw e;
     }
     const logged = signedAt.get(imageRef) ?? [];
     for (const line of logged) {
-      if (!sigs.some((sig) => matches(sig, line))) {
-        return { code: 1, line: line.seq, reason: "signature_invalid", detail: `이 줄 내용·anchor 와 맞는 이미지 서명이 없음: ${imageRef}` };
-      }
+      if (!sigs.some((sig) => matches(sig, line))) found({ line: line.seq, reason: "signature_invalid", image: imageRef, detail: `이 줄 내용·anchor 와 맞는 이미지 서명이 없음: ${imageRef}` });
     }
     const queriedRepo = encodeImageRepo(imageRef.slice(0, imageRef.lastIndexOf("@")));
     for (const sig of sigs) {
+      const runId = sig.run_id ?? "?";
       // 다른 저장소에서 서명한 것을 이미지와 같이 복사해 온 서명
       if (sig.image_repo !== undefined && sig.image_repo !== queriedRepo) {
-        return { code: 1, line: 0, reason: "foreign_signature", detail: `다른 저장소(image_repo=${sig.image_repo})에서 옮겨 온 서명 (run_id=${sig.run_id ?? "?"}): ${imageRef}` };
+        found({ line: 0, reason: "foreign_signature", image: imageRef, run_id: runId, detail: `다른 저장소(image_repo=${sig.image_repo})에서 옮겨 온 서명 (run_id=${runId}): ${imageRef}` });
+        continue;
       }
       const anchor = sig.audit_head;
       if (anchor === undefined) {
-        if (!o.strictImages) continue; // 감사 로그를 안 켜고 한 서명
-        return { code: 1, line: 0, reason: "unlogged_signature", detail: `감사 로그 없이 한 서명 (audit_head 없음, run_id=${sig.run_id ?? "?"}): ${imageRef}` };
+        if (o.strictImages) found({ line: 0, reason: "unlogged_signature", image: imageRef, run_id: runId, detail: `감사 로그 없이 한 서명 (audit_head 없음, run_id=${runId}): ${imageRef}` });
+        continue; // strict 가 아니면 감사 로그를 안 켜고 한 서명으로 봄
       }
-      if (!logged.some((line) => matches(sig, line))) {
-        // 같은 실행·같은 anchor 의 기록이 있는데 주석이 다르면, 정상 서명을 복사해서 일부만 바꾼 쌍둥이 서명
-        const twin = logged.find((line) => line.anchor === anchor && line.entry.kind === "sign" && line.entry.run_id === sig.run_id);
-        if (twin !== undefined && twin.anchor !== undefined && twin.entry.kind === "sign") {
-          const expected = twin.annotations ?? logAnnotations(twin.entry, twin.anchor);
-          return { code: 1, line: twin.seq, reason: "twin_signature", detail: `기록된 서명과 주석만 다른 서명 (${annotationDiff(expected, sig) || "주석 같음"}): ${imageRef}` };
-        }
-        const at = lineOfHash.get(anchor);
-        return {
-          code: 1,
-          line: at === undefined ? 0 : at + 1,
-          reason: "unlogged_signature",
-          detail: `감사 로그에 없는 서명 (run_id=${sig.run_id ?? "?"}, audit_head=${anchor.slice(0, 12)}…): ${imageRef}`,
-        };
+      if (logged.some((line) => matches(sig, line))) continue;
+      // 같은 실행·같은 anchor 의 기록이 있는데 주석이 다르면, 정상 서명을 복사해서 일부만 바꾼 쌍둥이 서명
+      const twin = logged.find((line) => line.anchor === anchor && line.entry.kind === "sign" && line.entry.run_id === sig.run_id);
+      if (twin !== undefined && twin.anchor !== undefined && twin.entry.kind === "sign") {
+        const expected = twin.annotations ?? logAnnotations(twin.entry, twin.anchor);
+        found({ line: twin.seq, reason: "twin_signature", image: imageRef, run_id: runId, detail: `기록된 서명과 주석만 다른 서명 (${annotationDiff(expected, sig) || "주석 같음"}): ${imageRef}` });
+        continue;
       }
+      const at = lineOfHash.get(anchor);
+      // audit_head 가 이 로그의 줄이면 그 뒤에서 갈라진 서명 (signed 줄을 지웠거나, 복사한 로그로 서명)
+      const where = at === undefined ? "이 로그에 없는 audit_head" : `이 로그 ${at}번째 줄 뒤에서 갈라짐 (signed 줄을 지웠거나 복사한 로그로 서명)`;
+      found({ line: at === undefined ? 0 : at + 1, reason: "unlogged_signature", image: imageRef, run_id: runId, detail: `감사 로그에 없는 서명 (run_id=${runId}, audit_head=${anchor.slice(0, 12)}…, ${where}): ${imageRef}` });
     }
     images++;
   }
-  return { code: 0, lines: lines.length, head, signed: [...signedAt.values()].reduce((n, ls) => n + ls.length, 0), images, revoked, ...withAnchors };
+  const signed = [...signedAt.values()].reduce((n, ls) => n + ls.length, 0);
+  const withSwept = swept !== undefined ? { swept } : {};
+  const first = findings[0];
+  if (first !== undefined) return { code: 1, line: first.line, reason: first.reason, detail: first.detail, findings, images, ...withSwept };
+  return { code: 0, lines: lines.length, head, signed, images, revoked, ...withAnchors, ...withSwept };
 }

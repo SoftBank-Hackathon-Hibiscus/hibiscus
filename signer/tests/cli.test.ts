@@ -232,6 +232,20 @@ describe("cli audit", () => {
   it("--audit 도 SIGNER_AUDIT_LOG 도 없으면 2", () => {
     expect(cli(["audit"]).code).toBe(2);
   });
+
+  it("--json 이면 결과를 JSON 한 줄로, 실행 오류도 JSON", () => {
+    const audit = auditLog(tmp());
+    expect(JSON.parse(cli(["audit", "--audit", audit, "--json"]).stdout)).toMatchObject({ ok: true, code: 0, lines: 2, revoked: 0 });
+    const r = cli(["audit", "--audit", join(tmp(), "none.jsonl"), "--json"]);
+    expect(r.code).toBe(2);
+    expect(JSON.parse(r.stdout)).toMatchObject({ ok: false, code: 2, error: "AUDIT_INVALID" });
+  });
+
+  it.each([["--sweep"], ["--digests-file", "x.txt"], ["--sweep-max", "5"]])("%s 는 --images 없이 쓰면 ARG_INVALID (2)", (...flag) => {
+    const r = cli(["audit", "--audit", auditLog(tmp()), ...flag]);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/ARG_INVALID/);
+  });
 });
 
 describe("cli verify --policy-sha256", () => {

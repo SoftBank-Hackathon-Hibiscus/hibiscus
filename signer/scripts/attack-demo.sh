@@ -47,8 +47,12 @@ check() {
   local why
   why="$(printf '%s\n' "$out" | grep -v -e '^WARNING' -e 'insecure practice' | grep -m1 -e '\[signer\]' -e '^{')"
   [ ${#why} -gt 220 ] && why="${why:0:217}..."
+  # audit 가 문제를 여러 건 찾으면 건마다 한 줄씩 더 나옴
+  local more
+  more="$(printf '%s\n' "$out" | grep -E '^  ([0-9]+번째 줄 )?\([a-z_]+\): ' | head -3 | cut -c1-200)"
   if [ "$code" = "$want" ]; then
     printf '  \033[32m✔\033[0m %s\n      exit %s  %s\n' "$title" "$code" "$why"
+    [ -n "$more" ] && printf '%s\n' "$more" | sed 's/^/      /'
   else
     wrong=$((wrong + 1))
     printf '  \033[31m✘\033[0m %s (기대 exit %s, 실제 %s)\n' "$title" "$want" "$code"
@@ -166,6 +170,29 @@ check 2 "레포의 cosign.pub 를 공격자 공개키로 바꿔치기 (지문 �
 cosign sign --yes --key "$KEY" --use-signing-config=false --tlog-upload=false -a run_id=r-999 -a targets=onprem+cloud_run "$REG@$D2" >/dev/null 2>&1
 check 1 "팀 키를 훔쳐 signer 밖에서 직접 서명: 감사 로그에 없는 서명이 레지스트리에 생김 (--strict-images)" \
   signer audit --audit "$W/audit.jsonl" --images --strict-images --image-repo "$REG" "${VERIFY[@]}"
+
+# --- 감사 로그 밖 서명 (별도 저장소·로그) ---
+step "공격 3-2. 감사 로그 밖에서 한 서명 (레지스트리 훑기)"
+REG2="localhost:$PORT/hib/billing"
+for n in 1 2 3; do
+  echo "b$n" >"$W/b$n" && tar cf "$W/b$n.tar" -C "$W" "b$n" && crane append -f "$W/b$n.tar" -t "$REG2:b$n" >/dev/null 2>&1
+done
+B1="$(crane digest "$REG2:b1")"
+B2="$(crane digest "$REG2:b2")"
+B3="$(crane digest "$REG2:b3")"
+edit fixtures/plans/allow-onprem.plan.json "$W/plan-b1.json" "o.run_id='r-201';o.digest='$B1'"
+edit fixtures/plans/allow-onprem.plan.json "$W/plan-b2.json" "o.run_id='r-202';o.digest='$B2'"
+SIGN_B=(--requester alice --image-repo "$REG2" --log "$W/decisions-b.jsonl" --no-tlog)
+env SIGNER_COSIGN_KEY="$KEY" "${SIGNER[@]}" sign --plan "$W/plan-b1.json" "${SIGN_B[@]}" --audit "$W/audit-b.jsonl" --out "$W/sb1.json" >/dev/null 2>&1
+# 운영자가 한 번만 SIGNER_AUDIT_LOG 를 진짜 로그 사본으로 바꿔 서명
+cp "$W/audit-b.jsonl" "$W/fork-b.jsonl"
+env SIGNER_COSIGN_KEY="$KEY" "${SIGNER[@]}" sign --plan "$W/plan-b2.json" "${SIGN_B[@]}" --audit "$W/fork-b.jsonl" --out "$W/sb2.json" >/dev/null 2>&1
+# 훔친 키로 로그에 한 번도 안 나온 새 이미지에 직접 서명
+cosign sign --yes --key "$KEY" --use-signing-config=false --tlog-upload=false -a run_id=r-998 "$REG2@$B3" >/dev/null 2>&1
+check 0 "(약점) 복사한 로그로 한 서명·signer 밖 새 이미지 서명: --strict-images 로도 안 보임" \
+  signer audit --audit "$W/audit-b.jsonl" --images --strict-images --image-repo "$REG2" "${VERIFY[@]}"
+check 1 "--sweep: 저장소 태그를 다 훑어서 두 건 다 찾음" \
+  signer audit --audit "$W/audit-b.jsonl" --images --strict-images --sweep --image-repo "$REG2" "${VERIFY[@]}"
 
 # --- 증명서 정책 ---
 step "공격 4. 시험에 실패한 이미지 배포"
