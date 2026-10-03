@@ -119,13 +119,15 @@ deploy
 
 `STAGE_MODE=cli`는 기존 `policy/`와 `signer/` CLI를 호출합니다. CLI 모드는 각 폴더의 의존성을 먼저 설치해야 합니다.
 
+CLI 정책은 배포 대상 커밋의 `.hibiscus/policy.yaml`만 사용합니다. Backend VM의 공통 정책 파일로 대체하지 않습니다. 파일이 없으면 정책 단계를 `skipped`로 기록하고 `onprem`, `cloud_run` 배포와 failover를 허용하는 계획을 생성합니다. 파일이 있으면 경로와 SHA-256을 `policy_results`에 저장합니다.
+
 ## 결과 저장과 CLI 연결
 
 영구 저장소는 DB입니다. 결과 파일 경로를 영구 저장소로 사용하지 않습니다.
 
 - `deployment_artifacts`: JSON과 설명 문서의 원문, SHA-256 해시, 계약 스키마 이름, 검증 오류를 저장합니다.
 - `deployment_audit_logs`: `decisions.jsonl`의 유효한 줄을 `deploy`, `rollback`, `sign`으로 구분하여 추가 저장합니다. 원본 JSONL도 산출물로 보관합니다.
-- `policy_results`: 조회용 정책 요약과 `planArtifactId`, `piiArtifactId`를 저장합니다.
+- `policy_results`: 조회용 정책 요약, 앱 정책 경로·SHA-256·skip 여부와 `planArtifactId`, `piiArtifactId`를 저장합니다.
 - 단계의 `artifacts` 값은 파일 경로가 아니라 DB 산출물 ID입니다.
 - `GET /deployments/:id`는 `deployment`, `stages`, `policyResult`, `artifacts`, `auditLogs`를 반환합니다. 원문은 각 산출물의 `content`에 있습니다.
 

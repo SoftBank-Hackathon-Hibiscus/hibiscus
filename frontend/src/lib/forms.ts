@@ -41,7 +41,6 @@ export interface RegistrationDraft {
   slug: string;
   imageRepo: string;
   containerPort: string;
-  policyPath: string;
   testTemplate: TestTemplate;
   requiresApproval: boolean;
   autoDeploy: boolean;
@@ -55,7 +54,6 @@ export const EMPTY_REGISTRATION: RegistrationDraft = {
   slug: '',
   imageRepo: '',
   containerPort: String(DEFAULT_CONTAINER_PORT),
-  policyPath: '',
   testTemplate: 'allow',
   requiresApproval: false,
   autoDeploy: true,
@@ -125,8 +123,6 @@ export function toGithubApplicationInput(d: RegistrationDraft): GithubApplicatio
     branch: d.branch,
     auto_deploy: d.autoDeploy,
   };
-  const policyPath = d.policyPath.trim();
-  if (policyPath) input.policy_path = policyPath;
   return input;
 }
 

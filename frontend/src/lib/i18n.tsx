@@ -389,7 +389,6 @@ const dict = {
   imageRepoLabel: ['이미지 저장소', 'イメージリポジトリ'],
   imageRepoHint: ['빌드한 컨테이너 이미지를 올릴 레지스트리 경로', 'ビルドしたコンテナイメージを置くレジストリのパス'],
   containerPortLabel: ['컨테이너 포트', 'コンテナポート'],
-  policyPathLabel: ['정책 파일 경로 (선택)', 'ポリシーファイルのパス（任意）'],
   testTemplateLabel: ['테스트 템플릿', 'テストテンプレート'],
   testTemplateAllow: ['allow: 테스트 결과와 무관하게 정책으로 판단', 'allow: テスト結果に関係なくポリシーで判断'],
   testTemplateBlock: ['block-test-failed: 테스트 실패 시 차단', 'block-test-failed: テスト失敗時はブロック'],

@@ -134,7 +134,6 @@ export class GithubService {
           slug: input.slug,
           image_repo: input.image_repo,
           container_port: input.container_port,
-          policy_path: input.policy_path,
           test_template: input.test_template,
           requires_approval: input.requires_approval,
           health_check: input.health_check,

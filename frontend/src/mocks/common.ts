@@ -43,7 +43,6 @@ export function applicationView(overrides: Partial<ApplicationView['application'
       containerPort: 8080,
       repo: 'SoftBank-Hackathon-Hibiscus/guestbook',
       defaultBranch: 'main',
-      policyPath: null,
       testTemplate: 'allow',
       requiresApproval: false,
       createdAt: at(-86400),
@@ -178,6 +177,9 @@ export function policyResult(deploymentId: string, input: Pick<PolicyResult, 'de
   return {
     deploymentId,
     ...input,
+    policyPath: '.hibiscus/policy.yaml',
+    policyHash: 'p'.repeat(64),
+    skipped: false,
     planPath: null,
     piiPath: null,
     planArtifactId,
