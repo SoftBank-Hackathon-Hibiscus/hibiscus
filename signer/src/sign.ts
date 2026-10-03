@@ -8,7 +8,7 @@ import { imageRefOf, type ImageSigner, type ImageVerifier } from "./cosign.js";
 import { decideSign } from "./decide.js";
 import { appendSignLog, canonicalize, sha256Hex, SignerError, signLogLine, writeJson } from "./io.js";
 import { DEFAULT_PLAN_SCHEMA, loadPlan } from "./plan.js";
-import { AUTO_APPROVER, PersonSchema, SignResultSchema, type RefuseReason, type SignLog, type SignResult } from "./schema.js";
+import { AUTO_APPROVER, PersonSchema, SignErrorSchema, SignResultSchema, type RefuseReason, type SignLog, type SignResult } from "./schema.js";
 
 export interface SignOptions {
   planPath: string;
@@ -35,6 +35,31 @@ export type SignOutcome =
   | { code: 2; reason: "sign_failed"; detail: string };
 
 export async function runSign(o: SignOptions): Promise<SignOutcome> {
+  const seen: { runId?: string } = {};
+  try {
+    return await signOnce(o, seen);
+  } catch (e) {
+    // plan·승인 기록 형식 오류처럼 결정 전에 멈춘 시도도 감사 로그에 남김 (감사 로그 자체 오류는 남길 수 없음)
+    if (o.auditPath && e instanceof SignerError && !e.code.startsWith("AUDIT_")) {
+      const entry = SignErrorSchema.parse({
+        kind: "sign_error",
+        time: (o.now ?? (() => new Date()))().toISOString(),
+        code: e.code,
+        message: e.message.slice(0, 500),
+        ...(seen.runId !== undefined ? { run_id: seen.runId } : {}),
+        requester: o.requester.slice(0, 100),
+      });
+      try {
+        await appendAudit(o.auditPath, entry, undefined, o.audit);
+      } catch {
+        // 원래 오류를 그대로 알림
+      }
+    }
+    throw e;
+  }
+}
+
+async function signOnce(o: SignOptions, seen: { runId?: string }): Promise<SignOutcome> {
   const now = o.now ?? (() => new Date());
   if (existsSync(o.outPath)) rmSync(o.outPath);
 
@@ -42,6 +67,7 @@ export async function runSign(o: SignOptions): Promise<SignOutcome> {
   if (!PersonSchema.safeParse(o.requester).success) throw new SignerError("REQUESTER_INVALID", `요청자 id 형식 오류 (영문·숫자·._- 1~64자): ${o.requester}`);
   const loaded = loadPlan(o.planPath, o.planSchemaPath ?? DEFAULT_PLAN_SCHEMA);
   const { plan } = loaded;
+  seen.runId = plan.run_id;
   const approval = o.approvalPath ? loadApproval(o.approvalPath) : undefined;
   const imageRef = imageRefOf(o.imageRepo, plan.digest);
   const base = {

@@ -116,13 +116,15 @@ export async function runAuditVerify(o: AuditVerifyOptions): Promise<AuditVerify
   const signedAt = new Map<string, AuditLine[]>();
   const repos = new Set<string>(o.imageRepo !== undefined ? [o.imageRepo] : []);
   for (const line of lines) {
-    const ref = line.entry.signature_ref;
-    if (line.entry.result !== "signed" || ref === null || ref.startsWith("dry-run:")) continue;
+    const entry = line.entry;
+    if (entry.kind !== "sign") continue;
+    const ref = entry.signature_ref;
+    if (entry.result !== "signed" || ref === null || ref.startsWith("dry-run:")) continue;
     const imageRef = ref.startsWith("cosign:") ? ref.slice("cosign:".length) : "";
     const repo = imageRef.slice(0, Math.max(0, imageRef.lastIndexOf("@")));
     let expected: string | undefined;
     try {
-      expected = imageRefOf(repo, line.entry.digest);
+      expected = imageRefOf(repo, entry.digest);
     } catch {
       expected = undefined;
     }
@@ -138,10 +140,10 @@ export async function runAuditVerify(o: AuditVerifyOptions): Promise<AuditVerify
 
   // 확인할 이미지: signed 줄 이미지 + 모든 줄 digest × 알고 있는 저장소
   const refs = new Set(signedAt.keys());
-  for (const line of lines) for (const repo of repos) refs.add(imageRefOf(repo, line.entry.digest));
+  for (const line of lines) if (line.entry.kind === "sign") for (const repo of repos) refs.add(imageRefOf(repo, line.entry.digest));
   const lineOfHash = new Map<string, number>([[GENESIS, 0], ...lines.map((l) => [l.hash, l.seq] as const)]);
   const matches = (sig: Record<string, string>, line: AuditLine) =>
-    line.anchor !== undefined && Object.entries(logAnnotations(line.entry, line.anchor)).every(([k, v]) => sig[k] === v);
+    line.anchor !== undefined && line.entry.kind === "sign" && Object.entries(logAnnotations(line.entry, line.anchor)).every(([k, v]) => sig[k] === v);
 
   let images = 0;
   for (const imageRef of [...refs].sort()) {

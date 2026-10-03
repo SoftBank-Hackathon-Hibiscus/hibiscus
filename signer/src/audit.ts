@@ -3,7 +3,7 @@ import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, rmSync, s
 import { dirname, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { canonicalize, sha256Hex, SignerError } from "./io.js";
-import { AuditLineSchema, type AuditLine, type SignLog, type SignResult } from "./schema.js";
+import { AuditLineSchema, type AuditLine, type SignError, type SignLog, type SignResult } from "./schema.js";
 
 /** 첫 줄의 prev_hash, 빈 감사 로그의 체인 끝 */
 export const GENESIS = "0".repeat(64);
@@ -32,7 +32,7 @@ export async function readAuditHead(path: string, o: AuditOptions = {}): Promise
 }
 
 /** 한 줄 추가. 마지막 줄 읽기와 추가를 잠금 안에서 한 번에 함 */
-export async function appendAudit(path: string, entry: SignLog, anchor: string | undefined, o: AuditOptions = {}): Promise<AuditLine> {
+export async function appendAudit(path: string, entry: SignLog | SignError, anchor: string | undefined, o: AuditOptions = {}): Promise<AuditLine> {
   return withLock(path, o, () => {
     const last = lastLine(path);
     const body = { seq: (last?.seq ?? 0) + 1, prev_hash: last?.hash ?? GENESIS, entry, ...(anchor !== undefined ? { anchor } : {}) };
@@ -79,11 +79,11 @@ export function checkAuditChain(text: string): AuditCheck {
     if (line.seq !== n) return broken("seq_gap", `seq 가 ${line.seq} 임 (${n} 이어야 함). 줄이 빠졌거나 순서가 바뀜`);
     if (line.prev_hash !== prev) return broken("prev_mismatch", "prev_hash 가 앞 줄 hash 와 다름");
     if (auditHash(line) !== line.hash) return broken("hash_mismatch", "내용과 hash 가 안 맞음 (줄이 고쳐짐)");
-    if (line.entry.result === "signed") {
+    if (line.entry.kind === "sign" && line.entry.result === "signed") {
       if (line.anchor === undefined) return broken("anchor_invalid", "signed 줄에 anchor 가 없음");
       if (!seen.has(line.anchor)) return broken("anchor_invalid", "anchor 가 앞 줄 hash 가 아님 (체인을 다시 계산한 흔적)");
     } else if (line.anchor !== undefined) {
-      return broken("anchor_invalid", "refused 줄에 anchor 가 있음");
+      return broken("anchor_invalid", "서명 안 한 줄(거절·오류)에 anchor 가 있음");
     }
     seen.add(line.hash);
     prev = line.hash;
@@ -99,6 +99,7 @@ export function findSignedLine(lines: readonly AuditLine[], r: SignResult): Audi
     if (line === undefined) continue;
     const e = line.entry;
     if (
+      e.kind === "sign" &&
       e.result === "signed" &&
       e.run_id === r.run_id &&
       e.digest === r.digest &&

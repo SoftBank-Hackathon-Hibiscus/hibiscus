@@ -102,11 +102,23 @@ export const SignLogSchema = z
   .describe("decisions.jsonl 의 kind: sign 한 줄");
 export type SignLog = z.infer<typeof SignLogSchema>;
 
+export const SignErrorSchema = z
+  .strictObject({
+    kind: z.literal("sign_error").describe("결정 전에 난 서명 실패"),
+    time: TimeSchema,
+    code: z.string().regex(/^[A-Z][A-Z0-9_]{0,39}$/).describe("SignerError 코드 (PLAN_INVALID, REQUESTER_INVALID 등)"),
+    message: z.string().max(500),
+    run_id: RunIdSchema.optional().describe("plan 을 읽은 뒤에 난 오류면 그 실행 id"),
+    requester: z.string().max(100).optional().describe("요청자로 들어온 값 그대로 (형식이 틀렸을 수 있음)"),
+  })
+  .describe("plan·승인 기록 형식 오류처럼 서명 결정 전에 멈춘 시도. 감사 로그에만 남김 (decisions.jsonl 계약은 그대로)");
+export type SignError = z.infer<typeof SignErrorSchema>;
+
 export const AuditLineSchema = z
   .strictObject({
     seq: z.int().min(1).describe("줄 번호. 1 부터 빈 번호 없이"),
     prev_hash: Sha256HexSchema.describe("앞 줄 hash. 첫 줄은 0 이 64개"),
-    entry: SignLogSchema,
+    entry: z.discriminatedUnion("kind", [SignLogSchema, SignErrorSchema]),
     anchor: Sha256HexSchema.optional().describe("signed 줄에만. 서명 직전 체인 끝 hash (이미지 서명 주석 audit_head 와 같은 값)"),
     hash: Sha256HexSchema.describe("이 줄 hash. sha256(키 정렬 JSON {seq, prev_hash, entry, anchor})"),
   })
