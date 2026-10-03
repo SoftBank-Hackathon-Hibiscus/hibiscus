@@ -53,7 +53,7 @@ export class RecordingSigner implements ImageSigner, ImageVerifier {
  * 받은 인자를 파일에 적고 끝나는 가짜 cosign.
  * expectArgs 를 주면 인자가 그것과 똑같을 때만 0, 아니면 1 (서명 주석이 안 맞는 상황)
  */
-export function fakeCosign(dir: string, o: { code?: number; expectArgs?: string[] } = {}): { bin: string; argsFile: string } {
+export function fakeCosign(dir: string, o: { code?: number; expectArgs?: string[]; stderr?: string } = {}): { bin: string; argsFile: string } {
   const argsFile = join(dir, "args.txt");
   const bin = join(dir, "cosign");
   let check = `exit ${o.code ?? 0}`;
@@ -62,7 +62,8 @@ export function fakeCosign(dir: string, o: { code?: number; expectArgs?: string[
     writeFileSync(expected, o.expectArgs.join("\n") + "\n");
     check = `cmp -s "${argsFile}" "${expected}" && exit 0\necho "Error: no matching signatures" >&2\nexit 1`;
   }
-  writeFileSync(bin, `#!/bin/sh\nprintf '%s\\n' "$@" > "${argsFile}"\necho "boom: registry denied" >&2\n${check}\n`);
+  const stderr = (o.stderr ?? "boom: registry denied").replace(/'/g, "");
+  writeFileSync(bin, `#!/bin/sh\nprintf '%s\\n' "$@" > "${argsFile}"\necho '${stderr}' >&2\n${check}\n`);
   chmodSync(bin, 0o755);
   return { bin, argsFile };
 }

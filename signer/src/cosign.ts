@@ -85,10 +85,17 @@ export class CosignVerifier implements ImageVerifier {
       if (err.code === "ENOENT") throw new SignerError("COSIGN_MISSING", `cosign 실행 파일이 없음: ${this.cosignBin}`);
       if (err.killed) throw new SignerError("VERIFY_TIMEOUT", "cosign verify 시간 초과 (180초)");
       const stderr = lastStderrLine(e);
+      // 키·레지스트리를 못 쓴 건 설정 문제라 실행 오류(2). 나머지(서명 없음, 주석 불일치 등)만 검증 실패(1)
+      if (KEY_ERROR_RE.test(stderr)) throw new SignerError("KEY_UNAVAILABLE", `cosign 공개키를 못 읽음: ${stderr}`);
+      if (REGISTRY_ERROR_RE.test(stderr)) throw new SignerError("REGISTRY_UNAVAILABLE", `레지스트리에 접근하지 못함: ${stderr}`);
       throw new SignerError("SIGNATURE_INVALID", `cosign verify 실패${stderr ? `: ${stderr}` : ""}`);
     }
   }
 }
+
+// cosign v3.1.3 오류 문구 기준
+const KEY_ERROR_RE = /loading verifier from key opts|loading public key/;
+const REGISTRY_ERROR_RE = /dial tcp|connection refused|no such host|i\/o timeout|TLS handshake|UNAUTHORIZED|DENIED/;
 
 function lastStderrLine(e: unknown): string {
   return String((e as { stderr?: unknown }).stderr ?? "").trim().split("\n").pop() ?? "";

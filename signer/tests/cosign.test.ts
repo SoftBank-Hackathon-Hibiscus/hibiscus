@@ -90,11 +90,24 @@ describe("CosignVerifier", () => {
 
   it("cosign 이 실패하면 SIGNATURE_INVALID (stderr 마지막 줄 포함)", async () => {
     const dir = tmp();
-    const { bin } = fakeCosign(dir, { code: 1 });
+    const { bin } = fakeCosign(dir, { code: 1, stderr: "Error: no matching attestations: missing or incorrect annotation" });
     await expect(new CosignVerifier(pubKey(dir), bin).verify(`${REPO}@${DIGEST}`, {})).rejects.toMatchObject({
       code: "SIGNATURE_INVALID",
-      message: /registry denied/,
+      message: /missing or incorrect annotation/,
     });
+  });
+
+  it.each([
+    ["Error: no signatures found", "SIGNATURE_INVALID"],
+    ["Error: no matching attestations: missing or incorrect annotation", "SIGNATURE_INVALID"],
+    ["Error: not enough verified log entries from transparency log: 0 < 1", "SIGNATURE_INVALID"],
+    ["Error: loading verifier from key opts: loading public key: new gcp kms client: credentials: could not find default credentials", "KEY_UNAVAILABLE"],
+    ['Error: Get "https://localhost:5999/v2/": dial tcp [::1]:5999: connect: connection refused', "REGISTRY_UNAVAILABLE"],
+    ["Error: GET https://asia-northeast3-docker.pkg.dev/v2/x/manifests/sha256:abc: DENIED: Permission denied", "REGISTRY_UNAVAILABLE"],
+  ])("cosign stderr '%s' → %s (서명 문제만 검증 실패, 키·레지스트리 문제는 실행 오류)", async (stderr, code) => {
+    const dir = tmp();
+    const { bin } = fakeCosign(dir, { code: 1, stderr });
+    await expect(new CosignVerifier(pubKey(dir), bin).verify(`${REPO}@${DIGEST}`, {})).rejects.toMatchObject({ code });
   });
 
   it("공개키 자리에 KMS 키 주소를 주면 파일 확인 없이 그대로 넘김", async () => {
