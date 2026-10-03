@@ -85,6 +85,12 @@ def _cmd_policy_preview(args) -> int:
     return result['exit_code']
 
 
+def _cmd_backend_test(args) -> int:
+    from .backend_test import run_backend_test
+
+    result = run_backend_test(args.request, args.out_dir, args.policy_root)
+    _print_json(result)
+    return EXIT_OK
 
 
 
@@ -292,6 +298,13 @@ def build_parser() -> argparse.ArgumentParser:
     preview.add_argument('--policy-root')
     preview.add_argument('--json', action='store_true')
     preview.set_defaults(handler=_cmd_policy_preview)
+
+    backend = sub.add_parser('backend-test', help='Backend 호출용 테스트 단계 (요청 JSON → 정책 입력 JSON)')
+    backend.add_argument('--request', required=True)
+    backend.add_argument('--out-dir', required=True)
+    backend.add_argument('--policy-root')
+    backend.add_argument('--json', action='store_true', default=True)
+    backend.set_defaults(handler=_cmd_backend_test)
 
     return parser
 

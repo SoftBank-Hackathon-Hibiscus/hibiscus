@@ -117,6 +117,37 @@ handoff 안의 `caller_asserted`는 기존 parity 형식을 유지한 값이며,
 |---|---|
 | `test-build` | 0: 앱 검사 통과, 3: 완료했지만 불일치, 1: 입력·실행·정리 오류 |
 | `policy-preview` | 정책 CLI와 같음. 0: allow, 2: needs_approval, 3: block, 1: 실행 오류 |
+| `backend-test` | 0: 원본 시험과 정책 변환 완료. 앱 `passed=false`도 포함. 그 외: 다음 단계로 진행 금지 |
 
 현재 비교 범위는 요청 200건 이하와 빈 컨테이너 쓰기 계층입니다. 기존 볼륨·서비스 컨테이너는 받지 않습니다.
 테스트와 정책 결과 폴더는 새로 만들어야 하며, 완료 결과를 덮어쓰지 않습니다.
+
+## Backend 호출부
+
+`integrations/backend_v2.ts`의 `runParityTestStage`가 PR #20의 CommandRunner와 StageOutcome 형태에
+맞춰 Python 명령을 호출합니다. `repoRoot`, `pythonCommand`, `artifactRoot`, `outputDir`는 Backend 설정에서
+주고, `request`에는 아래 값을 전달합니다. `build_manifest`, `record`, `noise`는 실행 환경의 절대 경로입니다.
+앱 설정과 실행 정보 중 어느 곳에서 이 세 경로를 관리할지는 태현님 코드에 연결할 때 정해야 합니다.
+
+```json
+{
+  "format": "premortem-backend-test-v1",
+  "run_id": "Backend가 만든 deployment.id",
+  "app": "guestbook",
+  "source_revision": "앱 커밋 전체 SHA",
+  "digest": "레지스트리 index digest",
+  "build_manifest": "/workspace/build/build_manifest.json",
+  "record": "/workspace/records/session.jsonl",
+  "noise": "/workspace/records/session.noise.json",
+  "after": [10]
+}
+```
+
+호출 명령은 `python -m premortem backend-test --request <요청.json> --out-dir <단계폴더> --json`입니다.
+단계 폴더는 새 폴더 또는 비어 있는 폴더여야 합니다. 결과의 `artifacts`는 이 폴더 기준 상대 경로이며,
+TypeScript 호출부는 이를 Backend의 artifact root 기준으로 바꿉니다.
+필요하면 `port`, `health_path`, `health_timeout`을 요청에 추가합니다. 기본은 8080, `/healthz`, 30초입니다.
+
+`test_result.json` 변환은 류진님 adapter CLI가 맡습니다. 끝까지 실행된 불일치를 `status=succeeded`,
+`summary.test_passed=false`로 구분해서 정책이 판단할 수 있게 넘깁니다. 시험 중단·다른 digest·다른 커밋은
+단계 실패입니다. 이 호출부를 Backend에 등록하거나 DB 구조·배포 worker를 바꾸지는 않았습니다.
