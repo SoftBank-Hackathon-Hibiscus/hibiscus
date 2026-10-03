@@ -47,7 +47,8 @@ export class CosignSigner implements ImageSigner {
     // v3 는 --use-signing-config=false 없이 --tlog-upload=false 만 주면 에러
     if (this.options.noTlog) args.push("--use-signing-config=false", "--tlog-upload=false");
     for (const [key, value] of Object.entries(annotations)) args.push("-a", `${key}=${value}`);
-    args.push(imageRef);
+    // -- 뒤라서 이미지 자리에 옵션처럼 생긴 값이 와도 옵션으로 안 읽힘
+    args.push("--", imageRef);
     try {
       // 비밀번호는 COSIGN_PASSWORD 로만 받음
       await execFileAsync(this.cosignBin, args, { env: process.env, timeout: 180_000 });
@@ -62,6 +63,8 @@ export class CosignSigner implements ImageSigner {
 export interface ImageVerifier {
   /** 주석이 전부 맞는 서명이 하나라도 있으면 통과. 아니면 SIGNATURE_INVALID */
   verify(imageRef: string, annotations: Record<string, string>): Promise<void>;
+  /** 이 키로 확인되는 서명 전부의 주석. 서명이 없으면 빈 배열 */
+  signatures(imageRef: string): Promise<Array<Record<string, string>>>;
 }
 
 export class CosignVerifier implements ImageVerifier {
@@ -72,14 +75,39 @@ export class CosignVerifier implements ImageVerifier {
   ) {}
 
   async verify(imageRef: string, annotations: Record<string, string>): Promise<void> {
+    await this.run(imageRef, annotations);
+  }
+
+  async signatures(imageRef: string): Promise<Array<Record<string, string>>> {
+    let stdout: string;
+    try {
+      stdout = await this.run(imageRef, {});
+    } catch (e) {
+      // 서명이 없거나 이 키로 확인되는 게 없음
+      if (e instanceof SignerError && e.code === "SIGNATURE_INVALID") return [];
+      throw e;
+    }
+    // stdout 은 서명 payload 의 JSON 배열. optional 에 -a 주석이 들어 있음
+    const out: Array<Record<string, string>> = [];
+    for (const line of stdout.split("\n")) {
+      if (!line.startsWith("[")) continue;
+      for (const payload of JSON.parse(line) as Array<{ optional?: Record<string, unknown> }>) {
+        const optional = payload.optional ?? {};
+        out.push(Object.fromEntries(Object.entries(optional).filter((kv): kv is [string, string] => typeof kv[1] === "string")));
+      }
+    }
+    return out;
+  }
+
+  private async run(imageRef: string, annotations: Record<string, string>): Promise<string> {
     if (!isKmsKey(this.pubKeyPath) && !existsSync(this.pubKeyPath)) throw new SignerError("KEY_MISSING", `cosign 공개키 파일이 없음: ${this.pubKeyPath}`);
     const args = ["verify", "--key", this.pubKeyPath];
     if (this.options.noTlog) args.push("--insecure-ignore-tlog=true");
     for (const [key, value] of Object.entries(annotations)) args.push("-a", `${key}=${value}`);
-    args.push(imageRef);
+    args.push("--", imageRef);
     try {
-      // 통과하면 stdout 에 서명 내용이 나옴. 결과는 종료 코드로만 봄
-      await execFileAsync(this.cosignBin, args, { env: process.env, timeout: 180_000, maxBuffer: 16 * 1024 * 1024 });
+      const { stdout } = await execFileAsync(this.cosignBin, args, { env: process.env, timeout: 180_000, maxBuffer: 16 * 1024 * 1024 });
+      return stdout;
     } catch (e) {
       const err = e as { code?: unknown; killed?: boolean };
       if (err.code === "ENOENT") throw new SignerError("COSIGN_MISSING", `cosign 실행 파일이 없음: ${this.cosignBin}`);

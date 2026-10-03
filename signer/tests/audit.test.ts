@@ -173,21 +173,78 @@ describe("감사 로그 체인", () => {
 });
 
 describe("runAuditVerify", () => {
-  it("정상 체인: 줄 수·체인 끝, --images 면 signed 줄마다 이미지 서명까지 확인", async () => {
+  it("정상 체인: 줄 수·체인 끝, --images 면 이미지 3개(거절 줄 digest 포함)의 서명과 맞춰 봄", async () => {
     const { signer, auditPath } = await chain(tmp());
     const lines = readLines(auditPath);
-    expect(await runAuditVerify({ auditPath })).toEqual({ code: 0, lines: 4, head: lines[3]!.hash, images: 0 });
-    expect(await runAuditVerify({ auditPath, verifier: signer })).toEqual({ code: 0, lines: 4, head: lines[3]!.hash, images: 2 });
-    expect(signer.verifyCalls.map((c) => c.annotations.audit_head)).toEqual([lines[1]!.anchor, lines[3]!.anchor]);
+    expect(await runAuditVerify({ auditPath })).toEqual({ code: 0, lines: 4, head: lines[3]!.hash, signed: 0, images: 0 });
+    expect(await runAuditVerify({ auditPath, verifier: signer })).toEqual({ code: 0, lines: 4, head: lines[3]!.hash, signed: 2, images: 3 });
   });
 
-  it("dry-run 서명 줄은 실제 서명이 없어서 --images 에서 건너뜀", async () => {
+  it("dry-run 서명 줄은 실제 서명이 없어서 맞춰 볼 서명 없이 통과 (저장소는 --image-repo)", async () => {
     const dir = tmp();
     const auditPath = join(dir, "sign_audit.jsonl");
     await runSign({ planPath: plan("allow"), requester: "alice", imageRepo: REPO, signer: new DryRunSigner(), outPath: join(dir, "r.json"), logPath: join(dir, "d.jsonl"), auditPath, now: () => NOW });
     const verifier = new RecordingSigner();
-    expect(await runAuditVerify({ auditPath, verifier })).toMatchObject({ code: 0, lines: 1, images: 0 });
-    expect(verifier.verifyCalls).toHaveLength(0);
+    await expect(runAuditVerify({ auditPath, verifier })).rejects.toMatchObject({ code: "ARG_MISSING" });
+    expect(await runAuditVerify({ auditPath, verifier, imageRepo: REPO })).toMatchObject({ code: 0, lines: 1, signed: 0, images: 1 });
+  });
+
+  it("signature_ref 를 옵션처럼 생긴 값(cosign:--help)으로 바꾸고 체인을 다시 계산 → ref_invalid", async () => {
+    const { signer, auditPath } = await chain(tmp());
+    const lines = readLines(auditPath);
+    lines[0]!.entry.requester = "mallory";
+    lines[1]!.entry.signature_ref = "cosign:--help";
+    lines[3]!.entry.signature_ref = "cosign:--help";
+    writeLines(auditPath, recompute(lines, "remap"));
+    expect(await runAuditVerify({ auditPath, verifier: signer })).toMatchObject({ code: 1, line: 2, reason: "ref_invalid" });
+  });
+
+  it("signed 줄의 digest 를 바꾸고 체인을 다시 계산 → signature_ref 와 안 맞아 ref_invalid", async () => {
+    const { signer, auditPath } = await chain(tmp());
+    const lines = readLines(auditPath);
+    lines[3]!.entry.digest = `sha256:${"e".repeat(64)}`;
+    writeLines(auditPath, recompute(lines, "remap"));
+    expect(checkAuditChain(readFileSync(auditPath, "utf8"))).toMatchObject({ ok: true });
+    expect(await runAuditVerify({ auditPath, verifier: signer })).toMatchObject({ code: 1, line: 4, reason: "ref_invalid" });
+  });
+
+  /** signed 줄을 sign_failed 거절로 바꿔치기 (anchor·signature_ref 제거) */
+  const downgrade = (l: AuditLine): AuditLine => {
+    const { anchor: _anchor, ...rest } = l;
+    return { ...rest, entry: { ...l.entry, result: "refused", reason: "sign_failed", signature_ref: null } };
+  };
+
+  it("앞 줄을 고치고 뒤 signed 줄을 거절로 바꿔 체인을 다시 계산 → 레지스트리 서명이 로그에 없어서 unlogged_signature", async () => {
+    const { signer, auditPath } = await chain(tmp());
+    const lines = readLines(auditPath);
+    lines[0]!.entry.requester = "mallory";
+    lines[3] = downgrade(lines[3]!);
+    writeLines(auditPath, recompute(lines, "remap"));
+    // 2번째 줄은 아직 signed 라 anchor 가 이미지 서명과 안 맞음
+    expect(await runAuditVerify({ auditPath, verifier: signer })).toMatchObject({ code: 1, line: 2, reason: "signature_invalid" });
+
+    lines[1] = downgrade(lines[1]!);
+    writeLines(auditPath, recompute(lines, "remap"));
+    expect(checkAuditChain(readFileSync(auditPath, "utf8"))).toMatchObject({ ok: true });
+    // signed 줄이 하나도 없으면 저장소를 몰라서 --image-repo 필요
+    await expect(runAuditVerify({ auditPath, verifier: signer })).rejects.toMatchObject({ code: "ARG_MISSING" });
+    expect(await runAuditVerify({ auditPath, verifier: signer, imageRepo: REPO })).toMatchObject({ code: 1, reason: "unlogged_signature" });
+  });
+
+  it("signed 줄 하나만 거절로 바꿔도 같은 저장소의 다른 signed 줄로 찾아서 unlogged_signature", async () => {
+    const { signer, auditPath } = await chain(tmp());
+    const lines = readLines(auditPath);
+    lines[3] = downgrade(lines[3]!);
+    writeLines(auditPath, recompute(lines, "remap"));
+    expect(checkAuditChain(readFileSync(auditPath, "utf8"))).toMatchObject({ ok: true });
+    expect(await runAuditVerify({ auditPath, verifier: signer })).toMatchObject({ code: 1, line: 4, reason: "unlogged_signature" });
+  });
+
+  it("마지막 signed 줄을 통째로 지워도 unlogged_signature", async () => {
+    const { signer, auditPath } = await chain(tmp());
+    writeLines(auditPath, readLines(auditPath).slice(0, 3));
+    expect(checkAuditChain(readFileSync(auditPath, "utf8"))).toMatchObject({ ok: true });
+    expect(await runAuditVerify({ auditPath, verifier: signer })).toMatchObject({ code: 1, line: 4, reason: "unlogged_signature" });
   });
 
   it("파일이 없으면 실행 오류 AUDIT_INVALID", async () => {

@@ -38,6 +38,16 @@ describe("cli sign --approval-ttl", () => {
   });
 });
 
+describe("cli 빈 플래그", () => {
+  it("--approval-ttl= 처럼 비워 두면 SIGNER_APPROVAL_TTL_MIN 을 씀", () => {
+    const r = cli(["sign", "--plan", plan("allow"), "--requester", "alice", "--image-repo", "localhost:5001/hib/app", "--dry-run", "--approval-ttl=", "--out", join(tmp(), "r.json"), "--log", join(tmp(), "d.jsonl")], {
+      SIGNER_APPROVAL_TTL_MIN: "abc",
+    });
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/ARG_INVALID/);
+  });
+});
+
 describe("cli audit", () => {
   /** dry-run 서명 2번으로 감사 로그 2줄 */
   function auditLog(dir: string): string {

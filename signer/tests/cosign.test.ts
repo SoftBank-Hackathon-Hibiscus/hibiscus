@@ -18,7 +18,7 @@ describe("CosignSigner", () => {
 
     expect(ref).toBe(`cosign:${REPO}@${DIGEST}`);
     expect(readFileSync(argsFile, "utf8").trim().split("\n")).toEqual([
-      "sign", "--yes", "--key", key, "-a", "run_id=r-1", "-a", `plan_hash=${"b".repeat(64)}`, `${REPO}@${DIGEST}`,
+      "sign", "--yes", "--key", key, "-a", "run_id=r-1", "-a", `plan_hash=${"b".repeat(64)}`, "--", `${REPO}@${DIGEST}`,
     ]);
   });
 
@@ -31,7 +31,7 @@ describe("CosignSigner", () => {
     await new CosignSigner(key, bin, { noTlog: true }).sign(`${REPO}@${DIGEST}`, { run_id: "r-1" });
 
     expect(readFileSync(argsFile, "utf8").trim().split("\n")).toEqual([
-      "sign", "--yes", "--key", key, "--use-signing-config=false", "--tlog-upload=false", "-a", "run_id=r-1", `${REPO}@${DIGEST}`,
+      "sign", "--yes", "--key", key, "--use-signing-config=false", "--tlog-upload=false", "-a", "run_id=r-1", "--", `${REPO}@${DIGEST}`,
     ]);
   });
 
@@ -72,7 +72,7 @@ describe("CosignVerifier", () => {
     await new CosignVerifier(pub, bin).verify(`${REPO}@${DIGEST}`, { run_id: "r-1", targets: "onprem+cloud_run" });
 
     expect(readFileSync(argsFile, "utf8").trim().split("\n")).toEqual([
-      "verify", "--key", pub, "-a", "run_id=r-1", "-a", "targets=onprem+cloud_run", `${REPO}@${DIGEST}`,
+      "verify", "--key", pub, "-a", "run_id=r-1", "-a", "targets=onprem+cloud_run", "--", `${REPO}@${DIGEST}`,
     ]);
   });
 
@@ -84,7 +84,7 @@ describe("CosignVerifier", () => {
     await new CosignVerifier(pub, bin, { noTlog: true }).verify(`${REPO}@${DIGEST}`, { run_id: "r-1" });
 
     expect(readFileSync(argsFile, "utf8").trim().split("\n")).toEqual([
-      "verify", "--key", pub, "--insecure-ignore-tlog=true", "-a", "run_id=r-1", `${REPO}@${DIGEST}`,
+      "verify", "--key", pub, "--insecure-ignore-tlog=true", "-a", "run_id=r-1", "--", `${REPO}@${DIGEST}`,
     ]);
   });
 
@@ -108,6 +108,34 @@ describe("CosignVerifier", () => {
     const dir = tmp();
     const { bin } = fakeCosign(dir, { code: 1, stderr });
     await expect(new CosignVerifier(pubKey(dir), bin).verify(`${REPO}@${DIGEST}`, {})).rejects.toMatchObject({ code });
+  });
+
+  it("이미지 자리에 옵션처럼 생긴 값이 와도 -- 뒤라서 옵션으로 안 읽힘", async () => {
+    const dir = tmp();
+    const { bin, argsFile } = fakeCosign(dir);
+    await new CosignVerifier(pubKey(dir), bin).verify("--help", {});
+    expect(readFileSync(argsFile, "utf8").trim().split("\n").slice(-2)).toEqual(["--", "--help"]);
+  });
+
+  it("signatures: 이 키로 확인되는 서명마다 주석(optional)을 돌려줌", async () => {
+    const dir = tmp();
+    const stdout = JSON.stringify([
+      { critical: {}, optional: { run_id: "r-1", audit_head: "a".repeat(64) } },
+      { critical: {}, optional: { run_id: "r-2", weird: 1 } },
+      { critical: {} },
+    ]);
+    const { bin, argsFile } = fakeCosign(dir, { stdout });
+    expect(await new CosignVerifier(pubKey(dir), bin).signatures(`${REPO}@${DIGEST}`)).toEqual([{ run_id: "r-1", audit_head: "a".repeat(64) }, { run_id: "r-2" }, {}]);
+    expect(readFileSync(argsFile, "utf8")).not.toContain("-a\n");
+  });
+
+  it("signatures: 서명이 없으면 빈 배열, 레지스트리 오류는 그대로 실행 오류", async () => {
+    const dir = tmp();
+    const none = fakeCosign(dir, { code: 1, stderr: "Error: no signatures found" });
+    expect(await new CosignVerifier(pubKey(dir), none.bin).signatures(`${REPO}@${DIGEST}`)).toEqual([]);
+    const dir2 = tmp();
+    const denied = fakeCosign(dir2, { code: 1, stderr: "Error: GET https://x/v2/: DENIED: Permission denied" });
+    await expect(new CosignVerifier(pubKey(dir2), denied.bin).signatures(`${REPO}@${DIGEST}`)).rejects.toMatchObject({ code: "REGISTRY_UNAVAILABLE" });
   });
 
   it("공개키 자리에 KMS 키 주소를 주면 파일 확인 없이 그대로 넘김", async () => {

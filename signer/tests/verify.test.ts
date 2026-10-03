@@ -30,8 +30,8 @@ describe("signAnnotations", () => {
     ]);
   });
 
-  it("source_revision 이 없으면 키도 없고, plan_sha256·audit_head 는 줄 때만 붙음", () => {
-    expect(signAnnotations(FIELDS)).not.toHaveProperty("source_revision");
+  it("source_revision 이 없으면 none, plan_sha256·audit_head 는 줄 때만 붙음", () => {
+    expect(signAnnotations(FIELDS).source_revision).toBe("none");
     expect(signAnnotations(FIELDS)).not.toHaveProperty("plan_sha256");
     expect(signAnnotations(FIELDS, { planSha256: "c".repeat(64), auditHead: "d".repeat(64) })).toMatchObject({
       plan_sha256: "c".repeat(64),
@@ -48,6 +48,10 @@ describe("signAnnotations", () => {
   ])("targets %j → %s (쉼표·따옴표·= 가 cosign 에 그대로 가지 않음)", (targets, encoded) => {
     expect(encodeTargets(targets)).toBe(encoded);
     expect(signAnnotations({ ...FIELDS, targets }).targets).toBe(encoded);
+  });
+
+  it("인코딩할 수 없는 문자(짝 없는 서로게이트)는 ANNOTATION_INVALID", () => {
+    expect(() => signAnnotations({ ...FIELDS, targets: ["\ud800"] })).toThrow(expect.objectContaining({ code: "ANNOTATION_INVALID" }));
   });
 
   it("['a','b'] 와 ['a+b'] 는 다르게 인코딩됨", () => {
@@ -105,6 +109,7 @@ describe("runVerify", () => {
     ["requester 바꿔치기", { requester: "mallory" }],
     ["plan_hash 바꾸기", { plan_hash: "f".repeat(64) }],
     ["run_id 바꾸기", { run_id: "r-999" }],
+    ["source_revision 지우기", { source_revision: undefined }],
   ])("서명 뒤 %s → signature_invalid", async (_, patch) => {
     const dir = tmp();
     const { signer, resultPath } = await signed(dir);
@@ -173,7 +178,7 @@ describe("runVerify", () => {
     writeFileSync(pub, "dummy");
     const imageRef = `${REPO}@${r.digest}`;
     // 서명된 그대로의 인자일 때만 통과하는 cosign
-    const expectArgs = ["verify", "--key", pub, ...Object.entries(signAnnotations(r)).flatMap(([k, v]) => ["-a", `${k}=${v}`]), imageRef];
+    const expectArgs = ["verify", "--key", pub, ...Object.entries(signAnnotations(r)).flatMap(([k, v]) => ["-a", `${k}=${v}`]), "--", imageRef];
     const { bin, argsFile } = fakeCosign(dir, { expectArgs });
     const verifier = new CosignVerifier(pub, bin);
 

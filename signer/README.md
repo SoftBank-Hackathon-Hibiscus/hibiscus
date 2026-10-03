@@ -56,8 +56,8 @@ npm run sign -- --plan plan.json --requester <요청자> --image-repo <저장소
 # 서명 결과 확인 (누구나 공개키로)
 npm run verify -- --result sign_result.json [--plan plan.json] [--audit sign_audit.jsonl] [--image-repo <저장소>] [--no-tlog]
 
-# 감사 로그 확인 (--images 면 이미지 서명까지)
-npm run audit:verify -- --audit sign_audit.jsonl [--images --no-tlog]
+# 감사 로그 확인 (--images 면 레지스트리 서명과 맞춰 봄)
+npm run audit:verify -- --audit sign_audit.jsonl [--images [--image-repo <저장소>] --no-tlog]
 ```
 
 | 옵션 | 없을 때 | 설명 |
@@ -79,7 +79,7 @@ npm run audit:verify -- --audit sign_audit.jsonl [--images --no-tlog]
 | 주석 | 값 |
 |---|---|
 | `run_id`, `plan_hash` | plan 값 그대로 |
-| `source_revision` | plan에 있을 때만 |
+| `source_revision` | plan 값, 없으면 `none` (서명 뒤 sign_result에서 지워도 걸리게) |
 | `targets` | 항목마다 `encodeURIComponent` 후 `+`로 연결 (예: `onprem+cloud_run`) |
 | `failover_allowed` | `true` / `false` |
 | `requester`, `approver` | 요청자, 승인자 (allow면 `auto`) |
@@ -87,6 +87,7 @@ npm run audit:verify -- --audit sign_audit.jsonl [--images --no-tlog]
 | `audit_head` | 감사 로그를 켰을 때만. 서명 직전 체인 끝 hash |
 
 - cosign `-a`는 값을 쉼표로 나눔 (`targets=onprem,cloud_run` → `unable to parse annotation: cloud_run`). 그래서 targets는 인코딩
+- 이미지 주소는 cosign 인자에서 `--` 뒤에 넘김 (옵션처럼 생긴 값이 와도 옵션으로 안 읽힘)
 - `cosign verify -a`는 넘긴 주석만 확인함 → 기존 배포 쪽 `-a run_id -a plan_hash` 확인은 그대로 통과
 - 이 변경 전에 서명한 이미지는 새 주석이 없어서 `npm run verify` 실패. 다시 서명하면 됨
 - requester·approver id가 레지스트리의 서명 정보에 보임 (GitHub id, Rekor에는 해시만)
@@ -118,15 +119,24 @@ npm run audit:verify -- --audit sign_audit.jsonl [--images --no-tlog]
   - 한 줄 고치면 → `hash_mismatch`
   - 줄 삭제·순서 바꿈 → `seq_gap` / `prev_mismatch`
   - 체인을 통째로 다시 계산하면 → `anchor_invalid`, anchor까지 맞추면 이미지 서명과 안 맞아서 `--images`·`verify --audit`에서 `signature_invalid`
+  - signed 줄을 지우거나 거절로 바꾸면 → 레지스트리에 그 서명(`audit_head` 붙은)이 남아 있어서 `--images`에서 `unlogged_signature`
+  - signed 줄의 `signature_ref`를 다른 이미지나 옵션처럼 생긴 값으로 바꾸면 → `ref_invalid`
+- `--images`가 하는 일
+  - 확인할 이미지: signed 줄의 이미지 + 모든 줄 digest × 아는 저장소(signed 줄 저장소, `--image-repo`)
+  - 이미지마다 이 키로 확인되는 서명을 전부 받아서, signed 줄마다 내용·anchor가 맞는 서명이 있는지, `audit_head`가 붙은 서명이 전부 로그의 signed 줄과 맞는지 봄
+  - signed 줄이 하나도 없으면 저장소를 몰라서 `--image-repo` 필요 (없으면 실행 오류)
 - 마지막 줄이 깨져 있으면 이어 쓰지 않고 서명도 안 함 (`AUDIT_INVALID`). 서명 뒤 감사 로그를 못 쓰면 sign_result도 안 남김
 - 여러 서명이 동시에 써도 갈라지지 않게 `<경로>.lock`으로 잠금 (5초 대기, 30초 넘은 잠금은 지움). cosign 서명 중에는 잠금 안 잡음
 - backend에서 쓸 때는 실행마다 지워지지 않는 절대경로 (`SIGNER_AUDIT_LOG=/var/lib/hibiscus/sign_audit.jsonl` 등). decisions.jsonl은 실행 폴더와 같이 지워짐
 
 ### 감사 로그가 못 잡는 것
 
-- 파일 끝 자르기·파일 통째 삭제 (특정 실행의 줄이 사라진 건 `verify --audit`으로 잡음)
+- 파일 끝의 거절 줄 자르기·파일 통째 삭제 (signed 줄이 사라진 건 `--images`나 `verify --audit`으로 잡음)
 - 마지막 서명 뒤에 붙은 거절 줄은 체인으로만 보호 (anchor 범위 밖)
 - 서명하는 동안 다른 실행이 붙인 줄은 그 서명의 anchor 범위 밖
+- 이미지를 레지스트리에서 지우면 그 signed 줄은 `signature_invalid`로 나옴 (변조와 구분 안 됨)
+- 같은 이미지를 다른 감사 로그로 서명한 것(예: 로컬 시험)도 `unlogged_signature`로 나옴
+- 감사 로그를 켜기 전에 한 서명, 이 변경 전에 한 서명(`source_revision` 주석 없음)은 다시 서명해야 맞춰 볼 수 있음
 
 ## 배포 쪽 서명 확인
 

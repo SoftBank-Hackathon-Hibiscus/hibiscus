@@ -17,14 +17,23 @@ const SAFE_VALUE = /^[A-Za-z0-9._~%!'()*+-]*$/;
 
 /** targets 를 항목마다 인코딩해서 + 로 연결. 순서 그대로 */
 export function encodeTargets(targets: readonly string[]): string {
-  return targets.map(encodeURIComponent).join("+");
+  try {
+    return targets.map(encodeURIComponent).join("+");
+  } catch {
+    // 짝 없는 서로게이트 문자 등은 encodeURIComponent 가 URIError
+    throw new SignerError("ANNOTATION_INVALID", `targets 에 인코딩할 수 없는 문자가 있음: ${JSON.stringify(targets)}`);
+  }
 }
+
+/** plan 에 source_revision 이 없을 때 주석 값. hex 가 아니라서 실제 커밋 SHA 와 안 겹침 */
+export const NO_SOURCE_REVISION = "none";
 
 export function signAnnotations(f: SignedFields, x: AnnotationExtras = {}): Record<string, string> {
   return checked({
     run_id: f.run_id,
     plan_hash: f.plan_hash,
-    ...(f.source_revision !== undefined ? { source_revision: f.source_revision } : {}),
+    // 없어도 none 으로 항상 붙임. 서명 뒤 sign_result 에서 source_revision 을 지워도 verify 에서 걸리게
+    source_revision: f.source_revision ?? NO_SOURCE_REVISION,
     targets: encodeTargets(f.targets),
     failover_allowed: String(f.failover_allowed),
     requester: f.requester,
@@ -40,7 +49,7 @@ export function logAnnotations(entry: SignLog, anchor: string): Record<string, s
   return checked({
     run_id: entry.run_id,
     plan_hash: entry.plan_hash,
-    ...(entry.source_revision !== undefined ? { source_revision: entry.source_revision } : {}),
+    source_revision: entry.source_revision ?? NO_SOURCE_REVISION,
     requester: entry.requester,
     approver: entry.approver,
     audit_head: anchor,

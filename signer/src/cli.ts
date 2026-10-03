@@ -16,7 +16,7 @@ const USAGE = `사용법
                           [--plan-schema <Plan.schema.json>]
   npx tsx src/cli.ts verify --result <sign_result.json> [--plan <plan.json>] [--audit <감사 로그>] [--image-repo <저장소>]
                             [--pub <cosign.pub>] [--no-tlog] [--plan-schema <Plan.schema.json>]
-  npx tsx src/cli.ts audit --audit <감사 로그> [--images [--pub <cosign.pub>] [--no-tlog]]
+  npx tsx src/cli.ts audit --audit <감사 로그> [--images [--image-repo <저장소>] [--pub <cosign.pub>] [--no-tlog]]
 
   --image-repo  태그 없는 이미지 저장소 (예: asia-northeast3-docker.pkg.dev/<프로젝트>/<저장소>/<이미지>). 없으면 IMAGE_REPO 환경변수
   --key         cosign 개인키 경로 또는 KMS 키 주소(gcpkms://...). 없으면 SIGNER_COSIGN_KEY 환경변수. 비밀번호는 COSIGN_PASSWORD 환경변수 (KMS 는 필요 없음)
@@ -32,7 +32,8 @@ const USAGE = `사용법
   --no-tlog     Rekor 없이 서명한 이미지 확인 (cosign verify --insecure-ignore-tlog=true)
 
   audit         감사 로그가 처음부터 끝까지 이어지는지 확인. 끊긴 첫 줄 번호를 알려줌
-  --images      signed 줄마다 이미지 서명의 audit_head 까지 확인 (체인을 통째로 다시 계산한 것도 잡음)
+  --images      레지스트리 서명과 맞춰 봄: signed 줄마다 맞는 서명이 있는지, audit_head 가 붙은 서명이 전부 로그에 있는지
+                (체인을 통째로 다시 계산하거나 signed 줄을 지우거나 거절로 바꾼 것도 잡음). 거절 줄 digest 는 --image-repo 저장소에서 찾음
 
 종료 코드: 0 서명함·확인함 / 1 서명 거절·확인 실패 / 2 실행 오류`;
 
@@ -75,8 +76,9 @@ async function main(argv: string[]): Promise<number> {
   const planSchema = values["plan-schema"] ?? DEFAULT_PLAN_SCHEMA;
   const noTlog = values["no-tlog"] === true || process.env.SIGNER_NO_TLOG === "1";
   // 빈 환경변수는 없는 것으로 봄 (backend 기본값이 '' 인 경우가 있음)
-  const auditPath = values.audit ?? (process.env.SIGNER_AUDIT_LOG || undefined);
-  const pub = values.pub ?? (process.env.COSIGN_PUBLIC_KEY || DEFAULT_PUBLIC_KEY);
+  // 빈 플래그(--audit "")도 없는 것으로 봄
+  const auditPath = values.audit || process.env.SIGNER_AUDIT_LOG || undefined;
+  const pub = values.pub || process.env.COSIGN_PUBLIC_KEY || DEFAULT_PUBLIC_KEY;
 
   if (command === "approve") {
     const loaded = loadPlan(required(values.plan, "plan"), planSchema);
@@ -92,7 +94,7 @@ async function main(argv: string[]): Promise<number> {
     const out = values.out ?? "sign_result.json";
     rmSync(out, { force: true });
     const dryRun = values["dry-run"] === true;
-    const approvalTtlMs = minutes(values["approval-ttl"] ?? process.env.SIGNER_APPROVAL_TTL_MIN, "approval-ttl");
+    const approvalTtlMs = minutes(values["approval-ttl"] || process.env.SIGNER_APPROVAL_TTL_MIN, "approval-ttl");
     const signer = dryRun
       ? new DryRunSigner()
       : new CosignSigner(required(values.key ?? process.env.SIGNER_COSIGN_KEY, "key"), "cosign", { noTlog });
@@ -123,7 +125,7 @@ async function main(argv: string[]): Promise<number> {
   }
 
   if (command === "verify") {
-    const imageRepo = values["image-repo"] ?? (process.env.IMAGE_REPO || undefined);
+    const imageRepo = values["image-repo"] || process.env.IMAGE_REPO || undefined;
     const outcome = await runVerify({
       resultPath: required(values.result, "result"),
       verifier: new CosignVerifier(pub, "cosign", { noTlog }),
@@ -145,15 +147,18 @@ async function main(argv: string[]): Promise<number> {
   }
 
   if (command === "audit") {
+    const imageRepo = values["image-repo"] || process.env.IMAGE_REPO || undefined;
     const outcome = await runAuditVerify({
       auditPath: required(auditPath, "audit"),
       ...(values.images === true ? { verifier: new CosignVerifier(pub, "cosign", { noTlog }) } : {}),
+      ...(imageRepo !== undefined ? { imageRepo } : {}),
     });
     if (outcome.code === 0) {
       console.log(`[signer] 감사 로그 이상 없음: ${outcome.lines}줄, head=${outcome.head}`);
-      if (values.images === true) console.log(`  이미지 서명까지 확인: ${outcome.images}개`);
+      if (values.images === true) console.log(`  이미지 ${outcome.images}개 확인: signed 줄 ${outcome.signed}개 모두 서명과 일치, 로그에 없는 서명 없음`);
     } else {
-      console.error(`[signer] 감사 로그 ${outcome.line}번째 줄 문제 (${outcome.reason}): ${outcome.detail}`);
+      const where = outcome.line > 0 ? `${outcome.line}번째 줄` : "";
+      console.error(`[signer] 감사 로그 ${where}${where ? " " : ""}문제 (${outcome.reason}): ${outcome.detail}`);
     }
     return outcome.code;
   }
