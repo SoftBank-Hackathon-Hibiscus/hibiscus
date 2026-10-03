@@ -808,6 +808,73 @@ describe('deployment API (e2e)', () => {
     }
   });
 
+  it('persists redacted parity build diagnostics without entering policy or verifying the source', async () => {
+    const config = app.get(ConfigService);
+    const keys = [
+      'backend.stageMode',
+      'backend.parityTestMode',
+      'backend.parityInputsFile',
+    ];
+    const previous = keys.map((key) => config.get(key));
+    const inputFile = join(testDirectory, 'parity-error-inputs.json');
+    const record = join(testDirectory, 'parity-error-record.jsonl');
+    const noise = join(testDirectory, 'parity-error-noise.json');
+    writeFileSync(record, '{}');
+    writeFileSync(noise, '{}');
+    writeFileSync(
+      inputFile,
+      JSON.stringify({ 'parity-error': { record, noise } }),
+    );
+    config.set(keys[0], 'cli');
+    config.set(keys[1], 'registry');
+    config.set(keys[2], inputFile);
+    const runner = vi
+      .spyOn(app.get(CommandRunner), 'run')
+      .mockResolvedValueOnce({
+        code: 0,
+        signal: null,
+        timedOut: false,
+        stdout: 'b'.repeat(40),
+        stderr: '',
+      })
+      .mockResolvedValueOnce({
+        code: 1,
+        signal: null,
+        timedOut: false,
+        stdout: '{"error_code":"BUILD_IDENTITY_INVALID"}',
+        stderr: 'TOKEN=do-not-store\nimage inspection failed',
+      });
+    try {
+      const application = await createApplication('parity-error', false);
+      const created = await api()
+        .post(`/applications/${application.application.id}/deployments`)
+        .send({ source_revision: 'b'.repeat(40) })
+        .expect(201);
+      const view = await waitForStatus(created.body.id, 'failed');
+      const test = view.stages.find(
+        (stage: { stage: string }) => stage.stage === 'test',
+      );
+      expect(test.summary).toMatchObject({
+        command_phase: 'build',
+        exit_code: 1,
+        timed_out: false,
+        stdout_tail: '{"error_code":"BUILD_IDENTITY_INVALID"}',
+        stderr_tail: 'TOKEN=[REDACTED]\nimage inspection failed',
+      });
+      expect(view.deployment.sourceRevisionVerified).toBe(false);
+      expect(view.deployment.digestSource).toBe('placeholder');
+      expect(
+        view.stages.some(
+          (stage: { stage: string }) => stage.stage === 'policy',
+        ),
+      ).toBe(false);
+      expect(JSON.stringify(view)).not.toContain('do-not-store');
+    } finally {
+      runner.mockRestore();
+      keys.forEach((key, index) => config.set(key, previous[index]));
+    }
+  });
+
   it('stores an English CLI error and preserves provider diagnostics separately', async () => {
     const config = app.get(ConfigService);
     const previousMode = config.get('backend.stageMode');

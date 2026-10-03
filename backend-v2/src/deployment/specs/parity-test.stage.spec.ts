@@ -149,6 +149,65 @@ describe('registry parity connection', () => {
     const result = await new ParityTestStage(config, { run }).run(context);
     expect(result.status).toBe('failed');
     expect(result.deploymentPatch).toBeUndefined();
+    expect(result.summary).toMatchObject({
+      command_phase: 'test',
+      timed_out: true,
+      exit_code: null,
+    });
+  });
+  it('preserves CLI stdout JSON and stderr on build failure without verifying the source', async () => {
+    const { context, config } = setup('placeholder');
+    const run = vi
+      .fn()
+      .mockResolvedValueOnce({
+        code: 0,
+        signal: null,
+        stdout: 'b'.repeat(40),
+        stderr: '',
+        timedOut: false,
+      })
+      .mockResolvedValueOnce({
+        code: 7,
+        signal: null,
+        timedOut: false,
+        stdout: JSON.stringify({
+          error_code: 'BUILD_IDENTITY_INVALID',
+          message: 'image mismatch',
+        }),
+        stderr:
+          'pull finished\nCOSIGN_PASSWORD=do-not-store\nimage identity failed',
+      });
+    const result = await new ParityTestStage(config, { run }).run(context);
+    expect(result.status).toBe('failed');
+    expect(result.error).toContain('build command failed');
+    expect(result.deploymentPatch).toBeUndefined();
+    expect(result.summary).toMatchObject({
+      command_phase: 'build',
+      exit_code: 7,
+      timed_out: false,
+      stdout_tail: expect.stringContaining('BUILD_IDENTITY_INVALID'),
+      stderr_tail: expect.stringContaining('image identity failed'),
+    });
+    expect(JSON.stringify(result)).not.toContain('do-not-store');
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+  it('bounds diagnostic output and preserves the final test failure', async () => {
+    const { context, config } = setup();
+    const run = vi
+      .fn()
+      .mockResolvedValue({
+        code: 1,
+        signal: null,
+        timedOut: false,
+        stdout: '',
+        stderr: 'discarded\n'.repeat(1000) + 'x'.repeat(5000) + '\nTEST_FAILED',
+      });
+    const result = await new ParityTestStage(config, { run }).run(context);
+    const summary = result.summary as { stderr_tail: string };
+    expect(summary.stderr_tail.length).toBeLessThanOrEqual(4000);
+    expect(summary.stderr_tail).toMatch(/TEST_FAILED$/);
+    expect(summary.stderr_tail).not.toContain('discarded');
+    expect(result.deploymentPatch).toBeUndefined();
   });
   it('rejects artifacts checked against the old placeholder and accepts the verified image identity', () => {
     const { context, digest } = setup();
