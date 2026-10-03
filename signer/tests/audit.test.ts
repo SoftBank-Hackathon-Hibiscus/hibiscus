@@ -186,8 +186,8 @@ describe("runAuditVerify", () => {
   it("정상 체인: 줄 수·체인 끝, --images 면 이미지 3개(거절 줄 digest 포함)의 서명과 맞춰 봄", async () => {
     const { signer, auditPath } = await chain(tmp());
     const lines = readLines(auditPath);
-    expect(await runAuditVerify({ auditPath })).toEqual({ code: 0, lines: 4, head: lines[3]!.hash, signed: 0, images: 0 });
-    expect(await runAuditVerify({ auditPath, verifier: signer })).toEqual({ code: 0, lines: 4, head: lines[3]!.hash, signed: 2, images: 3 });
+    expect(await runAuditVerify({ auditPath })).toEqual({ code: 0, lines: 4, head: lines[3]!.hash, signed: 0, images: 0, revoked: 0 });
+    expect(await runAuditVerify({ auditPath, verifier: signer })).toEqual({ code: 0, lines: 4, head: lines[3]!.hash, signed: 2, images: 3, revoked: 0 });
   });
 
   it("dry-run 서명 줄은 실제 서명이 없어서 맞춰 볼 서명 없이 통과 (저장소는 --image-repo)", async () => {

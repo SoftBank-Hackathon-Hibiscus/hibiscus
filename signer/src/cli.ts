@@ -6,6 +6,7 @@ import { parseArgs } from "node:util";
 import { createApproval } from "./approval.js";
 import { CosignSigner, CosignVerifier, DryRunSigner, isKmsKey, MultiKeyVerifier, type BlobVerifier, type ImageVerifier } from "./cosign.js";
 import { runAnchor } from "./anchor.js";
+import { runRevoke } from "./revoke.js";
 import { SignerError, writeJson } from "./io.js";
 import { DEFAULT_PLAN_SCHEMA, loadPlan } from "./plan.js";
 import { checkPublicKeyPins, looseKeyPermissions, publicKeyFingerprint, readPolicy } from "./keys.js";
@@ -22,10 +23,12 @@ const USAGE = `사용법
                           [--pub <cosign.pub>] [--pubkey-sha256 <지문>] [--plan-schema <Plan.schema.json>]
   npx tsx src/cli.ts verify --result <sign_result.json> [--plan <plan.json>] [--approval <approval.json>] [--audit <감사 로그>] [--image-repo <저장소>]
                             [--attestation [--policy <deploy.rego>] [--policy-sha256 <지문>] [--test-result <test_result.json>]] [--max-age <분>] [--json]
-                            [--pub <cosign.pub>] [--pubkey-sha256 <지문>] [--no-tlog] [--plan-schema <Plan.schema.json>]
+                            [--latest] [--pub <cosign.pub>] [--pubkey-sha256 <지문>] [--no-tlog] [--plan-schema <Plan.schema.json>]
   npx tsx src/cli.ts audit --audit <감사 로그> [--anchors <고정값 파일>] [--images [--strict-images] [--image-repo <저장소>]] [--pub <cosign.pub>] [--no-tlog]
   npx tsx src/cli.ts fingerprint [--pub <cosign.pub>] [--pubkey-sha256 <지문>] | --policy <정책.rego> [--policy-sha256 <지문>]
   npx tsx src/cli.ts anchor --audit <감사 로그> [--anchors <고정값 파일>] (--key <cosign.key>) [--no-tlog]
+  npx tsx src/cli.ts revoke --audit <감사 로그> --digest <sha256:…> [--run-id <id>] --reason <vulnerability|policy_changed|key_compromise|mistake>
+                            --by <id> [--note <메모>] [--anchors <고정값 파일> --key <cosign.key>]
 
   --image-repo  태그 없는 이미지 저장소 (예: asia-northeast3-docker.pkg.dev/<프로젝트>/<저장소>/<이미지>). 없으면 IMAGE_REPO 환경변수
   --key         cosign 개인키 경로 또는 KMS 키 주소(gcpkms://...). 없으면 SIGNER_COSIGN_KEY 환경변수. 비밀번호는 COSIGN_PASSWORD 환경변수 (KMS 는 필요 없음)
@@ -45,6 +48,10 @@ const USAGE = `사용법
   --approval    이 승인 기록(누가, 언제 승인)으로 서명했는지까지 확인
   --max-age     서명한 지 이 시간(분)이 지난 결과는 거부 (expired). 없으면 SIGNER_MAX_AGE_MIN
   --json        결과를 JSON 한 줄로 출력 (실행 오류도)
+  --latest      --audit 와 같이: 이 결과 뒤에 같은 저장소·겹치는 배포 위치로 더 새로 서명한 결과가 있거나 같은 이미지가 block 됐으면 거부
+                (superseded, 예전 결과 재사용·몰래 롤백). 없으면 SIGNER_VERIFY_LATEST=1
+
+  revoke        서명 철회 줄을 감사 로그에 추가. 그 서명은 verify --audit 에서 revoked, --run-id 없이 이미지 전체를 철회하면 다시 서명도 안 함
   --attestation 배포 증명서도 확인 (서명·내용이 sign_result 와 같은지 + Rego 정책). 정책 기본값은 policy/deploy.rego
   --policy-sha256 Rego 정책 파일 지문 고정 (여러 번 가능). 정책 파일이 이 목록에 없으면 멈춤. 없으면 SIGNER_POLICY_SHA256(쉼표로 여러 개)
   --pub         cosign 공개키 경로 또는 KMS 키 주소. 키 교체 중이면 여러 번 (아무 키로나 확인되면 통과).
@@ -100,6 +107,12 @@ const OPTIONS = {
   "minimal-env": { type: "boolean", default: false },
   "test-result": { type: "string" },
   anchors: { type: "string" },
+  digest: { type: "string" },
+  "run-id": { type: "string" },
+  reason: { type: "string" },
+  by: { type: "string" },
+  note: { type: "string" },
+  latest: { type: "boolean", default: false },
   json: { type: "boolean", default: false },
 } as const;
 
@@ -234,6 +247,7 @@ async function main(argv: string[]): Promise<number> {
           ? { attestation: { policyPath: checkedPolicy, ...(values["test-result"] !== undefined ? { testResultPath: values["test-result"] } : {}) } }
           : {}),
         ...(maxAgeMs !== undefined ? { maxAgeMs } : {}),
+        ...(values.latest === true || process.env.SIGNER_VERIFY_LATEST === "1" ? { latest: true } : {}),
         planSchemaPath: planSchema,
         ...(auditPath !== undefined ? { auditPath } : {}),
       });
@@ -309,6 +323,27 @@ async function main(argv: string[]): Promise<number> {
     return 0;
   }
 
+  if (command === "revoke") {
+    const log = required(auditPath, "audit");
+    const r = await runRevoke({
+      auditPath: log,
+      digest: required(values.digest, "digest"),
+      runId: values["run-id"] || undefined,
+      reason: required(values.reason, "reason"),
+      by: required(values.by, "by"),
+      note: values.note || undefined,
+    });
+    const e = r.line.entry;
+    if (e.kind === "revoke") console.log(`[signer] 서명 철회: 감사 로그 ${r.line.seq}번째 줄, ${e.run_id !== undefined ? `run_id=${e.run_id} ` : "이미지 전체 "}${e.digest} (${e.reason}, ${e.by})`);
+    if (r.signed === 0) console.error("[signer] 경고: 감사 로그에 이 이미지(실행)의 signed 줄이 아직 없음 (미리 철회함)");
+    // 고정값 파일을 주면 바로 끝 고정 (철회 줄을 잘라내면 anchor_truncated)
+    if (anchorsPath !== undefined) {
+      const anchor = await runAnchor({ auditPath: log, anchorsPath, signer: new CosignSigner(required(values.key ?? process.env.SIGNER_COSIGN_KEY, "key"), "cosign", cosignOptions) });
+      console.log(`  끝 고정: ${anchor.seq}줄 (${anchorsPath})`);
+    }
+    return 0;
+  }
+
   if (command === "audit") {
     if (values["strict-images"] === true && values.images !== true) throw new SignerError("ARG_INVALID", "--strict-images 는 --images 와 같이 써야 함 (레지스트리 서명을 볼 때만 의미 있음)");
     const imageRepo = values["image-repo"] || process.env.IMAGE_REPO || undefined;
@@ -319,7 +354,7 @@ async function main(argv: string[]): Promise<number> {
       ...(anchorsPath !== undefined ? { anchors: { path: anchorsPath, verifier: trustedVerifier() } } : {}),
     });
     if (outcome.code === 0) {
-      console.log(`[signer] 감사 로그 이상 없음: ${outcome.lines}줄, head=${outcome.head}`);
+      console.log(`[signer] 감사 로그 이상 없음: ${outcome.lines}줄, head=${outcome.head}${outcome.revoked > 0 ? `, 철회 ${outcome.revoked}건` : ""}`);
       if (outcome.anchors !== undefined) console.log(`  끝 고정값 ${outcome.anchors}개와 일치 (잘리거나 다시 쓴 흔적 없음)`);
       if (values.images === true) console.log(`  이미지 ${outcome.images}개 확인: signed 줄 ${outcome.signed}개 모두 서명과 일치, 로그에 없는 서명 없음`);
     } else {

@@ -1,10 +1,10 @@
 // sign_result.json 이 signer 가 서명한 그대로인지(verify), 감사 로그가 끊기지 않았는지(audit) 확인
 import { fileURLToPath } from "node:url";
-import { encodeImageRepo, logAnnotations, NO_APPROVAL, signAnnotations } from "./annotations.js";
+import { decodeTargets, encodeImageRepo, logAnnotations, NO_APPROVAL, signAnnotations } from "./annotations.js";
 import { loadApproval } from "./approval.js";
 import { checkAnchors, type AnchorBreak } from "./anchor.js";
 import { DEPLOY_PREDICATE_TYPE, findDeployStatement } from "./attestation.js";
-import { cancelledHashes, checkAuditChain, findSignedLine, GENESIS, readAuditFile, type AuditBreak } from "./audit.js";
+import { cancelledHashes, checkAuditChain, findSignedLine, GENESIS, readAuditFile, revocationOf, type AuditBreak } from "./audit.js";
 import { imageRefOf, type BlobVerifier, type ImageVerifier } from "./cosign.js";
 import { canonicalize, parseWith, readJson, sha256Hex, SignerError } from "./io.js";
 import { DEFAULT_PLAN_SCHEMA, loadPlan } from "./plan.js";
@@ -22,7 +22,9 @@ export type VerifyReason =
   | "signature_invalid"
   | "attestation_invalid"
   | "policy_denied"
-  | "expired";
+  | "expired"
+  | "revoked"
+  | "superseded";
 
 export interface VerifyOptions {
   resultPath: string;
@@ -40,6 +42,11 @@ export interface VerifyOptions {
   attestation?: { policyPath?: string; testResultPath?: string };
   /** 있으면 서명한 지 이 시간(ms)이 지난 결과는 거부. signed_at 도 서명 주석에 묶여 있어서 고쳐도 걸림 */
   maxAgeMs?: number;
+  /**
+   * 켜면 이 결과 뒤에 같은 저장소·겹치는 배포 위치로 더 새로 서명한 결과가 있거나, 같은 이미지가 block 됐으면 거부
+   * (예전 정상 결과 재사용·몰래 롤백). auditPath 가 있어야 함
+   */
+  latest?: boolean;
   now?: () => Date;
 }
 
@@ -53,6 +60,7 @@ const PLAN_FIELDS = ["run_id", "digest", "plan_hash", "source_revision", "target
 const fail = (reason: VerifyReason, detail: string): VerifyOutcome => ({ code: 1, reason, detail });
 
 export async function runVerify(o: VerifyOptions): Promise<VerifyOutcome> {
+  if (o.latest === true && o.auditPath === undefined) throw new SignerError("ARG_MISSING", "--latest 는 감사 로그(--audit)가 있어야 함 (더 새 서명을 감사 로그에서 찾음)");
   const result = parseWith(SignResultSchema, readJson(o.resultPath, "sign_result"), "sign_result");
 
   if (o.maxAgeMs !== undefined) {
@@ -102,6 +110,15 @@ export async function runVerify(o: VerifyOptions): Promise<VerifyOutcome> {
     const line = findSignedLine(check.lines, result);
     if (!line) return fail("audit_mismatch", "감사 로그에 이 서명 결과(signed 줄)가 없음");
     if (cancelledHashes(check.lines).has(line.hash)) return fail("audit_mismatch", `서명 뒤 단계(자기 확인·증명서)가 실패해서 취소된 서명 (${line.seq}번째 줄)`);
+    const revocation = revocationOf(check.lines, line);
+    if (revocation !== undefined && revocation.entry.kind === "revoke") {
+      const r = revocation.entry;
+      return fail("revoked", `감사 로그 ${revocation.seq}번째 줄에서 철회됨 (${r.reason}, ${r.by}${r.note ? `: ${r.note}` : ""})`);
+    }
+    if (o.latest === true) {
+      const newer = newerThan(check.lines, line, repo, result);
+      if (newer !== undefined) return fail("superseded", newer);
+    }
     auditHead = line.anchor;
     recorded = line.annotations;
   }
@@ -142,6 +159,26 @@ export async function runVerify(o: VerifyOptions): Promise<VerifyOutcome> {
     if (!found.ok) return fail("attestation_invalid", found.detail);
   }
   return { code: 0, result, imageRef, annotations };
+}
+
+/**
+ * 이 signed 줄 뒤에 더 새로 서명한 결과(같은 저장소, 배포 위치가 겹침, 취소·철회 안 됨)나 같은 이미지의 block 결정이 있으면 그 설명.
+ * 주석 기록이 없는 예전 줄은 배포 위치가 겹치는 것으로 봄
+ */
+function newerThan(lines: readonly AuditLine[], line: AuditLine, repo: string, result: SignResult): string | undefined {
+  const cancelled = cancelledHashes(lines);
+  for (const l of lines) {
+    if (l.seq <= line.seq || l.entry.kind !== "sign") continue;
+    const e = l.entry;
+    if (e.result === "refused" && e.reason === "policy_block" && e.digest === result.digest) return `${l.seq}번째 줄(run_id=${e.run_id})에서 같은 이미지가 block 됨`;
+    if (e.result !== "signed" || cancelled.has(l.hash) || revocationOf(lines, l) !== undefined) continue;
+    const ref = e.signature_ref ?? "";
+    if (!ref.startsWith("cosign:") || ref.slice("cosign:".length, ref.lastIndexOf("@")) !== repo) continue;
+    const targets = l.annotations?.targets !== undefined ? decodeTargets(l.annotations.targets) : undefined;
+    if (targets !== undefined && !targets.some((t) => result.targets.includes(t))) continue;
+    return `${l.seq}번째 줄(run_id=${e.run_id}, ${e.digest.slice(0, 19)}…)이 더 나중에 서명됨`;
+  }
+  return undefined;
 }
 
 /** image_repo 만 다르고 다른 주석은 다 같은 서명이 있으면 그 서명의 저장소 */
@@ -199,7 +236,7 @@ function annotationDiff(expected: Record<string, string>, sig: Record<string, st
 }
 
 export type AuditVerifyOutcome =
-  | { code: 0; lines: number; head: string; signed: number; images: number; anchors?: number }
+  | { code: 0; lines: number; head: string; signed: number; images: number; revoked: number; anchors?: number }
   | { code: 1; line: number; reason: AuditBreak | AuditImageReason | AnchorBreak; detail: string };
 
 /**
@@ -217,7 +254,8 @@ export async function runAuditVerify(o: AuditVerifyOptions): Promise<AuditVerify
     anchors = anchored.anchors;
   }
   const withAnchors = anchors !== undefined ? { anchors } : {};
-  if (!o.verifier) return { code: 0, lines: lines.length, head, signed: 0, images: 0, ...withAnchors };
+  const revoked = lines.filter((l) => l.entry.kind === "revoke").length;
+  if (!o.verifier) return { code: 0, lines: lines.length, head, signed: 0, images: 0, revoked, ...withAnchors };
 
   // signed 줄의 서명 위치가 그 줄 digest 의 이미지인지 (옵션처럼 생긴 값, 다른 이미지 차단)
   const signedAt = new Map<string, AuditLine[]>();
@@ -297,5 +335,5 @@ export async function runAuditVerify(o: AuditVerifyOptions): Promise<AuditVerify
     }
     images++;
   }
-  return { code: 0, lines: lines.length, head, signed: [...signedAt.values()].reduce((n, ls) => n + ls.length, 0), images, ...withAnchors };
+  return { code: 0, lines: lines.length, head, signed: [...signedAt.values()].reduce((n, ls) => n + ls.length, 0), images, revoked, ...withAnchors };
 }

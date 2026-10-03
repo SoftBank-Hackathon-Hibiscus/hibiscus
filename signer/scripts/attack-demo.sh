@@ -201,6 +201,22 @@ check 1 "같은 로그로 v1 배포 확인: 이 서명 결과의 signed 줄이 �
 check 1 "같은 로그를 레지스트리 서명과 맞춰 봄: 로그에 없는 서명" \
   signer audit --audit "$W/audit-rechain.jsonl" --images --image-repo "$REG" "${VERIFY[@]}"
 
+# --- 예전 서명 재사용 ---
+step "공격 6. 예전 서명 재사용·철회한 이미지"
+check 1 "v2 가 나온 뒤 v1 결과로 배포 (몰래 롤백, --latest)" \
+  signer verify --result "$W/sr.json" --audit "$W/audit.jsonl" --latest "${VERIFY[@]}"
+check 0 "v2 결과는 가장 새 결과라 통과" \
+  signer verify --result "$W/sr2.json" --audit "$W/audit.jsonl" --latest "${VERIFY[@]}"
+signer revoke --audit "$W/audit.jsonl" --digest "$D2" --reason vulnerability --by carol --note "CVE 발견" \
+  --anchors "$W/anchors.jsonl" --key "$KEY" --no-tlog >/dev/null 2>&1
+check 1 "v2 를 철회한 뒤 v2 결과로 배포" \
+  signer verify --result "$W/sr2.json" --audit "$W/audit.jsonl" "${VERIFY[@]}"
+sed '$d' "$W/audit.jsonl" >"$W/audit-unrevoke.jsonl"
+check 1 "철회 줄을 지운 감사 로그 (끝 고정값과 맞춰 봄)" \
+  signer audit --audit "$W/audit-unrevoke.jsonl" --anchors "$W/anchors.jsonl" "${VERIFY[@]}"
+check 2 "철회한 이미지를 다시 서명 요청" \
+  env SIGNER_COSIGN_KEY="$KEY" "${SIGNER[@]}" sign --plan "$W/plan2.json" "${SIGN[@]}" --out "$W/x.json"
+
 # --- 결과 ---
 step "결과"
 if [ "$wrong" -eq 0 ]; then

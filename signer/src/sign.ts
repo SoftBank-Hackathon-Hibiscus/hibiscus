@@ -4,7 +4,7 @@ import { existsSync, rmSync } from "node:fs";
 import { NO_APPROVAL, signAnnotations } from "./annotations.js";
 import { buildPredicate, DEPLOY_PREDICATE_TYPE, loadTestEvidence } from "./attestation.js";
 import { loadApproval } from "./approval.js";
-import { appendAudit, readAuditHead, type AuditOptions } from "./audit.js";
+import { appendAudit, digestRevocation, readAuditState, type AuditOptions } from "./audit.js";
 import { imageRefOf, type ImageSigner, type ImageVerifier } from "./cosign.js";
 import { decideSign } from "./decide.js";
 import { appendSignLog, canonicalize, sha256Hex, SignerError, signLogLine, writeJson } from "./io.js";
@@ -104,7 +104,13 @@ async function signOnce(o: SignOptions, seen: { runId?: string }): Promise<SignO
   // sign_result 의 서명 대상 필드 전부 + plan 파일 해시를 주석으로 붙임. 서명 뒤 targets 등을 바꾸면 verify 에서 걸림
   const claims = { ...base, targets: plan.targets, failover_allowed: plan.failover_allowed, approver: decision.approver };
   // 감사 로그를 켰으면 서명 직전 체인 끝을 서명에도 남김 (체인을 통째로 다시 계산하면 서명과 안 맞게)
-  const auditHead = o.auditPath ? await readAuditHead(o.auditPath, o.audit) : undefined;
+  const state = o.auditPath ? await readAuditState(o.auditPath, o.audit) : undefined;
+  const auditHead = state?.head;
+  // 이미지 전체를 철회했으면 다시 서명하지 않음 (철회는 되돌리지 않음, 새로 빌드해야 함)
+  const revoked = state ? digestRevocation(state.lines, plan.digest) : undefined;
+  if (revoked !== undefined && revoked.entry.kind === "revoke") {
+    throw new SignerError("DIGEST_REVOKED", `감사 로그 ${revoked.seq}번째 줄에서 이 이미지의 서명을 전부 철회함 (${revoked.entry.reason}, ${revoked.entry.by}): ${plan.digest}`);
+  }
   // 사람 승인이면 그 승인 기록(누가, 언제)까지 서명에 묶음. 자동 승인이면 none
   const approvalSha256 = decision.approver === AUTO_APPROVER || !approval ? NO_APPROVAL : sha256Hex(canonicalize(approval));
   // 서명 시각은 서명 전에 정해서 주석·sign_result·감사 로그에 같은 값으로 씀

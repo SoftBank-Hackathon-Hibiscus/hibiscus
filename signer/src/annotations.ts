@@ -40,6 +40,16 @@ function encodeValue(name: string, value: string): string {
   }
 }
 
+/** encodeTargets 의 반대. 빈 문자열이면 빈 목록 */
+export function decodeTargets(value: string): string[] {
+  if (value === "") return [];
+  try {
+    return value.split("+").map(decodeURIComponent);
+  } catch {
+    throw new SignerError("ANNOTATION_INVALID", `targets 주석을 풀 수 없음: ${value}`);
+  }
+}
+
 /** plan 에 source_revision 이 없을 때 주석 값. hex 가 아니라서 실제 커밋 SHA 와 안 겹침 */
 export const NO_SOURCE_REVISION = "none";
 

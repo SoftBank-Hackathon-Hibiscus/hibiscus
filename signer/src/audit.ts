@@ -4,7 +4,7 @@ import { dirname, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { logAnnotations } from "./annotations.js";
 import { canonicalize, sha256Hex, SignerError } from "./io.js";
-import { AuditLineSchema, type AuditLine, type SignError, type SignLog, type SignResult } from "./schema.js";
+import { AuditLineSchema, type AuditEntry, type AuditLine, type SignResult } from "./schema.js";
 
 /** 첫 줄의 prev_hash, 빈 감사 로그의 체인 끝 */
 export const GENESIS = "0".repeat(64);
@@ -36,11 +36,19 @@ export interface AuditExtra {
 
 /** 서명 직전 체인 끝 hash. 파일이 없거나 비었으면 GENESIS */
 export async function readAuditHead(path: string, o: AuditOptions = {}): Promise<string> {
-  return withLock(path, o, () => lastLine(path)?.hash ?? GENESIS);
+  return (await readAuditState(path, o)).head;
+}
+
+/** 체인 끝 hash 와 줄 전체 (체인을 처음부터 확인함). 파일이 없으면 빈 로그 */
+export async function readAuditState(path: string, o: AuditOptions = {}): Promise<{ head: string; lines: AuditLine[] }> {
+  return withLock(path, o, () => {
+    const lines = allLines(path);
+    return { head: lines.at(-1)?.hash ?? GENESIS, lines };
+  });
 }
 
 /** 한 줄 추가. 마지막 줄 읽기와 추가를 잠금 안에서 한 번에 함 */
-export async function appendAudit(path: string, entry: SignLog | SignError, anchor: string | undefined, o: AuditOptions = {}, extra: AuditExtra = {}): Promise<AuditLine> {
+export async function appendAudit(path: string, entry: AuditEntry, anchor: string | undefined, o: AuditOptions = {}, extra: AuditExtra = {}): Promise<AuditLine> {
   return withLock(path, o, () => {
     const last = lastLine(path);
     const body = {
@@ -141,6 +149,18 @@ export function cancelledHashes(lines: readonly AuditLine[]): Set<string> {
   return new Set(lines.flatMap((l) => (l.cancels !== undefined ? [l.cancels] : [])));
 }
 
+/** 이 signed 줄을 철회한 줄 (같은 digest 이고 run_id 가 없거나 같음). 위치와 상관없이 철회는 철회 */
+export function revocationOf(lines: readonly AuditLine[], signed: AuditLine): AuditLine | undefined {
+  if (signed.entry.kind !== "sign") return undefined;
+  const { digest, run_id } = signed.entry;
+  return lines.find((l) => l.entry.kind === "revoke" && l.entry.digest === digest && (l.entry.run_id === undefined || l.entry.run_id === run_id));
+}
+
+/** 이 digest 의 서명 전부를 철회한 줄 (새로 서명하지 않음) */
+export function digestRevocation(lines: readonly AuditLine[], digest: string): AuditLine | undefined {
+  return lines.find((l) => l.entry.kind === "revoke" && l.entry.digest === digest && l.entry.run_id === undefined);
+}
+
 /** sign_result 에 해당하는 signed 줄. 같은 게 여러 개면 가장 뒤 */
 export function findSignedLine(lines: readonly AuditLine[], r: SignResult): AuditLine | undefined {
   for (let i = lines.length - 1; i >= 0; i--) {
@@ -167,18 +187,22 @@ export function findSignedLine(lines: readonly AuditLine[], r: SignResult): Audi
 
 // 마지막 줄. 체인 전체를 처음부터 확인해서 중간이라도 깨져 있으면 이어 쓰지 않음 (고친 기록 위에 새 서명을 쌓지 않게)
 function lastLine(path: string): AuditLine | undefined {
+  return allLines(path).at(-1);
+}
+
+function allLines(path: string): AuditLine[] {
   let text: string;
   try {
     text = readFileSync(path, "utf8");
   } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw new SignerError("AUDIT_INVALID", `감사 로그 파일을 읽지 못함: ${path}`);
   }
   const check = checkAuditChain(text);
   if (!check.ok) {
     throw new SignerError("AUDIT_INVALID", `감사 로그 ${check.line}번째 줄 (${check.reason}): ${check.detail}. 고쳐진 기록 위에는 이어 쓰지 않음: ${path}`);
   }
-  return check.lines.at(-1);
+  return check.lines;
 }
 
 async function withLock<T>(path: string, o: AuditOptions, fn: () => T): Promise<T> {

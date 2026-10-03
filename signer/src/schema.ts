@@ -114,6 +114,21 @@ export const SignErrorSchema = z
   .describe("plan·승인 기록 형식 오류처럼 서명 결정 전에 멈춘 시도. 감사 로그에만 남김 (decisions.jsonl 계약은 그대로)");
 export type SignError = z.infer<typeof SignErrorSchema>;
 
+export const RevokeReasonSchema = z.enum(["vulnerability", "policy_changed", "key_compromise", "mistake"]);
+
+export const RevokeSchema = z
+  .strictObject({
+    kind: z.literal("revoke").describe("서명 철회"),
+    time: TimeSchema,
+    digest: DigestSchema,
+    run_id: RunIdSchema.optional().describe("있으면 그 실행의 서명만, 없으면 이 이미지의 서명 전부 (이후 서명도 거부)"),
+    reason: RevokeReasonSchema,
+    by: PersonSchema.describe("철회한 사람"),
+    note: z.string().max(200).optional(),
+  })
+  .describe("이미 한 서명을 더는 배포에 쓰지 않게 막는 기록. 감사 로그에만 남김 (decisions.jsonl 계약은 그대로)");
+export type Revoke = z.infer<typeof RevokeSchema>;
+
 // cosign -a 값으로 쓸 수 있는 문자. cosign 은 쉼표로 값을 나누고 = 가 두 번이면 거절해서, encodeURIComponent 결과와 구분자 + 만 허용
 export const ANNOTATION_VALUE_RE = /^[A-Za-z0-9._~%!'()*+-]*$/;
 export const ANNOTATION_KEY_RE = /^[a-z][a-z0-9_]{0,39}$/;
@@ -122,7 +137,7 @@ export const AuditLineSchema = z
   .strictObject({
     seq: z.int().min(1).describe("줄 번호. 1 부터 빈 번호 없이"),
     prev_hash: Sha256HexSchema.describe("앞 줄 hash. 첫 줄은 0 이 64개"),
-    entry: z.discriminatedUnion("kind", [SignLogSchema, SignErrorSchema]),
+    entry: z.discriminatedUnion("kind", [SignLogSchema, SignErrorSchema, RevokeSchema]),
     anchor: Sha256HexSchema.optional().describe("signed 줄에만. 서명 직전 체인 끝 hash (이미지 서명 주석 audit_head 와 같은 값)"),
     annotations: z
       .record(z.string().regex(ANNOTATION_KEY_RE), z.string().regex(ANNOTATION_VALUE_RE))
@@ -133,3 +148,4 @@ export const AuditLineSchema = z
   })
   .describe("서명 감사 로그(해시 체인) 한 줄. signer 안에서만 씀");
 export type AuditLine = z.infer<typeof AuditLineSchema>;
+export type AuditEntry = AuditLine["entry"];
