@@ -2,7 +2,9 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { encodeTargets, signAnnotations } from "../src/annotations.js";
+import { createApproval } from "../src/approval.js";
 import { CosignVerifier } from "../src/cosign.js";
+import { writeJson } from "../src/io.js";
 import { loadPlan } from "../src/plan.js";
 import { runSign } from "../src/sign.js";
 import { runVerify } from "../src/verify.js";
@@ -90,6 +92,7 @@ describe("runVerify", () => {
       failover_allowed: "false",
       requester: "alice",
       approver: "auto",
+      approval_sha256: "none",
     });
   });
 
@@ -178,7 +181,7 @@ describe("runVerify", () => {
     writeFileSync(pub, "dummy");
     const imageRef = `${REPO}@${r.digest}`;
     // 서명된 그대로의 인자일 때만 통과하는 cosign
-    const expectArgs = ["verify", "--key", pub, ...Object.entries(signAnnotations(r)).flatMap(([k, v]) => ["-a", `${k}=${v}`]), "--", imageRef];
+    const expectArgs = ["verify", "--key", pub, ...Object.entries(signAnnotations(r, { approvalSha256: "none" })).flatMap(([k, v]) => ["-a", `${k}=${v}`]), "--", imageRef];
     const { bin, argsFile } = fakeCosign(dir, { expectArgs });
     const verifier = new CosignVerifier(pub, bin);
 
@@ -187,5 +190,53 @@ describe("runVerify", () => {
     const outcome = await runVerify({ resultPath: tamper(resultPath, { targets: ["onprem", "cloud_run"] }), verifier });
     expect(outcome).toMatchObject({ code: 1, reason: "signature_invalid" });
     expect(readFileSync(argsFile, "utf8")).toContain("targets=onprem+cloud_run");
+  });
+
+  describe("승인 기록 확인 (--approval)", () => {
+    async function signedWithApproval(dir: string) {
+      const signer = new RecordingSigner();
+      const approvalPath = join(dir, "approval.json");
+      writeJson(approvalPath, createApproval(loadPlan(plan("needs-approval")), "alice", "bob", NOW));
+      const resultPath = join(dir, "sign_result.json");
+      const outcome = await runSign({ planPath: plan("needs-approval"), requester: "alice", approvalPath, imageRepo: REPO, signer, outPath: resultPath, logPath: join(dir, "d.jsonl"), now: () => NOW });
+      expect(outcome.code).toBe(0);
+      return { signer, resultPath, approvalPath };
+    }
+
+    it("서명에 쓴 승인 기록이면 통과하고 approval_sha256 까지 확인", async () => {
+      const { signer, resultPath, approvalPath } = await signedWithApproval(tmp());
+      expect(await runVerify({ resultPath, verifier: signer, approvalPath })).toMatchObject({ code: 0 });
+      expect(signer.verifyCalls[0]?.annotations.approval_sha256).toMatch(/^[0-9a-f]{64}$/);
+    });
+
+    it("승인 기록 없이 확인하면 승인 해시는 안 봄 (사람 승인 결과)", async () => {
+      const { signer, resultPath } = await signedWithApproval(tmp());
+      expect(await runVerify({ resultPath, verifier: signer })).toMatchObject({ code: 0 });
+      expect(signer.verifyCalls[0]?.annotations).not.toHaveProperty("approval_sha256");
+    });
+
+    it("승인 시각만 고친 승인 기록이면 서명과 안 맞아서 signature_invalid", async () => {
+      const dir = tmp();
+      const { signer, resultPath, approvalPath } = await signedWithApproval(dir);
+      const forged = join(dir, "forged.json");
+      writeJson(forged, { ...readJsonFile(approvalPath), approved_at: "2026-10-03T09:00:00.000Z" });
+      expect(await runVerify({ resultPath, verifier: signer, approvalPath: forged })).toMatchObject({ code: 1, reason: "signature_invalid" });
+    });
+
+    it("다른 승인자의 승인 기록이면 approval_mismatch", async () => {
+      const dir = tmp();
+      const { signer, resultPath } = await signedWithApproval(dir);
+      const other = join(dir, "other.json");
+      writeJson(other, createApproval(loadPlan(plan("needs-approval")), "alice", "carol", NOW));
+      expect(await runVerify({ resultPath, verifier: signer, approvalPath: other })).toMatchObject({ code: 1, reason: "approval_mismatch", detail: expect.stringMatching(/approver/) });
+    });
+
+    it("자동 승인 결과에 승인 기록을 주면 approval_mismatch", async () => {
+      const dir = tmp();
+      const { signer, resultPath } = await signed(dir);
+      const approvalPath = join(dir, "approval.json");
+      writeJson(approvalPath, createApproval(loadPlan(plan("needs-approval")), "alice", "bob", NOW));
+      expect(await runVerify({ resultPath, verifier: signer, approvalPath })).toMatchObject({ code: 1, reason: "approval_mismatch" });
+    });
   });
 });

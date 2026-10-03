@@ -15,7 +15,7 @@ const USAGE = `사용법
                           --image-repo <저장소> (--key <cosign.key> [--no-tlog] | --dry-run)
                           [--out sign_result.json] [--log decisions.jsonl] [--audit <감사 로그>] [--approval-ttl <분>]
                           [--plan-schema <Plan.schema.json>]
-  npx tsx src/cli.ts verify --result <sign_result.json> [--plan <plan.json>] [--audit <감사 로그>] [--image-repo <저장소>]
+  npx tsx src/cli.ts verify --result <sign_result.json> [--plan <plan.json>] [--approval <approval.json>] [--audit <감사 로그>] [--image-repo <저장소>]
                             [--pub <cosign.pub>] [--no-tlog] [--plan-schema <Plan.schema.json>]
   npx tsx src/cli.ts audit --audit <감사 로그> [--images [--image-repo <저장소>] [--pub <cosign.pub>] [--no-tlog]]
   npx tsx src/cli.ts fingerprint [--pub <cosign.pub>] [--pubkey-sha256 <지문>]
@@ -32,6 +32,7 @@ const USAGE = `사용법
 
   verify        sign_result.json 의 targets·approver 등이 서명된 값 그대로인지 cosign verify 로 확인
   --plan        plan 내용과 plan 파일 해시까지 확인
+  --approval    이 승인 기록(누가, 언제 승인)으로 서명했는지까지 확인
   --pub         cosign 공개키 경로 또는 KMS 키 주소. 없으면 COSIGN_PUBLIC_KEY 환경변수, 그것도 없으면 keys/cosign.pub
   --no-tlog     Rekor 없이 서명한 이미지 확인 (cosign verify --insecure-ignore-tlog=true)
 
@@ -148,6 +149,7 @@ async function main(argv: string[]): Promise<number> {
       verifier: new CosignVerifier(trustedPub(), "cosign", { noTlog }),
       ...(imageRepo !== undefined ? { imageRepo } : {}),
       ...(values.plan !== undefined ? { planPath: values.plan } : {}),
+      ...(values.approval ? { approvalPath: values.approval } : {}),
       planSchemaPath: planSchema,
       ...(auditPath !== undefined ? { auditPath } : {}),
     });

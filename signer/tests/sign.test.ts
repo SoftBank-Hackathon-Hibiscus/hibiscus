@@ -4,7 +4,7 @@ import { Ajv2020 } from "ajv/dist/2020.js";
 import { describe, expect, it } from "vitest";
 import { createApproval } from "../src/approval.js";
 import { CONTRACTS, toJsonSchema } from "../src/contracts.js";
-import { writeJson } from "../src/io.js";
+import { canonicalize, sha256Hex, writeJson } from "../src/io.js";
 import { DEFAULT_PLAN_SCHEMA, loadPlan } from "../src/plan.js";
 import { runSign } from "../src/sign.js";
 import { copyPlan, NOW, plan, readJsonFile, readLog, RecordingSigner, REPO, tmp } from "./helpers.js";
@@ -51,6 +51,7 @@ describe("runSign", () => {
           failover_allowed: "false",
           requester: "alice",
           approver: "auto",
+          approval_sha256: "none",
           plan_sha256: loadPlan(plan("allow-onprem")).planSha256,
         },
       },
@@ -93,7 +94,12 @@ describe("runSign", () => {
 
     expect(outcome.code).toBe(0);
     expect(readJsonFile(paths(dir).outPath)).toMatchObject({ requester: "alice", approver: "bob" });
-    expect(signer.calls[0]?.annotations).toMatchObject({ requester: "alice", approver: "bob" });
+    expect(signer.calls[0]?.annotations).toMatchObject({
+      requester: "alice",
+      approver: "bob",
+      // 승인 기록(키 정렬 JSON)의 해시까지 서명에 묶음
+      approval_sha256: sha256Hex(canonicalize(readJsonFile(approvalPath))),
+    });
   });
 
   it("needs_approval: 승인 뒤 targets 를 바꾸면 서명 안 함", async () => {

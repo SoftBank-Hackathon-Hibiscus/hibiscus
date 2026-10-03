@@ -10,7 +10,12 @@ export interface AnnotationExtras {
   planSha256?: string | undefined;
   /** 서명 직전 감사 로그 체인 끝 hash */
   auditHead?: string | undefined;
+  /** 승인 기록(approval.json, 키 정렬 JSON)의 sha256. 자동 승인이면 none */
+  approvalSha256?: string | undefined;
 }
+
+/** 승인 기록이 없을 때(allow, approver auto) 주석 값 */
+export const NO_APPROVAL = "none";
 
 // cosign -a 는 쉼표로 값을 나누고 = 가 두 번이면 거절함. encodeURIComponent 결과와 구분자 + 만 허용
 const SAFE_VALUE = /^[A-Za-z0-9._~%!'()*+-]*$/;
@@ -38,6 +43,7 @@ export function signAnnotations(f: SignedFields, x: AnnotationExtras = {}): Reco
     failover_allowed: String(f.failover_allowed),
     requester: f.requester,
     approver: f.approver,
+    ...(x.approvalSha256 !== undefined ? { approval_sha256: x.approvalSha256 } : {}),
     ...(x.planSha256 !== undefined ? { plan_sha256: x.planSha256 } : {}),
     ...(x.auditHead !== undefined ? { audit_head: x.auditHead } : {}),
   });

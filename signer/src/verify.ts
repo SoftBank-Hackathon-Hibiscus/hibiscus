@@ -1,15 +1,16 @@
 // sign_result.json 이 signer 가 서명한 그대로인지(verify), 감사 로그가 끊기지 않았는지(audit) 확인
 import { fileURLToPath } from "node:url";
-import { logAnnotations, signAnnotations } from "./annotations.js";
+import { logAnnotations, NO_APPROVAL, signAnnotations } from "./annotations.js";
+import { loadApproval } from "./approval.js";
 import { checkAuditChain, findSignedLine, GENESIS, readAuditFile, type AuditBreak } from "./audit.js";
 import { imageRefOf, type ImageVerifier } from "./cosign.js";
-import { canonicalize, parseWith, readJson, SignerError } from "./io.js";
+import { canonicalize, parseWith, readJson, sha256Hex, SignerError } from "./io.js";
 import { DEFAULT_PLAN_SCHEMA, loadPlan } from "./plan.js";
-import { SignResultSchema, type AuditLine, type SignResult } from "./schema.js";
+import { AUTO_APPROVER, SignResultSchema, type AuditLine, type SignResult } from "./schema.js";
 
 export const DEFAULT_PUBLIC_KEY = fileURLToPath(new URL("../keys/cosign.pub", import.meta.url));
 
-export type VerifyReason = "dry_run" | "ref_invalid" | "repo_mismatch" | "plan_mismatch" | "audit_mismatch" | "signature_invalid";
+export type VerifyReason = "dry_run" | "ref_invalid" | "repo_mismatch" | "plan_mismatch" | "approval_mismatch" | "audit_mismatch" | "signature_invalid";
 
 export interface VerifyOptions {
   resultPath: string;
@@ -21,6 +22,8 @@ export interface VerifyOptions {
   planSchemaPath?: string;
   /** 있으면 감사 로그 체인과 이 실행의 signed 줄(anchor)까지 확인 */
   auditPath?: string;
+  /** 있으면 이 승인 기록으로 서명했는지까지 확인 (사람 승인일 때) */
+  approvalPath?: string;
 }
 
 export type VerifyOutcome =
@@ -56,6 +59,16 @@ export async function runVerify(o: VerifyOptions): Promise<VerifyOutcome> {
     planSha256 = loaded.planSha256;
   }
 
+  // 자동 승인 결과는 항상 "승인 기록 없음(none)"으로 서명돼 있어야 함. 사람 승인은 승인 기록을 주면 그 해시까지 확인
+  let approvalSha256: string | undefined = result.approver === AUTO_APPROVER ? NO_APPROVAL : undefined;
+  if (o.approvalPath !== undefined) {
+    if (result.approver === AUTO_APPROVER) return fail("approval_mismatch", "자동 승인(auto) 결과인데 승인 기록을 줌");
+    const approval = loadApproval(o.approvalPath);
+    const differs = (["run_id", "digest", "plan_hash", "requester", "approver"] as const).find((k) => approval[k] !== result[k]);
+    if (differs) return fail("approval_mismatch", `승인 기록과 sign_result 의 ${differs} 가 다름`);
+    approvalSha256 = sha256Hex(canonicalize(approval));
+  }
+
   let auditHead: string | undefined;
   if (o.auditPath !== undefined) {
     const check = checkAuditChain(readAuditFile(o.auditPath));
@@ -65,7 +78,7 @@ export async function runVerify(o: VerifyOptions): Promise<VerifyOutcome> {
     auditHead = line.anchor;
   }
 
-  const annotations = signAnnotations(result, { planSha256, auditHead });
+  const annotations = signAnnotations(result, { planSha256, auditHead, approvalSha256 });
   try {
     await o.verifier.verify(imageRef, annotations);
   } catch (e) {

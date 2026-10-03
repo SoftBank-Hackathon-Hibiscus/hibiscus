@@ -1,14 +1,14 @@
 // plan 읽기 → 결정 → 서명 → sign_result.json + kind: sign 기록 (+ 감사 로그 체인).
 // 거절이면 sign_result.json 을 안 남김 (이전 파일도 지움). plan 을 못 읽으면 run_id 를 몰라서 기록 없이 오류
 import { existsSync, rmSync } from "node:fs";
-import { signAnnotations } from "./annotations.js";
+import { NO_APPROVAL, signAnnotations } from "./annotations.js";
 import { loadApproval } from "./approval.js";
 import { appendAudit, readAuditHead, type AuditOptions } from "./audit.js";
 import { imageRefOf, type ImageSigner, type ImageVerifier } from "./cosign.js";
 import { decideSign } from "./decide.js";
-import { appendSignLog, SignerError, signLogLine, writeJson } from "./io.js";
+import { appendSignLog, canonicalize, sha256Hex, SignerError, signLogLine, writeJson } from "./io.js";
 import { DEFAULT_PLAN_SCHEMA, loadPlan } from "./plan.js";
-import { PersonSchema, SignResultSchema, type RefuseReason, type SignLog, type SignResult } from "./schema.js";
+import { AUTO_APPROVER, PersonSchema, SignResultSchema, type RefuseReason, type SignLog, type SignResult } from "./schema.js";
 
 export interface SignOptions {
   planPath: string;
@@ -71,7 +71,9 @@ export async function runSign(o: SignOptions): Promise<SignOutcome> {
   const claims = { ...base, targets: plan.targets, failover_allowed: plan.failover_allowed, approver: decision.approver };
   // 감사 로그를 켰으면 서명 직전 체인 끝을 서명에도 남김 (체인을 통째로 다시 계산하면 서명과 안 맞게)
   const auditHead = o.auditPath ? await readAuditHead(o.auditPath, o.audit) : undefined;
-  const annotations = signAnnotations(claims, { planSha256: loaded.planSha256, auditHead });
+  // 사람 승인이면 그 승인 기록(누가, 언제)까지 서명에 묶음. 자동 승인이면 none
+  const approvalSha256 = decision.approver === AUTO_APPROVER || !approval ? NO_APPROVAL : sha256Hex(canonicalize(approval));
+  const annotations = signAnnotations(claims, { planSha256: loaded.planSha256, auditHead, approvalSha256 });
 
   let signatureRef: string;
   try {
