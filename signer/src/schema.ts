@@ -98,3 +98,14 @@ export const SignLogSchema = z
   })
   .describe("decisions.jsonl 의 kind: sign 한 줄");
 export type SignLog = z.infer<typeof SignLogSchema>;
+
+export const AuditLineSchema = z
+  .strictObject({
+    seq: z.int().min(1).describe("줄 번호. 1 부터 빈 번호 없이"),
+    prev_hash: Sha256HexSchema.describe("앞 줄 hash. 첫 줄은 0 이 64개"),
+    entry: SignLogSchema,
+    anchor: Sha256HexSchema.optional().describe("signed 줄에만. 서명 직전 체인 끝 hash (이미지 서명 주석 audit_head 와 같은 값)"),
+    hash: Sha256HexSchema.describe("이 줄 hash. sha256(키 정렬 JSON {seq, prev_hash, entry, anchor})"),
+  })
+  .describe("서명 감사 로그(해시 체인) 한 줄. signer 안에서만 씀");
+export type AuditLine = z.infer<typeof AuditLineSchema>;

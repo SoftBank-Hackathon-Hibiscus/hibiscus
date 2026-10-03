@@ -8,6 +8,7 @@
     "approve": "tsx src/cli.ts approve",
     "sign": "tsx src/cli.ts sign",
     "verify": "tsx src/cli.ts verify",
+    "audit:verify": "tsx src/cli.ts audit",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "contracts": "tsx scripts/contracts.ts"

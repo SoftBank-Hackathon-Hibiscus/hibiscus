@@ -1,9 +1,9 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { tmp } from "./helpers.js";
+import { plan, tmp } from "./helpers.js";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const TSX = join(ROOT, "node_modules", ".bin", "tsx");
@@ -27,5 +27,37 @@ describe("cli sign", () => {
     expect(r.code).toBe(2);
     expect(r.stderr).toMatch(/ARG_MISSING/);
     expect(existsSync(out)).toBe(false);
+  });
+});
+
+describe("cli audit", () => {
+  /** dry-run 서명 2번으로 감사 로그 2줄 */
+  function auditLog(dir: string): string {
+    const audit = join(dir, "sign_audit.jsonl");
+    for (const name of ["block", "allow"]) {
+      cli(["sign", "--plan", plan(name as "block" | "allow"), "--requester", "alice", "--image-repo", "localhost:5001/hib/app", "--dry-run", "--out", join(dir, "r.json"), "--log", join(dir, "d.jsonl")], {
+        SIGNER_AUDIT_LOG: audit,
+      });
+    }
+    return audit;
+  }
+
+  it("체인이 이어져 있으면 0, 줄 수와 체인 끝 hash 출력", () => {
+    const audit = auditLog(tmp());
+    const r = cli(["audit", "--audit", audit]);
+    expect(r.code).toBe(0);
+    expect(r.stdout).toMatch(/감사 로그 이상 없음: 2줄, head=[0-9a-f]{64}/);
+  });
+
+  it("한 줄을 고치면 1, 끊긴 줄 번호와 이유 출력", () => {
+    const audit = auditLog(tmp());
+    writeFileSync(audit, readFileSync(audit, "utf8").replace('"policy_block"', '"approval_missing"'));
+    const r = cli(["audit", "--audit", audit]);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toMatch(/감사 로그 1번째 줄 문제 \(hash_mismatch\)/);
+  });
+
+  it("--audit 도 SIGNER_AUDIT_LOG 도 없으면 2", () => {
+    expect(cli(["audit"]).code).toBe(2);
   });
 });

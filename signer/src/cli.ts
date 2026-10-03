@@ -1,4 +1,4 @@
-// approve / sign / verify 명령. 종료 코드 0 서명·확인 / 1 거절·확인 실패 / 2 오류
+// approve / sign / verify / audit 명령. 종료 코드 0 서명·확인 / 1 거절·확인 실패 / 2 오류
 import { rmSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { createApproval } from "./approval.js";
@@ -6,26 +6,31 @@ import { CosignSigner, CosignVerifier, DryRunSigner } from "./cosign.js";
 import { SignerError, writeJson } from "./io.js";
 import { DEFAULT_PLAN_SCHEMA, loadPlan } from "./plan.js";
 import { runSign } from "./sign.js";
-import { DEFAULT_PUBLIC_KEY, runVerify } from "./verify.js";
+import { DEFAULT_PUBLIC_KEY, runAuditVerify, runVerify } from "./verify.js";
 
 const USAGE = `사용법
   npx tsx src/cli.ts approve --plan <plan.json> --requester <id> --approver <id> [--out approval.json]
   npx tsx src/cli.ts sign --plan <plan.json> --requester <id> [--approval <approval.json>]
                           --image-repo <저장소> (--key <cosign.key> [--no-tlog] | --dry-run)
-                          [--out sign_result.json] [--log decisions.jsonl] [--plan-schema <Plan.schema.json>]
-  npx tsx src/cli.ts verify --result <sign_result.json> [--plan <plan.json>] [--image-repo <저장소>]
+                          [--out sign_result.json] [--log decisions.jsonl] [--audit <감사 로그>] [--plan-schema <Plan.schema.json>]
+  npx tsx src/cli.ts verify --result <sign_result.json> [--plan <plan.json>] [--audit <감사 로그>] [--image-repo <저장소>]
                             [--pub <cosign.pub>] [--no-tlog] [--plan-schema <Plan.schema.json>]
+  npx tsx src/cli.ts audit --audit <감사 로그> [--images [--pub <cosign.pub>] [--no-tlog]]
 
   --image-repo  태그 없는 이미지 저장소 (예: asia-northeast3-docker.pkg.dev/<프로젝트>/<저장소>/<이미지>). 없으면 IMAGE_REPO 환경변수
   --key         cosign 개인키 경로. 없으면 SIGNER_COSIGN_KEY 환경변수. 비밀번호는 COSIGN_PASSWORD 환경변수
   --no-tlog     Rekor 에 안 올리고 서명 (Rekor 장애 대비). 없으면 SIGNER_NO_TLOG=1 환경변수
                 배포 쪽 verify 에도 --insecure-ignore-tlog=true 필요
   --dry-run     cosign 을 부르지 않고 signature_ref 를 dry-run:... 으로 채움 (연결 확인용, 실제 배포에 쓰지 말 것)
+  --audit       서명 감사 로그(해시 체인) 경로. 없으면 SIGNER_AUDIT_LOG 환경변수, 둘 다 없으면 안 씀
 
   verify        sign_result.json 의 targets·approver 등이 서명된 값 그대로인지 cosign verify 로 확인
   --plan        plan 내용과 plan 파일 해시까지 확인
   --pub         cosign 공개키. 없으면 COSIGN_PUBLIC_KEY 환경변수, 그것도 없으면 keys/cosign.pub
   --no-tlog     Rekor 없이 서명한 이미지 확인 (cosign verify --insecure-ignore-tlog=true)
+
+  audit         감사 로그가 처음부터 끝까지 이어지는지 확인. 끊긴 첫 줄 번호를 알려줌
+  --images      signed 줄마다 이미지 서명의 audit_head 까지 확인 (체인을 통째로 다시 계산한 것도 잡음)
 
 종료 코드: 0 서명함·확인함 / 1 서명 거절·확인 실패 / 2 실행 오류`;
 
@@ -52,10 +57,15 @@ async function main(argv: string[]): Promise<number> {
       "plan-schema": { type: "string" },
       result: { type: "string" },
       pub: { type: "string" },
+      audit: { type: "string" },
+      images: { type: "boolean", default: false },
     },
   });
   const planSchema = values["plan-schema"] ?? DEFAULT_PLAN_SCHEMA;
   const noTlog = values["no-tlog"] === true || process.env.SIGNER_NO_TLOG === "1";
+  // 빈 환경변수는 없는 것으로 봄 (backend 기본값이 '' 인 경우가 있음)
+  const auditPath = values.audit ?? (process.env.SIGNER_AUDIT_LOG || undefined);
+  const pub = values.pub ?? (process.env.COSIGN_PUBLIC_KEY || DEFAULT_PUBLIC_KEY);
 
   if (command === "approve") {
     const loaded = loadPlan(required(values.plan, "plan"), planSchema);
@@ -83,6 +93,7 @@ async function main(argv: string[]): Promise<number> {
       logPath: values.log ?? "decisions.jsonl",
       signer,
       planSchemaPath: planSchema,
+      ...(auditPath !== undefined ? { auditPath } : {}),
     });
     if (outcome.code === 0) {
       const r = outcome.result;
@@ -91,6 +102,7 @@ async function main(argv: string[]): Promise<number> {
       console.log(`  approver : ${r.approver}`);
       console.log(`  signature: ${r.signature_ref}${dryRun ? "  (시험 실행)" : noTlog ? "  (Rekor 없이)" : ""}`);
       console.log(`  저장     : ${out}`);
+      if (auditPath !== undefined) console.log(`  감사 로그: ${auditPath}`);
     } else {
       console.error(`[signer] 서명 안 함 (${outcome.reason}): ${outcome.detail}`);
     }
@@ -98,8 +110,6 @@ async function main(argv: string[]): Promise<number> {
   }
 
   if (command === "verify") {
-    // 빈 환경변수는 없는 것으로 봄 (backend 기본값이 '' 인 경우가 있음)
-    const pub = values.pub ?? (process.env.COSIGN_PUBLIC_KEY || DEFAULT_PUBLIC_KEY);
     const imageRepo = values["image-repo"] ?? (process.env.IMAGE_REPO || undefined);
     const outcome = await runVerify({
       resultPath: required(values.result, "result"),
@@ -107,6 +117,7 @@ async function main(argv: string[]): Promise<number> {
       ...(imageRepo !== undefined ? { imageRepo } : {}),
       ...(values.plan !== undefined ? { planPath: values.plan } : {}),
       planSchemaPath: planSchema,
+      ...(auditPath !== undefined ? { auditPath } : {}),
     });
     if (outcome.code === 0) {
       const r = outcome.result;
@@ -116,6 +127,20 @@ async function main(argv: string[]): Promise<number> {
       console.log(`  확인한 주석: ${Object.keys(outcome.annotations).join(", ")}`);
     } else {
       console.error(`[signer] 서명 확인 실패 (${outcome.reason}): ${outcome.detail}`);
+    }
+    return outcome.code;
+  }
+
+  if (command === "audit") {
+    const outcome = await runAuditVerify({
+      auditPath: required(auditPath, "audit"),
+      ...(values.images === true ? { verifier: new CosignVerifier(pub, "cosign", { noTlog }) } : {}),
+    });
+    if (outcome.code === 0) {
+      console.log(`[signer] 감사 로그 이상 없음: ${outcome.lines}줄, head=${outcome.head}`);
+      if (values.images === true) console.log(`  이미지 서명까지 확인: ${outcome.images}개`);
+    } else {
+      console.error(`[signer] 감사 로그 ${outcome.line}번째 줄 문제 (${outcome.reason}): ${outcome.detail}`);
     }
     return outcome.code;
   }
