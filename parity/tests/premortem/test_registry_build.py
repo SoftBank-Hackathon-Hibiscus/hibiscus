@@ -27,6 +27,8 @@ class RegistryRunner:
         self.fail_push = False
         self.bad_label = False
         self.metadata_digest = None
+        self.local_architecture = "amd64"
+        self.descriptor = None
         child = self.add_manifest({"schemaVersion": 2, "mediaType": MANIFEST_TYPE,
                                    "config": {"digest": CONFIG_ID}, "layers": []})
         self.child = child
@@ -62,8 +64,11 @@ class RegistryRunner:
             labels = dict(self.labels)
             if self.bad_label:
                 labels["org.opencontainers.image.revision"] = "wrong"
-            output = json.dumps([{"Id": self.local_id, "Os": "linux", "Architecture": "amd64",
-                                  "Config": {"Labels": labels}}])
+            image = {"Id": self.local_id, "Os": "linux", "Architecture": self.local_architecture,
+                     "Config": {"Labels": labels}}
+            if self.descriptor is not None:
+                image["Descriptor"] = self.descriptor
+            output = json.dumps([image])
         elif args[1] != "pull":
             raise AssertionError(args)
         return CommandResult(tuple(args), 0, output, "")
@@ -175,6 +180,41 @@ class RegistryBuildTest(unittest.TestCase):
 
     def test_local_config_mismatch_is_not_success(self):
         self.runner.local_id = "sha256:" + "b" * 64
+        self.assert_failed("BUILD_IDENTITY_INVALID")
+
+    def test_containerd_index_id_is_verified(self):
+        self.runner.local_id = self.runner.index
+        self.runner.descriptor = {"digest": self.runner.index, "mediaType": INDEX_TYPE}
+        image = self.build()["image"]
+        self.assertEqual(image["local_image_id"], self.runner.index)
+        self.assertEqual(image["local_image_id_kind"], "index")
+
+    def test_containerd_platform_manifest_id_is_verified(self):
+        self.runner.local_id = self.runner.child
+        self.runner.descriptor = {"digest": self.runner.child, "mediaType": MANIFEST_TYPE}
+        self.assertEqual(self.build()["image"]["local_image_id_kind"], "manifest")
+
+    def test_matching_index_cannot_hide_wrong_platform(self):
+        self.runner.local_id = self.runner.index
+        self.runner.local_architecture = "arm64"
+        self.assert_failed("BUILD_IDENTITY_INVALID")
+
+    def test_matching_index_cannot_hide_wrong_source(self):
+        self.runner.local_id = self.runner.index
+        self.runner.bad_label = True
+        self.assert_failed("BUILD_IDENTITY_INVALID")
+
+    def test_conflicting_local_descriptor_is_rejected(self):
+        self.runner.local_id = self.runner.index
+        self.runner.descriptor = {"digest": self.runner.child, "mediaType": MANIFEST_TYPE}
+        self.assert_failed("BUILD_IDENTITY_INVALID")
+
+    def test_other_platform_manifest_is_not_an_accepted_local_id(self):
+        arm = self.runner.add_manifest({"schemaVersion": 2, "mediaType": MANIFEST_TYPE,
+            "config": {"digest": "sha256:" + "c" * 64}, "layers": []})
+        self.runner.set_index([self.runner.descriptors[0],
+            {"digest": arm, "platform": {"os": "linux", "architecture": "arm64"}}])
+        self.runner.local_id = arm
         self.assert_failed("BUILD_IDENTITY_INVALID")
 
     def test_revision_label_mismatch_is_not_success(self):

@@ -5,7 +5,7 @@ from pathlib import Path
 from .errors import PremortemError
 from .jsonio import load_json, loads_strict
 from .paths import validate_run_id
-from .registry_build import _command, _digest, _verify_index, _REPO
+from .registry_build import _command, _digest, _verify_index, _verify_local_image, _REPO
 from .snapshot import tree_hash, tree_listing
 
 
@@ -49,13 +49,9 @@ def verify_build(path: Path, runner, *, run_id=None, revision=None, digest=None)
         expected_labels = {'org.opencontainers.image.revision': source['commit'],
                            'premortem.source_tree_sha256': source['tree_sha256'],
                            'premortem.run_id': build['run_id']}
-        labels = local['Config']['Labels']
-        if (local['Id'] != children[native]['config_digest']
-                or f"{local['Os']}/{local['Architecture']}" != native
-                or any(labels.get(k) != v for k, v in expected_labels.items())):
-            raise ValueError('실행할 이미지 ID·소스 라벨이 빌드 기록과 다름')
+        identity_kind = _verify_local_image(local, actual_digest, native, children[native], expected_labels)
         # 빌드한 PC와 실행하는 PC의 아키텍처가 달라도 같은 index를 쓴다.
-        image.update(local_image_id=local['Id'], platform=native)
+        image.update(local_image_id=local['Id'], local_image_id_kind=identity_kind, platform=native)
         return build
     except (KeyError, TypeError, AttributeError, ValueError) as error:
         raise PremortemError('BUILD_IDENTITY_INVALID', str(error)) from error

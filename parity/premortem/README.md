@@ -62,8 +62,10 @@ Dockerfile은 앱 폴더 바로 아래에 있어야 하며, submodule은 지원�
 1. 커밋의 소스 복사본으로 빌드하고 소스 커밋·내용 hash·run ID를 이미지 라벨에 넣습니다.
 2. 고유 태그로 push하고 Buildx가 반환한 index digest를 읽습니다.
 3. `repository@digest`로 index와 아키텍처별 manifest를 다시 읽어 내용 hash와 platform을 확인합니다.
-4. 같은 index digest로 Docker 호스트 platform의 이미지를 pull합니다. 로컬 이미지 ID가 해당
-   platform manifest의 config digest와 같은지, 소스 라벨이 맞는지 확인합니다.
+4. 같은 index digest로 Docker 호스트 platform의 이미지를 pull합니다. 로컬 이미지 ID가 검증한
+   index, 해당 platform manifest, 또는 config digest와 일치하는지 확인합니다. classic 이미지
+   저장소의 config ID와 containerd 저장소의 descriptor ID를 모두 지원하며, platform과 소스 라벨도
+   반드시 대조합니다. 다른 아키텍처의 manifest나 관계없는 ID는 허용하지 않습니다.
 5. 모두 맞을 때만 `build_manifest.json`을 씁니다. 실패하면 `build_error.json`을 남기고 0이 아닌
    종료 코드로 끝납니다. 이미 있는 결과 폴더는 덮어쓰지 않습니다. push 후 검증에 실패했다면
    레지스트리에 이미지는 남을 수 있으므로 성공 manifest의 유무로 완료 여부를 판단합니다.
@@ -76,6 +78,7 @@ Dockerfile은 앱 폴더 바로 아래에 있어야 하며, submodule은 지원�
 | `image.platforms[platform].manifest_digest` | 해당 아키텍처 이미지 manifest의 digest |
 | `image.platforms[platform].config_digest` | 해당 이미지 config의 digest |
 | `image.local_image_id` / `platform` | 실제 pull해서 확인한 로컬 이미지 ID와 platform |
+| `image.local_image_id_kind` | 로컬 ID가 가리키는 종류: `config`, `manifest`, `index`. 과거 기록에는 없을 수 있음 |
 | `image.source_build_link_verified` / `registry_link_verified` | 이 빌드 명령의 소스 라벨·로컬 ID 연결 검사 결과 |
 
 `schema_version`은 `premortem.build.v1`입니다. 이는 빌드 기록이며 정책 통과나 배포 완료를 뜻하지 않습니다.

@@ -167,6 +167,29 @@ class BuiltPipelineTest(unittest.TestCase):
         with self.assertRaises(PremortemError):
             verify_build(self.manifest, self.fixture.runner)
 
+    def test_build_can_be_reverified_on_a_different_image_store(self):
+        runner = self.fixture.runner
+        for local_id, kind in ((runner.index, 'index'), (runner.child, 'manifest'),
+                               (registry_fixture.CONFIG_ID, 'config')):
+            with self.subTest(kind=kind):
+                runner.local_id = local_id
+                build = verify_build(self.manifest, runner)
+                self.assertEqual(build['image']['local_image_id'], local_id)
+                self.assertEqual(build['image']['local_image_id_kind'], kind)
+
+    def test_replay_preserves_containerd_image_identity(self):
+        self.fixture.runner.local_id = self.fixture.runner.index
+        summary = self.run_pipeline()
+        self.assertEqual(summary['status'], 'completed')
+        self.assertEqual(summary['local_image_id'], self.fixture.runner.index)
+
+    def test_containerd_identity_mismatch_stops_before_container(self):
+        self.fixture.runner.local_id = self.fixture.runner.index
+        self.fixture.runner.bad_label = True
+        with self.assertRaises(PremortemError):
+            self.run_pipeline()
+        self.assertEqual(self.docker.calls, [])
+
     def test_registry_content_change_is_rejected(self):
         self.fixture.runner.raw[self.fixture.runner.index] += ' '
         with self.assertRaises(PremortemError):
