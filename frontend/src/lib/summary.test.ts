@@ -80,6 +80,25 @@ describe('summarizeDeployment: 배포 판정', () => {
     expect(s.deployLines.join(' ')).toContain('Cloud Run: 이전 버전으로 되돌렸어요');
   });
 
+  it('rolled_back 은 대상별로 serving 에 남은 되돌린 값을 보여준다', () => {
+    const view = makeAllowView({
+      deployment: { status: 'failed', deploymentPerformed: false },
+      deployStage: deployStage({ status: 'failed', exitCode: 4 }),
+      deployResult: makeDeployResult({
+        decision: 'rolled_back',
+        routing: { result: 'error', error: 'Routing revision does not match' },
+        targets: [
+          { target: 'cloud_run', phase: 'rollback', result: 'ok', serving: 'guestbook-00001-abc' },
+          { target: 'onprem', phase: 'rollback', result: 'ok', job_id: 'job-9', serving: 'hibiscus-dep-0001-guestbook' },
+        ],
+      }),
+    });
+    const s = summarizeDeployment(view, 'ko');
+    expect(s.deployLines).toContain('Cloud Run: 이전 버전으로 되돌렸어요 (guestbook-00001-abc)');
+    expect(s.deployLines).toContain('On-Prem: 이전 버전으로 되돌렸어요 (hibiscus-dep-0001-guestbook)');
+    expect(s.deploy.details).toEqual(['Cloud Run 을 guestbook-00001-abc 로 되돌림', 'On-Prem 을 hibiscus-dep-0001-guestbook 로 되돌림']);
+  });
+
   it('error + rollback 실패는 빨강이고 Cloud Run 경고', () => {
     const view = makeAllowView({
       deployment: { status: 'failed', deploymentPerformed: false },

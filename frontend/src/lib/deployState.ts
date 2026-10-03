@@ -69,8 +69,10 @@ export function deriveDeployDisplay(stage: StageExecution | undefined, result: D
       return { tone: 'warning', title: '안전하게 보류됨. 새 버전의 후보 검사가 실패해 트래픽을 전환하지 않았습니다', details, decisionLabel, routingLabel, routingTone };
     }
     case 'rolled_back': {
-      const rollback = result.targets.find((t) => t.phase === 'rollback' && t.result === 'ok');
-      if (rollback?.previous) details.push(`Cloud Run 을 ${rollback.previous} 로 되돌림`);
+      // 되돌린 대상은 serving 에 남는다 (Cloud Run 은 revision, On-Prem 은 컨테이너)
+      for (const step of result.targets.filter((t) => t.phase === 'rollback' && t.result === 'ok')) {
+        details.push(step.serving ? `${targetLabel(step.target)} 을 ${step.serving} 로 되돌림` : `${targetLabel(step.target)} 을 이전 버전으로 되돌림`);
+      }
       if (result.error) details.push(result.error);
       return { tone: 'warning', title: '이전 버전으로 복구됨', details, decisionLabel, routingLabel, routingTone };
     }
