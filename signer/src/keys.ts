@@ -26,11 +26,20 @@ const FINGERPRINT_RE = /^(?:sha256:)?([0-9a-fA-F]{64})$/;
 
 /** 고정한 지문과 공개키가 같은지. 다르면 PUBKEY_MISMATCH. 같으면 지문 반환 */
 export function checkPublicKeyPin(pubKeyPath: string, expected: string): string {
-  const pinned = FINGERPRINT_RE.exec(expected.trim())?.[1]?.toLowerCase();
-  if (!pinned) throw new SignerError("ARG_INVALID", `공개키 지문 형식 오류 (sha256 hex 64자): ${expected}`);
+  return checkPublicKeyPins(pubKeyPath, [expected]);
+}
+
+/** 키 교체 중처럼 지문을 여러 개 고정했을 때. 공개키 지문이 그중 하나여야 함 */
+export function checkPublicKeyPins(pubKeyPath: string, expected: readonly string[]): string {
+  const pinned = expected.map((e) => {
+    const hex = FINGERPRINT_RE.exec(e.trim())?.[1]?.toLowerCase();
+    if (!hex) throw new SignerError("ARG_INVALID", `공개키 지문 형식 오류 (sha256 hex 64자): ${e}`);
+    return hex;
+  });
+  if (pinned.length === 0) throw new SignerError("ARG_INVALID", "고정한 공개키 지문이 없음");
   const actual = publicKeyFingerprint(pubKeyPath);
-  if (actual !== pinned) {
-    throw new SignerError("PUBKEY_MISMATCH", `공개키가 고정한 지문과 다름 (고정 ${pinned.slice(0, 12)}…, 실제 ${actual.slice(0, 12)}…): ${pubKeyPath}`);
+  if (!pinned.includes(actual)) {
+    throw new SignerError("PUBKEY_MISMATCH", `공개키가 고정한 지문과 다름 (고정 ${pinned.map((p) => p.slice(0, 12) + "…").join(", ")} / 실제 ${actual.slice(0, 12)}…): ${pubKeyPath}`);
   }
   return actual;
 }

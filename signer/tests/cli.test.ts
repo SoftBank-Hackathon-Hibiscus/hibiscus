@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { generateKeyPairSync } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,7 +14,7 @@ function cli(args: string[], env: Record<string, string> = {}) {
   const r = spawnSync(TSX, ["src/cli.ts", ...args], {
     cwd: ROOT,
     encoding: "utf8",
-    env: { ...process.env, SIGNER_COSIGN_KEY: "", IMAGE_REPO: "", SIGNER_AUDIT_LOG: "", ...env },
+    env: { ...process.env, SIGNER_COSIGN_KEY: "", IMAGE_REPO: "", SIGNER_AUDIT_LOG: "", COSIGN_PUBLIC_KEY: "", SIGNER_PUBKEY_SHA256: "", ...env },
   });
   return { code: r.status, stdout: r.stdout, stderr: r.stderr };
 }
@@ -77,6 +78,26 @@ describe("cli fingerprint / 공개키 고정", () => {
     expect(r.code).toBe(2);
     expect(r.stderr).toMatch(/PUBKEY_MISMATCH/);
     expect(existsSync(join(dir, "d.jsonl"))).toBe(false);
+  });
+});
+
+describe("cli 여러 공개키", () => {
+  it("fingerprint 는 --pub 를 여러 번 주면 키마다 한 줄", () => {
+    const dir = tmp();
+    const other = join(dir, "other.pub");
+    writeFileSync(other, generateKeyPairSync("ec", { namedCurve: "P-256" }).publicKey.export({ type: "spki", format: "pem" }));
+    const r = cli(["fingerprint", "--pub", "keys/cosign.pub", "--pub", other]);
+    expect(r.code).toBe(0);
+    expect(r.stdout.trim().split("\n")).toHaveLength(2);
+  });
+
+  it("COSIGN_PUBLIC_KEY 에 쉼표로 여러 개, 그중 하나가 고정 목록에 없으면 PUBKEY_MISMATCH", () => {
+    const dir = tmp();
+    const other = join(dir, "other.pub");
+    writeFileSync(other, generateKeyPairSync("ec", { namedCurve: "P-256" }).publicKey.export({ type: "spki", format: "pem" }));
+    const r = cli(["fingerprint"], { COSIGN_PUBLIC_KEY: `keys/cosign.pub,${other}`, SIGNER_PUBKEY_SHA256: "2f049a775b1f1075c8c14ad13483b5d1ae411e32f7f89e2dc1b113b3a2d3dcfa" });
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/PUBKEY_MISMATCH/);
   });
 });
 

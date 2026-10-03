@@ -265,3 +265,57 @@ export class DryRunSigner implements ImageSigner {
     return `dry-run:${imageRef}`;
   }
 }
+
+/**
+ * 키 교체 중처럼 믿는 공개키가 여러 개일 때. 서명·증명서는 그중 아무 키로나 확인되면 통과.
+ * 키·레지스트리 설정 오류는 숨기지 않음 (다른 키로 통과하지 못하면 그 오류를 그대로 냄)
+ */
+export class MultiKeyVerifier implements ImageVerifier {
+  constructor(private readonly verifiers: readonly ImageVerifier[]) {
+    if (verifiers.length === 0) throw new SignerError("ARG_INVALID", "믿는 공개키가 없음");
+  }
+
+  async verify(imageRef: string, annotations: Record<string, string>): Promise<void> {
+    const errors: unknown[] = [];
+    for (const v of this.verifiers) {
+      try {
+        await v.verify(imageRef, annotations);
+        return;
+      } catch (e) {
+        errors.push(e);
+      }
+    }
+    throw firstConfigError(errors) ?? new SignerError("SIGNATURE_INVALID", `믿는 공개키 ${this.verifiers.length}개 모두로 확인 실패: ${messages(errors)}`);
+  }
+
+  async signatures(imageRef: string): Promise<Array<Record<string, string>>> {
+    const all: Array<Record<string, string>> = [];
+    for (const v of this.verifiers) all.push(...(await v.signatures(imageRef)));
+    return all;
+  }
+
+  async attestations(imageRef: string, predicateType: string, policyPath?: string): Promise<unknown[]> {
+    const all: unknown[] = [];
+    const errors: unknown[] = [];
+    for (const v of this.verifiers) {
+      if (!v.attestations) continue;
+      try {
+        all.push(...(await v.attestations(imageRef, predicateType, policyPath)));
+      } catch (e) {
+        // 믿는 키로 서명된 증명서가 정책을 어기면 다른 키 결과와 상관없이 거부
+        if (e instanceof SignerError && e.code === "POLICY_DENIED") throw e;
+        errors.push(e);
+      }
+    }
+    if (all.length > 0) return all;
+    throw firstConfigError(errors) ?? new SignerError("SIGNATURE_INVALID", `믿는 공개키로 확인되는 배포 증명서가 없음: ${messages(errors)}`);
+  }
+}
+
+function firstConfigError(errors: unknown[]): unknown {
+  return errors.find((e) => !(e instanceof SignerError && (e.code === "SIGNATURE_INVALID" || e.code === "SIGNATURE_NOT_FOUND")));
+}
+
+function messages(errors: unknown[]): string {
+  return errors.map((e) => (e instanceof Error ? e.message : String(e))).join(" / ").slice(0, 400);
+}
