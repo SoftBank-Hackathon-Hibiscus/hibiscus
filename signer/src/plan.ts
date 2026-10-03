@@ -5,8 +5,8 @@ import { Ajv2020 } from "ajv/dist/2020.js";
 import { canonicalize, parseWith, readJson, sha256Hex, SignerError } from "./io.js";
 import { PlanSchema, type Plan } from "./schema.js";
 
-// 루트 contracts/ 로 옮겨지면 바꾸기
-export const DEFAULT_PLAN_SCHEMA = fileURLToPath(new URL("../../policy/contracts/Plan.schema.json", import.meta.url));
+// 파트 사이 공개 계약(루트 contracts/)의 Plan 스키마. 정책 폴더 원본과 같은지는 policy 테스트가 확인
+export const DEFAULT_PLAN_SCHEMA = fileURLToPath(new URL("../../contracts/Plan.schema.json", import.meta.url));
 
 export interface LoadedPlan {
   plan: Plan;

@@ -52,8 +52,8 @@
 
 ## 기존 경로 안내
 
-- 서명 파트는 당분간 `policy/contracts/Plan.schema.json` 을 런타임에 직접 읽는다 (`signer/src/plan.ts`, `--plan-schema` 로 바꿀 수 있음). 그 파일이 없으면 서명하지 않는다.
-- 그래서 각 파트 폴더의 `contracts/` 는 지우지 않는다. 정책 소유 5개(TestResult, Plan, DecisionLog, RollbackRequest, RollbackPlan)는 `policy/tests/root-contracts.test.ts` 가 원본과 같은지 확인한다. 서명 파트 2개(SignResult, SignLog)는 자동 검사가 없다.
+- 서명 파트는 이 폴더의 `Plan.schema.json` 을 런타임에 직접 읽는다 (`signer/src/plan.ts`, `--plan-schema` 로 바꿀 수 있음). 그 파일이 없으면 서명하지 않는다.
+- 각 파트 폴더의 `contracts/` 는 지우지 않는다. 정책 소유 5개(TestResult, Plan, DecisionLog, RollbackRequest, RollbackPlan)는 `policy/tests/root-contracts.test.ts` 가, 서명 파트 2개(SignResult, SignLog)는 `signer/tests/root-contracts.test.ts` 가 원본과 같은지 확인한다.
 
 ## 바꿀 때 절차
 
@@ -105,3 +105,4 @@ parity 의 `result.json`(`parity/mocks/test_result.json` 형식)은 이 계약�
 | 2026-10-01 | contracts/publish-current | main 의 Plan, RollbackRequest, RollbackPlan, DecisionLog, SignResult, SignLog 를 그대로 공개 |
 | 2026-10-02 | #28 | TestResult 공개 및 런타임 의미 규칙 문서화 |
 | 2026-10-03 | signer/verify-audit | SignLog `reason` enum 에 `approval_expired` 추가 (승인 유효시간, 켤 때만 나옴). 값 추가라 기존 줄은 그대로 통과 |
+| 2026-10-03 | signer/verify-audit | 서명 파트가 Plan 스키마를 `policy/contracts/` 대신 이 폴더에서 읽음 (내용은 같음) |

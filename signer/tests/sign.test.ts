@@ -1,11 +1,11 @@
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { describe, expect, it } from "vitest";
 import { createApproval } from "../src/approval.js";
 import { CONTRACTS, toJsonSchema } from "../src/contracts.js";
 import { writeJson } from "../src/io.js";
-import { loadPlan } from "../src/plan.js";
+import { DEFAULT_PLAN_SCHEMA, loadPlan } from "../src/plan.js";
 import { runSign } from "../src/sign.js";
 import { copyPlan, NOW, plan, readJsonFile, readLog, RecordingSigner, REPO, tmp } from "./helpers.js";
 
@@ -146,6 +146,12 @@ describe("runSign", () => {
     await expect(runSign({ planPath: bad, requester: "alice", imageRepo: REPO, signer, ...paths(dir) })).rejects.toMatchObject({ code: "PLAN_INVALID" });
     expect(signer.calls).toHaveLength(0);
     expect(existsSync(paths(dir).logPath)).toBe(false);
+  });
+
+  it("기본 Plan 스키마는 루트 contracts/ 공개본 (정책 폴더 원본과 같은 내용)", () => {
+    expect(DEFAULT_PLAN_SCHEMA.replace(/\\/g, "/")).toMatch(/\/contracts\/Plan\.schema\.json$/);
+    expect(DEFAULT_PLAN_SCHEMA).not.toMatch(/policy/);
+    expect(readFileSync(DEFAULT_PLAN_SCHEMA, "utf8")).toBe(readFileSync(join(DEFAULT_PLAN_SCHEMA, "..", "..", "policy", "contracts", "Plan.schema.json"), "utf8"));
   });
 
   it("Plan 스키마를 못 읽으면 서명하지 않음 (D9)", async () => {
