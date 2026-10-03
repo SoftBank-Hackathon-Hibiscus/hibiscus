@@ -6,6 +6,7 @@ import type { ApplicationView, Decision, DeploymentStatus, DeploymentView, Stage
 import { ErrorNotice } from '../components/ErrorNotice';
 import { Modal } from '../components/Modal';
 import { PageError } from '../components/PageError';
+import { RecordedDiagnosis } from '../components/RecordedDiagnosis';
 import { Loader } from '../components/Loader';
 import { Collapsible, Crumbs, DemoBadge, Empty, Hash, Kv, PageTitle, Pill, type Tone } from '../components/ui';
 import { useMinVisible } from '../hooks/useMinVisible';
@@ -589,6 +590,7 @@ function TestDetail({ view, summary }: { view: DeploymentView; summary: Deployme
           </div>
         </div>
       )}
+      {!stub && !result.passed && result.app === 'guestbook' && <RecordedDiagnosis />}
       {withMismatch.length > 0 && (
         <div className="fold-list">
           {withMismatch.map((c) => (
