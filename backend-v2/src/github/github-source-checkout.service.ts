@@ -118,6 +118,8 @@ export class GithubSourceCheckoutService {
         [
           '-c',
           'protocol.version=2',
+          '-c',
+          'credential.helper=',
           'fetch',
           '--quiet',
           '--depth=1',
