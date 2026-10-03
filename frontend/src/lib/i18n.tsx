@@ -86,6 +86,7 @@ const dict = {
   demosTitle: ['데모 시나리오', 'デモシナリオ'],
   diagnosisRecordedTitle: ['실제 실행으로 본 LLM 진단', '実際の実行記録から見るLLM診断'],
   diagnosisRecordedAction: ['저장된 LLM 진단 보기', '保存済みLLM診断を見る'],
+  diagnosisRelatedAction: ['같은 실패 패턴의 LLM 진단 사례 보기', '同じ失敗パターンのLLM診断例を見る'],
   diagnosisRecordedNote: ['10월 2일 방명록 실행의 분석 사례입니다. 현재 배포의 진단은 아닙니다.', '10月2日の掲示板アプリの実行を分析した事例です。現在のデプロイの診断ではありません。'],
   diagnosisNewTab: ['새 탭에서 열기 · 닫으면 기존 시연을 이어갈 수 있습니다', '新しいタブで開く・閉じると元のデモに戻れます'],
   demosSub: ['미리 만든 데이터로 다섯 가지 상황을 봅니다. 실제 서버에는 연결하지 않아요.', '用意したデータで5つの状況を見ます。実サーバーには接続しません。'],

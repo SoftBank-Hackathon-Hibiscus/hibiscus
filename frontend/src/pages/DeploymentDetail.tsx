@@ -16,6 +16,7 @@ import { fmtTime, relTime, targetLabel } from '../lib/format';
 import { pickLang, useLang, type DictKey } from '../lib/i18n';
 import { Markdown, prepareExplain } from '../lib/markdown';
 import { loaderHoldMs } from '../lib/motion';
+import { matchesRecordedGuestbook } from '../lib/recordedDiagnosis';
 import { APPLICATIONS_PATH, applicationPath, hrefFor, realHref } from '../lib/router';
 import { summarizeDeployment, type DeploymentSummary, type ProofLink } from '../lib/summary';
 
@@ -590,7 +591,9 @@ function TestDetail({ view, summary, sourceKind }: { view: DeploymentView; summa
           </div>
         </div>
       )}
-      {sourceKind === 'mock' && !stub && !result.passed && result.app === 'guestbook' && <RecordedDiagnosis />}
+      {!stub && !result.passed && (sourceKind === 'mock' ? result.app === 'guestbook' : matchesRecordedGuestbook(result)) && (
+        <RecordedDiagnosis relatedCase={sourceKind === 'real'} />
+      )}
       {withMismatch.length > 0 && (
         <div className="fold-list">
           {withMismatch.map((c) => (
