@@ -303,6 +303,22 @@ describe("runSign 과 감사 로그", () => {
     expect(existsSync(join(dir, "r.json"))).toBe(false);
   });
 
+  it.each([
+    ["중간 줄 내용 수정", (ls: AuditLine[]) => { ls[1]!.entry.requester = "mallory"; return ls; }, /2번째 줄 \(hash_mismatch\)/],
+    ["중간 줄 삭제", (ls: AuditLine[]) => ls.filter((_, i) => i !== 1), /2번째 줄 \(seq_gap\)/],
+    ["체인 통째로 재계산(anchor 그대로)", (ls: AuditLine[]) => { ls[0]!.entry.requester = "mallory"; return recompute(ls, "keep"); }, /2번째 줄 \(anchor_invalid\)/],
+  ] as const)("감사 로그가 고쳐져 있으면(%s) 다음 서명은 cosign 을 부르기 전에 거부", async (_, edit, where) => {
+    const dir = tmp();
+    const { auditPath } = await chain(dir);
+    writeLines(auditPath, edit(readLines(auditPath)));
+    const signer = new RecordingSigner();
+    await expect(
+      runSign({ planPath: plan("allow"), requester: "alice", imageRepo: REPO, signer, outPath: join(dir, "next.json"), logPath: join(dir, "next.jsonl"), auditPath, now: () => NOW }),
+    ).rejects.toMatchObject({ code: "AUDIT_INVALID", message: expect.stringMatching(where) });
+    expect(signer.calls).toHaveLength(0);
+    expect(existsSync(join(dir, "next.json"))).toBe(false);
+  });
+
   it("서명 뒤 감사 로그를 못 쓰면 sign_result 를 남기지 않고 signed 기록도 안 남김", async () => {
     const dir = tmp();
     const auditPath = join(dir, "sign_audit.jsonl");

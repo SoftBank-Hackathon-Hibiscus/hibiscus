@@ -115,7 +115,7 @@ export function findSignedLine(lines: readonly AuditLine[], r: SignResult): Audi
   return undefined;
 }
 
-// 마지막 줄. 깨져 있으면 이어 쓰지 않음
+// 마지막 줄. 체인 전체를 처음부터 확인해서 중간이라도 깨져 있으면 이어 쓰지 않음 (고친 기록 위에 새 서명을 쌓지 않게)
 function lastLine(path: string): AuditLine | undefined {
   let text: string;
   try {
@@ -124,17 +124,11 @@ function lastLine(path: string): AuditLine | undefined {
     if ((e as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw new SignerError("AUDIT_INVALID", `감사 로그 파일을 읽지 못함: ${path}`);
   }
-  if (text === "") return undefined;
-  if (!text.endsWith("\n")) throw new SignerError("AUDIT_INVALID", `감사 로그 마지막 줄이 줄바꿈 없이 끝남 (쓰다가 끊겼거나 잘림): ${path}`);
-  const lastText = text.slice(text.lastIndexOf("\n", text.length - 2) + 1, -1);
-  let line: AuditLine;
-  try {
-    line = AuditLineSchema.parse(JSON.parse(lastText));
-  } catch {
-    throw new SignerError("AUDIT_INVALID", `감사 로그 마지막 줄 형식 오류: ${path}`);
+  const check = checkAuditChain(text);
+  if (!check.ok) {
+    throw new SignerError("AUDIT_INVALID", `감사 로그 ${check.line}번째 줄 (${check.reason}): ${check.detail}. 고쳐진 기록 위에는 이어 쓰지 않음: ${path}`);
   }
-  if (auditHash(line) !== line.hash) throw new SignerError("AUDIT_INVALID", `감사 로그 마지막 줄 hash 가 안 맞음: ${path}`);
-  return line;
+  return check.lines.at(-1);
 }
 
 async function withLock<T>(path: string, o: AuditOptions, fn: () => T): Promise<T> {
