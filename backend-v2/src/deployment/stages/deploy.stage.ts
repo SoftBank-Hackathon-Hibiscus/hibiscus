@@ -13,6 +13,7 @@ import { CloudRunClient } from '../deploy/cloud-run.client.js';
 import { DeployOrchestrator } from '../deploy/deploy.orchestrator.js';
 import { HttpHealthChecker } from '../deploy/http-health.checker.js';
 import { OnpremClient } from '../deploy/onprem.client.js';
+import { DeploymentRepository } from '../deployment.repository.js';
 import { RoutingAdapter } from '../deploy/routing.adapter.js';
 import { SignatureVerifier } from '../deploy/signature.verifier.js';
 import type { DeployResult } from '../types/deploy-result.type.js';
@@ -47,6 +48,7 @@ export class DeployStage implements StageRunner {
     private readonly config: ConfigService<BackendConfig & DeployConfig, true>,
     private readonly runner: CommandRunner,
     private readonly applications: ApplicationRepository,
+    private readonly deployments: DeploymentRepository,
     private readonly moduleRef: ModuleRef,
   ) {}
 
@@ -97,6 +99,7 @@ export class DeployStage implements StageRunner {
       sign,
       agentId: agent?.id ?? null,
       healthCheck: view.healthCheck,
+      environment: this.deployments.environment(deployment.id, 'runtime'),
       changedBy: deployment.requester,
     });
 

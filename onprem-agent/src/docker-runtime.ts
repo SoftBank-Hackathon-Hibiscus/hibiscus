@@ -27,6 +27,7 @@ export class DockerRuntime implements ContainerRuntime {
     const recovered = await this.recover(job, name);
     if (recovered) return recovered;
 
+    const environment = this.environmentArgs(job.runtime.environment);
     await this.commands.run(this.config.dockerCommand, [
       "run",
       "-d",
@@ -42,6 +43,7 @@ export class DockerRuntime implements ContainerRuntime {
       `hibiscus.digest=${job.digest}`,
       "-p",
       `127.0.0.1::${job.runtime.container_port}`,
+      ...environment,
       job.image,
     ]);
     const hostPort = await this.hostPort(name, job.runtime.container_port);
@@ -54,6 +56,7 @@ export class DockerRuntime implements ContainerRuntime {
       host_port: hostPort,
       container_port: job.runtime.container_port,
       role: "candidate",
+      environment: job.runtime.environment,
     };
   }
 
@@ -150,6 +153,7 @@ export class DockerRuntime implements ContainerRuntime {
       `hibiscus.digest=${container.digest}`,
       "-p",
       `127.0.0.1:${container.host_port}:${container.container_port}`,
+      ...this.environmentArgs(container.environment),
       container.image,
     ]);
     const hostPort = await this.hostPort(
@@ -203,7 +207,15 @@ export class DockerRuntime implements ContainerRuntime {
       host_port: hostPort,
       container_port: job.runtime.container_port,
       role: "candidate",
+      environment: job.runtime.environment,
     };
+  }
+
+  private environmentArgs(environment?: Record<string, string>): string[] {
+    return Object.entries(environment ?? {}).flatMap(([name, value]) => [
+      "--env",
+      `${name}=${value}`,
+    ]);
   }
 
   private async ensureManaged(container: ManagedContainer): Promise<void> {

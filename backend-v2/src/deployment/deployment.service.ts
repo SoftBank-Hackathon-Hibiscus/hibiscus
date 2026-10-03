@@ -35,27 +35,33 @@ export class DeploymentService {
       input.image_digest ??
       `sha256:${createHash('sha256').update(`placeholder:${id}`).digest('hex')}`;
 
-    return this.repository.create({
-      id,
-      applicationId,
-      trigger,
-      sourceRevision: input.source_revision,
-      // Webhook authentication verifies the request, not the built/tested image.
-      sourceRevisionVerified: false,
-      imageDigest: digest,
-      digestSource: input.image_digest ? 'registry' : 'placeholder',
-      requester: requesterId,
-      approver: null,
-      decision: null,
-      status: 'queued',
-      currentStage: null,
-      error: null,
-      workDir: '', // 기존 DB 행의 경로 메타데이터만 보존. 새 결과는 DB에 저장합니다.
-      executionMode: this.config.get('backend.stageMode', { infer: true }),
-      deploymentPerformed: false,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    });
+    return this.repository.create(
+      {
+        id,
+        applicationId,
+        trigger,
+        sourceRevision: input.source_revision,
+        // Webhook authentication verifies the request, not the built/tested image.
+        sourceRevisionVerified: false,
+        imageDigest: digest,
+        digestSource: input.image_digest ? 'registry' : 'placeholder',
+        requester: requesterId,
+        approver: null,
+        decision: null,
+        status: 'queued',
+        currentStage: null,
+        error: null,
+        workDir: '', // 기존 DB 행의 경로 메타데이터만 보존. 새 결과는 DB에 저장합니다.
+        executionMode: this.config.get('backend.stageMode', { infer: true }),
+        deploymentPerformed: false,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      },
+      {
+        runtime: this.applications.runtimeEnvironment(applicationId),
+        test: this.applications.testEnvironment(applicationId),
+      },
+    );
   }
 
   list(applicationId: string): Deployment[] {
@@ -63,6 +69,15 @@ export class DeploymentService {
       throw new NotFoundException('Application not found');
     }
     return this.repository.list(applicationId);
+  }
+
+  latestSourceRevision(applicationId: string): string {
+    const latest = this.list(applicationId)[0];
+    if (!latest)
+      throw new ConflictException(
+        'Application has no deployment source to redeploy',
+      );
+    return latest.sourceRevision;
   }
 
   get(id: string) {

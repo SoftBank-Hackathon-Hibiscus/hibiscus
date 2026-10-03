@@ -23,7 +23,10 @@ export interface AgentJob {
   image?: string;
   plan_hash?: string;
   to_digest?: string;
-  runtime: { container_port: number };
+  runtime: {
+    container_port: number;
+    environment?: Record<string, string>;
+  };
   health_check: AgentHealthCheck;
   created_at: string;
   deadline: string;
@@ -80,6 +83,7 @@ export interface ManagedContainer extends ServingContainer {
   host_port: number;
   container_port: number;
   role: "candidate" | "serving" | "standby";
+  environment?: Record<string, string>;
 }
 
 export type CachedJobResult = Omit<AgentJobResult, "attempt">;

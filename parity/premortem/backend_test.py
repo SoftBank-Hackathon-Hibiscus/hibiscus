@@ -16,7 +16,7 @@ def validate_request(request):
     parity = request.get('format') == 'premortem-backend-test-v1' if isinstance(request, dict) else False
     health = request.get('format') == 'premortem-backend-health-v1' if isinstance(request, dict) else False
     required = common | ({'record', 'noise'} if parity else set())
-    optional = {'port', 'health_path', 'health_timeout', 'after'}
+    optional = {'port', 'health_path', 'health_timeout', 'after', 'environment'}
     if (not isinstance(request, dict) or not (parity or health)
             or not required <= set(request) or set(request) - required - optional):
         raise PremortemError('INPUT_INVALID', 'Backend 테스트 요청 형식이 잘못됨')
@@ -32,6 +32,13 @@ def validate_request(request):
     after = request.get('after', [])
     if not isinstance(after, list) or any(type(v) is not int or v < 1 for v in after):
         raise PremortemError('INPUT_INVALID', 'after는 양의 요청 번호 배열이어야 함')
+    environment = request.get('environment', {})
+    if (not isinstance(environment, dict) or len(environment) > 50
+            or any(not isinstance(name, str) or not re.fullmatch(r'[A-Z_][A-Z0-9_]{0,63}', name)
+                   or name in {'PORT', 'HIB_RUN_ID', 'HIB_DIGEST'}
+                   or not isinstance(value, str) or len(value) > 4096
+                   for name, value in environment.items())):
+        raise PremortemError('INPUT_INVALID', '검증용 환경변수 형식이 잘못됨')
     return request
 
 
@@ -54,6 +61,7 @@ def run_backend_test(request_path, out_dir, policy_root=None):
                 port=request.get('port', 8080),
                 health_path=request.get('health_path', '/healthz'),
                 health_timeout=request.get('health_timeout', 30),
+                environment=request.get('environment', {}),
                 out_dir=output,
             )
             normalized['app'] = request['app']
@@ -80,7 +88,8 @@ def run_backend_test(request_path, out_dir, policy_root=None):
             noise=request['noise'], app=request['app'], out_dir=output / 'parity', runner=SubprocessRunner(),
             run_id=request['run_id'], revision=request['source_revision'], digest=request['digest'],
             port=request.get('port', 8080), health_path=request.get('health_path', '/healthz'),
-            health_timeout=request.get('health_timeout', 30), after=tuple(request.get('after', [])))
+            health_timeout=request.get('health_timeout', 30), after=tuple(request.get('after', [])),
+            environment=request.get('environment', {}))
         if execution['status'] != 'completed':
             raise PremortemError('TEST_INCOMPLETE', '시험이 중단되어 정책 입력을 만들지 않음')
         verify_test_bundle(output / 'parity')

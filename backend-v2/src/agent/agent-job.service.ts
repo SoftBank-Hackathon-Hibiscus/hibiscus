@@ -63,6 +63,7 @@ export class AgentJobService {
       image: input.image ?? null,
       planHash: input.plan_hash ?? null,
       toDigest: input.to_digest ?? null,
+      environment: input.environment ?? {},
       createdAt: input.created_at
         ? new Date(input.created_at).toISOString()
         : new Date().toISOString(),
@@ -84,7 +85,7 @@ export class AgentJobService {
       this.config.get('backend.agentCandidateLeaseMs', { infer: true }),
       this.config.get('backend.agentActionLeaseMs', { infer: true }),
     );
-    return job ? this.contract(job) : undefined;
+    return job ? this.contract(job, true) : undefined;
   }
 
   submit(agentId: string, jobId: string, input: AgentJobResultDto) {
@@ -188,6 +189,7 @@ export class AgentJobService {
       image: job.image,
       planHash: job.planHash,
       toDigest: job.toDigest,
+      environment: job.environment,
       deadline: job.deadline,
     });
     if (canonicalJson(identity(stored)) !== canonicalJson(identity(requested)))
@@ -195,7 +197,7 @@ export class AgentJobService {
     return { job: this.contract(stored), status: stored.status };
   }
 
-  private contract(job: AgentJob) {
+  private contract(job: AgentJob, includeEnvironment = false) {
     const deployment = this.deployments.find(job.runId)!;
     const application = this.applications.getView(deployment.applicationId)!;
     const health = application.healthCheck;
@@ -211,6 +213,11 @@ export class AgentJobService {
       ...(job.toDigest ? { to_digest: job.toDigest } : {}),
       runtime: {
         container_port: application.application.containerPort,
+        ...(includeEnvironment
+          ? {
+              environment: job.environment,
+            }
+          : {}),
       },
       health_check: {
         enabled: health.enabled,

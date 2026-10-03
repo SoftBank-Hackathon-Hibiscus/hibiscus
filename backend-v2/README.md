@@ -76,7 +76,10 @@ src/
 ```text
 Application (Project)
 ├── HealthCheckConfig (1:1)
+├── ApplicationEnvironmentVariable (1:N)
+├── ApplicationTestEnvironmentVariable (1:N, parity 전용)
 ├── Deployment (1:N, version 1, 2, 3...)
+│   ├── DeploymentEnvironmentVariable (1:N, runtime/test 스냅샷)
 │   ├── PolicyResult (1:1)
 │   └── StageExecution (1:N)
 │       ├── DeploymentArtifact (1:N, 결과 원문)
@@ -91,6 +94,28 @@ Application (Project)
 
 Health Check 설정은 Deployment마다 복사하지 않습니다. Application에 한 개를 둡니다.
 따라서 새 Deployment도 현재 Application 설정을 사용합니다.
+
+Application 생성 요청의 `environment`에는 운영 런타임 환경변수를 넣을 수 있습니다.
+`test_environment`에는 parity health/replay 컨테이너만 사용하는 검증용 값을 넣습니다. replay는 데이터를 변경할 수 있으므로 운영 DB 자격 증명을 `test_environment`에 넣지 마세요.
+`PUT /applications/:id/environment`는 전체 환경변수를 교체하고, 가장 최근 배포와 같은 `source_revision`으로 새 배포를 시작합니다. 응답에는 변수 이름과 새 Deployment가 포함되며 값은 반환하지 않습니다.
+`PUT /applications/:id/test-environment`도 검증용 환경변수를 전체 교체한 뒤 새 배포를 시작합니다.
+기존 이미지를 그대로 재사용하지 않고 같은 소스를 다시 빌드·검증하므로 새 Deployment의 digest는 처음에 placeholder입니다.
+배포를 만들 때 두 환경을 Deployment 단위로 스냅샷 저장합니다. 중단된 배포가 재개돼도 parity, Cloud Run, On-Prem은 해당 배포가 시작할 때 저장한 값을 계속 사용합니다.
+새 배포부터 같은 운영 값이 Cloud Run revision과 On-Prem Docker container에 적용됩니다. `PORT`, `HIB_RUN_ID`, `HIB_DIGEST`는 시스템 관리 값이라 설정할 수 없습니다.
+
+```json
+{
+  "environment": [
+    { "name": "DATABASE_URL", "value": "postgres://..." },
+    { "name": "OBJECT_STORAGE_BUCKET", "value": "hibiscus-demo" }
+  ],
+  "test_environment": [
+    { "name": "DATABASE_URL", "value": "postgres://test-db/..." }
+  ]
+}
+```
+
+MVP에서는 값이 Backend DB에 저장됩니다. 관리 API 응답과 일반 Job 조회에는 값이 나오지 않습니다. 운영 비밀값은 이후 Secret Manager 참조 방식으로 교체해야 합니다.
 
 Agent token은 생성할 때 한 번만 반환합니다. DB에는 SHA-256 해시만 저장합니다.
 
@@ -288,6 +313,8 @@ Webhook은 원본 요청 바이트의 HMAC-SHA256을 `X-Hub-Signature-256`과 �
 - `GET /applications`
 - `GET /applications/:id`
 - `PATCH /applications/:id/health-check`
+- `PUT /applications/:id/environment`
+- `PUT /applications/:id/test-environment`
 - `POST /applications/:id/deployments`
 - `GET /applications/:id/deployments`
 - `GET /deployments/:id`

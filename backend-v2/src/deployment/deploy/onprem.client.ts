@@ -46,6 +46,7 @@ export class OnpremClient implements OnpremPort {
         ...(spec.image ? { image: spec.image } : {}),
         ...(spec.planHash ? { plan_hash: spec.planHash } : {}),
         ...(spec.toDigest ? { to_digest: spec.toDigest } : {}),
+        ...(spec.environment ? { environment: spec.environment } : {}),
         deadline: new Date(Date.now() + timeout).toISOString(),
       } as CreateAgentJobDto;
       this.jobs.create(spec.agentId, input);

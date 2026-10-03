@@ -237,6 +237,7 @@ export class DeployOrchestrator {
       const candidate = await this.deps.cloudRun!.candidate(
         imageRef,
         input.deploymentId,
+        input.environment,
       );
       return {
         step: {
@@ -281,6 +282,7 @@ export class DeployOrchestrator {
         digest: input.digest,
         image: imageRef,
         planHash: input.sign.plan_hash,
+        environment: input.environment,
       });
       const candidate = outcome.payload?.candidate;
       if (outcome.status !== 'succeeded' || !candidate)

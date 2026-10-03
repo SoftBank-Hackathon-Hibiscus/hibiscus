@@ -15,6 +15,8 @@ export interface TestRequest {
   health_path?: string;
   health_timeout?: number;
   after?: number[];
+  /** 검증 컨테이너 전용. 운영 환경변수를 전달하지 않는다. */
+  environment?: Record<string, string>;
 }
 
 interface Command {

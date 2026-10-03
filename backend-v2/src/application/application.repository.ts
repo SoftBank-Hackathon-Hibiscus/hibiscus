@@ -4,15 +4,20 @@ import { DatabaseService } from '../database/database.service.js';
 import {
   agents,
   applicationAgents,
+  applicationEnvironmentVariables,
+  applicationTestEnvironmentVariables,
   applications,
   healthCheckConfigs,
   type Application,
   type HealthCheckConfig,
+  type ApplicationEnvironmentVariable,
 } from '../database/schema.js';
 
 export interface ApplicationView {
   application: Application;
   healthCheck: HealthCheckConfig;
+  environment: string[];
+  testEnvironment: string[];
   agents: Array<{
     id: string;
     name: string;
@@ -30,12 +35,26 @@ export class ApplicationRepository {
   create(
     application: Application,
     healthCheck: HealthCheckConfig,
+    environment: ApplicationEnvironmentVariable[],
+    testEnvironment: ApplicationEnvironmentVariable[],
   ): ApplicationView {
     this.database.db.transaction((tx) => {
       tx.insert(applications).values(application).run();
       tx.insert(healthCheckConfigs).values(healthCheck).run();
+      if (environment.length)
+        tx.insert(applicationEnvironmentVariables).values(environment).run();
+      if (testEnvironment.length)
+        tx.insert(applicationTestEnvironmentVariables)
+          .values(testEnvironment)
+          .run();
     });
-    return { application, healthCheck, agents: [] };
+    return {
+      application,
+      healthCheck,
+      environment: environment.map(({ name }) => name).sort(),
+      testEnvironment: testEnvironment.map(({ name }) => name).sort(),
+      agents: [],
+    };
   }
 
   find(id: string): Application | undefined {
@@ -85,7 +104,13 @@ export class ApplicationRepository {
       .where(eq(applicationAgents.applicationId, id))
       .orderBy(asc(agents.createdAt))
       .all();
-    return { application, healthCheck, agents: assignedAgents };
+    return {
+      application,
+      healthCheck,
+      environment: this.environmentNames(id),
+      testEnvironment: this.testEnvironmentNames(id),
+      agents: assignedAgents,
+    };
   }
 
   list(): ApplicationView[] {
@@ -111,5 +136,91 @@ export class ApplicationRepository {
       .from(healthCheckConfigs)
       .where(eq(healthCheckConfigs.applicationId, applicationId))
       .get();
+  }
+
+  runtimeEnvironment(applicationId: string): Record<string, string> {
+    return Object.fromEntries(
+      this.database.db
+        .select({
+          name: applicationEnvironmentVariables.name,
+          value: applicationEnvironmentVariables.value,
+        })
+        .from(applicationEnvironmentVariables)
+        .where(eq(applicationEnvironmentVariables.applicationId, applicationId))
+        .orderBy(asc(applicationEnvironmentVariables.name))
+        .all()
+        .map(({ name, value }) => [name, value]),
+    );
+  }
+
+  testEnvironment(applicationId: string): Record<string, string> {
+    return Object.fromEntries(
+      this.database.db
+        .select({
+          name: applicationTestEnvironmentVariables.name,
+          value: applicationTestEnvironmentVariables.value,
+        })
+        .from(applicationTestEnvironmentVariables)
+        .where(
+          eq(applicationTestEnvironmentVariables.applicationId, applicationId),
+        )
+        .orderBy(asc(applicationTestEnvironmentVariables.name))
+        .all()
+        .map(({ name, value }) => [name, value]),
+    );
+  }
+
+  replaceEnvironment(
+    applicationId: string,
+    environment: ApplicationEnvironmentVariable[],
+  ): string[] {
+    this.database.db.transaction((tx) => {
+      tx.delete(applicationEnvironmentVariables)
+        .where(eq(applicationEnvironmentVariables.applicationId, applicationId))
+        .run();
+      if (environment.length)
+        tx.insert(applicationEnvironmentVariables).values(environment).run();
+    });
+    return environment.map(({ name }) => name).sort();
+  }
+
+  replaceTestEnvironment(
+    applicationId: string,
+    environment: ApplicationEnvironmentVariable[],
+  ): string[] {
+    this.database.db.transaction((tx) => {
+      tx.delete(applicationTestEnvironmentVariables)
+        .where(
+          eq(applicationTestEnvironmentVariables.applicationId, applicationId),
+        )
+        .run();
+      if (environment.length)
+        tx.insert(applicationTestEnvironmentVariables)
+          .values(environment)
+          .run();
+    });
+    return environment.map(({ name }) => name).sort();
+  }
+
+  private environmentNames(applicationId: string): string[] {
+    return this.database.db
+      .select({ name: applicationEnvironmentVariables.name })
+      .from(applicationEnvironmentVariables)
+      .where(eq(applicationEnvironmentVariables.applicationId, applicationId))
+      .orderBy(asc(applicationEnvironmentVariables.name))
+      .all()
+      .map(({ name }) => name);
+  }
+
+  private testEnvironmentNames(applicationId: string): string[] {
+    return this.database.db
+      .select({ name: applicationTestEnvironmentVariables.name })
+      .from(applicationTestEnvironmentVariables)
+      .where(
+        eq(applicationTestEnvironmentVariables.applicationId, applicationId),
+      )
+      .orderBy(asc(applicationTestEnvironmentVariables.name))
+      .all()
+      .map(({ name }) => name);
   }
 }

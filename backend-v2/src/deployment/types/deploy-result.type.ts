@@ -72,6 +72,7 @@ export interface CloudRunPort {
   candidate(
     imageRef: string,
     runId: string,
+    environment: Record<string, string>,
   ): Promise<{ revision: string; candidateUrl: string }>;
   activate(): Promise<{ previous: string; serving: string }>;
   rollback(revision: string): Promise<void>;
@@ -88,6 +89,7 @@ export interface OnpremJobSpec {
   image?: string;
   planHash?: string;
   toDigest?: string;
+  environment?: Record<string, string>;
 }
 
 export interface OnpremJobOutcome {
@@ -146,6 +148,7 @@ export interface DeployInput {
   /** 온프레에 쓸 Agent. 없으면 온프레는 skipped */
   agentId: string | null;
   healthCheck: HealthCheckConfig;
+  environment: Record<string, string>;
   /** 라우팅 변경 기록에 남길 사용자 id */
   changedBy: string;
 }

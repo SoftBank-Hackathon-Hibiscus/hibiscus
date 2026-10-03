@@ -204,6 +204,7 @@ export class ParityTestStage {
         port: application.containerPort,
         health_path: applicationView.healthCheck.path,
         health_timeout: applicationView.healthCheck.timeoutSeconds,
+        environment: this.deployments.environment(deployment.id, 'test'),
         ...(replayInput
           ? { record: replayInput.record, noise: replayInput.noise }
           : {}),
@@ -211,6 +212,7 @@ export class ParityTestStage {
       const requestPath = join(stageWork, 'parity-request.json');
       writeFileSync(requestPath, JSON.stringify(request, null, 2) + '\n', {
         flag: 'wx',
+        mode: 0o600,
       });
       await run({
         ...command,
