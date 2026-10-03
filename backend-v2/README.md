@@ -97,8 +97,9 @@ Health Check 설정은 Deployment마다 복사하지 않습니다. Application�
 
 Application 생성 요청의 `environment`에는 운영 런타임 환경변수를 넣을 수 있습니다.
 `test_environment`에는 parity health/replay 컨테이너만 사용하는 검증용 값을 넣습니다. replay는 데이터를 변경할 수 있으므로 운영 DB 자격 증명을 `test_environment`에 넣지 마세요.
-`PUT /applications/:id/environment`는 전체 환경변수를 교체합니다. 응답에는 변수 이름만 포함하며 값은 반환하지 않습니다.
-`PUT /applications/:id/test-environment`는 검증용 환경변수를 전체 교체합니다.
+`PUT /applications/:id/environment`는 전체 환경변수를 교체하고, 가장 최근 배포와 같은 `source_revision`으로 새 배포를 시작합니다. 응답에는 변수 이름과 새 Deployment가 포함되며 값은 반환하지 않습니다.
+`PUT /applications/:id/test-environment`도 검증용 환경변수를 전체 교체한 뒤 새 배포를 시작합니다.
+기존 이미지를 그대로 재사용하지 않고 같은 소스를 다시 빌드·검증하므로 새 Deployment의 digest는 처음에 placeholder입니다.
 배포를 만들 때 두 환경을 Deployment 단위로 스냅샷 저장합니다. 중단된 배포가 재개돼도 parity, Cloud Run, On-Prem은 해당 배포가 시작할 때 저장한 값을 계속 사용합니다.
 새 배포부터 같은 운영 값이 Cloud Run revision과 On-Prem Docker container에 적용됩니다. `PORT`, `HIB_RUN_ID`, `HIB_DIGEST`는 시스템 관리 값이라 설정할 수 없습니다.
 

@@ -71,6 +71,15 @@ export class DeploymentService {
     return this.repository.list(applicationId);
   }
 
+  latestSourceRevision(applicationId: string): string {
+    const latest = this.list(applicationId)[0];
+    if (!latest)
+      throw new ConflictException(
+        'Application has no deployment source to redeploy',
+      );
+    return latest.sourceRevision;
+  }
+
   get(id: string) {
     const view = this.repository.getView(id);
     if (!view) throw new NotFoundException('Deployment not found');

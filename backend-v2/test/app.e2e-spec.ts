@@ -551,6 +551,7 @@ describe('deployment API (e2e)', () => {
 
   it('stores application environment values without returning them', async () => {
     const secret = 'postgres://user:password@db.example/app';
+    const updatedSecret = 'postgres://user:changed@db.example/app';
     const testSecret = 'postgres://test:test@db.example/app_test';
     const created = await api()
       .post('/applications')
@@ -578,10 +579,17 @@ describe('deployment API (e2e)', () => {
 
     const updated = await api()
       .put(`/applications/${created.body.application.id}/environment`)
-      .send({ environment: [{ name: 'DATABASE_URL', value: secret }] })
+      .send({ environment: [{ name: 'DATABASE_URL', value: updatedSecret }] })
       .expect(200);
-    expect(updated.body).toEqual({ environment: ['DATABASE_URL'] });
-    expect(JSON.stringify(updated.body)).not.toContain(secret);
+    expect(updated.body.environment).toEqual(['DATABASE_URL']);
+    expect(updated.body.deployment).toMatchObject({
+      applicationId: created.body.application.id,
+      version: 2,
+      sourceRevision: deployment.sourceRevision,
+      digestSource: 'placeholder',
+      status: 'queued',
+    });
+    expect(JSON.stringify(updated.body)).not.toContain(updatedSecret);
 
     const updatedTest = await api()
       .put(`/applications/${created.body.application.id}/test-environment`)
@@ -591,7 +599,12 @@ describe('deployment API (e2e)', () => {
         ],
       })
       .expect(200);
-    expect(updatedTest.body).toEqual({ environment: ['DATABASE_URL'] });
+    expect(updatedTest.body.environment).toEqual(['DATABASE_URL']);
+    expect(updatedTest.body.deployment).toMatchObject({
+      version: 3,
+      sourceRevision: deployment.sourceRevision,
+      status: 'queued',
+    });
 
     const deployments = app.get(DeploymentRepository);
     expect(deployments.environment(deployment.id, 'runtime')).toEqual({
@@ -601,6 +614,9 @@ describe('deployment API (e2e)', () => {
     expect(deployments.environment(deployment.id, 'test')).toEqual({
       DATABASE_URL: testSecret,
     });
+    expect(
+      deployments.environment(updated.body.deployment.id, 'runtime'),
+    ).toEqual({ DATABASE_URL: updatedSecret });
 
     await api()
       .put(`/applications/${created.body.application.id}/environment`)
