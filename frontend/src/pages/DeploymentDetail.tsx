@@ -6,6 +6,7 @@ import type { ApplicationView, Decision, DeploymentStatus, DeploymentView, Stage
 import { ErrorNotice } from '../components/ErrorNotice';
 import { Modal } from '../components/Modal';
 import { PageError } from '../components/PageError';
+import { RecordedDiagnosis } from '../components/RecordedDiagnosis';
 import { Loader } from '../components/Loader';
 import { Collapsible, Crumbs, DemoBadge, Empty, Hash, Kv, PageTitle, Pill, type Tone } from '../components/ui';
 import { useMinVisible } from '../hooks/useMinVisible';
@@ -126,7 +127,7 @@ export function DeploymentDetail({ id, source }: { id: string; source: DataSourc
       <div className="grid-2">
         <section className="card">
           <CardTitle icon={FlaskConical}>{t(STEP_DETAIL_KEY.test)}</CardTitle>
-          <TestDetail view={view} summary={summary} />
+          <TestDetail view={view} summary={summary} sourceKind={source.kind} />
         </section>
         <section className="card">
           <CardTitle icon={Scale}>{t(STEP_DETAIL_KEY.policy)}</CardTitle>
@@ -523,7 +524,7 @@ function ApprovalCard({ view, source, onChanged }: { view: DeploymentView; sourc
 
 // ---------------------------------------------------------------- test
 
-function TestDetail({ view, summary }: { view: DeploymentView; summary: DeploymentSummary }) {
+function TestDetail({ view, summary, sourceKind }: { view: DeploymentView; summary: DeploymentSummary; sourceKind: DataSource['kind'] }) {
   const { t } = useLang();
   const stage = latestStages(view.stages).test;
   const parsed = parseJsonArtifact<TestResult>(findArtifact(view, 'test_result', stage));
@@ -589,6 +590,7 @@ function TestDetail({ view, summary }: { view: DeploymentView; summary: Deployme
           </div>
         </div>
       )}
+      {sourceKind === 'mock' && !stub && !result.passed && result.app === 'guestbook' && <RecordedDiagnosis />}
       {withMismatch.length > 0 && (
         <div className="fold-list">
           {withMismatch.map((c) => (

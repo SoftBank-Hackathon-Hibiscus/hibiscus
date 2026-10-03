@@ -1,0 +1,143 @@
+{
+  "stage": "test",
+  "commit": "86251f2",
+  "image": "sha256:a2c3c7624d267a74e795cf03b13d9cf7ac0f4522bad1eaeabdae6f3612df5723",
+  "passed": false,
+  "facts": [
+    {
+      "kind": "sqlite",
+      "path": "/app/data/data.db",
+      "storage": "container_layer",
+      "evidence": "docker diff A /app/data/data.db; header 'SQLite format 3'"
+    },
+    {
+      "kind": "local_upload",
+      "path": "/app/uploads",
+      "storage": "container_layer",
+      "evidence": "docker diff: 2 file(s) written under /app/uploads"
+    }
+  ],
+  "replay": [
+    {
+      "condition": "none",
+      "total": 20,
+      "matched": 20
+    },
+    {
+      "condition": "restart",
+      "total": 20,
+      "matched": 14
+    },
+    {
+      "condition": "replace",
+      "total": 20,
+      "matched": 13
+    }
+  ],
+  "mismatches": [
+    {
+      "condition": "restart",
+      "index": 11,
+      "request": "GET /me",
+      "expected": "200 {\"name\":\"alice\"}",
+      "actual": "401 {\"error\":\"login required\"}",
+      "related_fact": null
+    },
+    {
+      "condition": "restart",
+      "index": 12,
+      "request": "POST /posts",
+      "expected": "201 {\"id\":3,\"author\":\"carol\",\"message\":\"재방문했어요\",\"created_at\":\"2026-10-02T04:21:49.574+00:00\"}",
+      "actual": "201 {\"id\":1,\"author\":\"carol\",\"message\":\"재방문했어요\",\"created_at\":\"2026-10-02T07:09:21.951+00:00\"}",
+      "related_fact": "/app/data/data.db"
+    },
+    {
+      "condition": "restart",
+      "index": 13,
+      "request": "GET /posts",
+      "expected": "200 [{\"id\":1,\"author\":\"alice\",\"message\":\"첫 방문 기념!\",\"created_at\":\"2026-10-02T04:21:49.483+00:00\"},{\"id\":2,\"author\":\"bob\",\"message\":\"hello guestbook\",\"created_at\":\"2026-10-02T04:21:49.516+00:00\"},{\"id\"…",
+      "actual": "200 [{\"id\":1,\"author\":\"carol\",\"message\":\"재방문했어요\",\"created_at\":\"2026-10-02T07:09:21.951+00:00\"}]",
+      "related_fact": "/app/data/data.db"
+    },
+    {
+      "condition": "restart",
+      "index": 14,
+      "request": "GET /posts/2",
+      "expected": "200 {\"id\":2,\"author\":\"bob\",\"message\":\"hello guestbook\",\"created_at\":\"2026-10-02T04:21:49.516+00:00\"}",
+      "actual": "404 {\"error\":\"post not found\"}",
+      "related_fact": "/app/data/data.db"
+    },
+    {
+      "condition": "restart",
+      "index": 17,
+      "request": "GET /me",
+      "expected": "200 {\"name\":\"alice\"}",
+      "actual": "401 {\"error\":\"login required\"}",
+      "related_fact": null
+    },
+    {
+      "condition": "restart",
+      "index": 20,
+      "request": "GET /posts",
+      "expected": "200 [{\"id\":1,\"author\":\"alice\",\"message\":\"첫 방문 기념!\",\"created_at\":\"2026-10-02T04:21:49.483+00:00\"},{\"id\":2,\"author\":\"bob\",\"message\":\"hello guestbook\",\"created_at\":\"2026-10-02T04:21:49.516+00:00\"},{\"id\"…",
+      "actual": "200 [{\"id\":1,\"author\":\"carol\",\"message\":\"재방문했어요\",\"created_at\":\"2026-10-02T07:09:21.951+00:00\"}]",
+      "related_fact": "/app/data/data.db"
+    },
+    {
+      "condition": "replace",
+      "index": 11,
+      "request": "GET /me",
+      "expected": "200 {\"name\":\"alice\"}",
+      "actual": "401 {\"error\":\"login required\"}",
+      "related_fact": null
+    },
+    {
+      "condition": "replace",
+      "index": 12,
+      "request": "POST /posts",
+      "expected": "201 {\"id\":3,\"author\":\"carol\",\"message\":\"재방문했어요\",\"created_at\":\"2026-10-02T04:21:49.574+00:00\"}",
+      "actual": "201 {\"id\":1,\"author\":\"carol\",\"message\":\"재방문했어요\",\"created_at\":\"2026-10-02T07:09:25.691+00:00\"}",
+      "related_fact": "/app/data/data.db"
+    },
+    {
+      "condition": "replace",
+      "index": 13,
+      "request": "GET /posts",
+      "expected": "200 [{\"id\":1,\"author\":\"alice\",\"message\":\"첫 방문 기념!\",\"created_at\":\"2026-10-02T04:21:49.483+00:00\"},{\"id\":2,\"author\":\"bob\",\"message\":\"hello guestbook\",\"created_at\":\"2026-10-02T04:21:49.516+00:00\"},{\"id\"…",
+      "actual": "200 [{\"id\":1,\"author\":\"carol\",\"message\":\"재방문했어요\",\"created_at\":\"2026-10-02T07:09:25.691+00:00\"}]",
+      "related_fact": "/app/data/data.db"
+    },
+    {
+      "condition": "replace",
+      "index": 14,
+      "request": "GET /posts/2",
+      "expected": "200 {\"id\":2,\"author\":\"bob\",\"message\":\"hello guestbook\",\"created_at\":\"2026-10-02T04:21:49.516+00:00\"}",
+      "actual": "404 {\"error\":\"post not found\"}",
+      "related_fact": "/app/data/data.db"
+    },
+    {
+      "condition": "replace",
+      "index": 16,
+      "request": "GET /uploads",
+      "expected": "200 [\"cat.png\",\"notes.txt\"]",
+      "actual": "200 [\"notes.txt\"]",
+      "related_fact": "/app/uploads"
+    },
+    {
+      "condition": "replace",
+      "index": 17,
+      "request": "GET /me",
+      "expected": "200 {\"name\":\"alice\"}",
+      "actual": "401 {\"error\":\"login required\"}",
+      "related_fact": null
+    },
+    {
+      "condition": "replace",
+      "index": 20,
+      "request": "GET /posts",
+      "expected": "200 [{\"id\":1,\"author\":\"alice\",\"message\":\"첫 방문 기념!\",\"created_at\":\"2026-10-02T04:21:49.483+00:00\"},{\"id\":2,\"author\":\"bob\",\"message\":\"hello guestbook\",\"created_at\":\"2026-10-02T04:21:49.516+00:00\"},{\"id\"…",
+      "actual": "200 [{\"id\":1,\"author\":\"carol\",\"message\":\"재방문했어요\",\"created_at\":\"2026-10-02T07:09:25.691+00:00\"}]",
+      "related_fact": "/app/data/data.db"
+    }
+  ]
+}

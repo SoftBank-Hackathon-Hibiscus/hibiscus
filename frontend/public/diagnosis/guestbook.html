@@ -1,0 +1,1397 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Hibiscus · 실패 원인 분석</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f6f2;
+        --paper: #fff;
+        --ink: #253b35;
+        --muted: #63736c;
+        --line: #dfe5dd;
+        --green: #28674c;
+        --soft: #e8f0e6;
+        --red: #974635;
+        --redsoft: #f7e9e2;
+        --mono: ui-monospace, Consolas, monospace;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font:
+          16px/1.65 "Pretendard Variable",
+          Pretendard,
+          "Noto Sans KR",
+          "Malgun Gothic",
+          system-ui,
+          sans-serif;
+        word-break: keep-all;
+        overflow-wrap: anywhere;
+      }
+      html[lang="ja"] body {
+        font-family: "Noto Sans JP", "Yu Gothic", Meiryo, system-ui, sans-serif;
+        word-break: normal;
+      }
+      .nav-tools,
+      .languages {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .nav-tools {
+        flex-wrap: wrap;
+        justify-content: flex-end;
+      }
+      .languages {
+        gap: 3px;
+        flex-shrink: 0;
+      }
+      .languages button {
+        border: 1px solid var(--line);
+        border-radius: 5px;
+        padding: 3px 8px;
+        background: transparent;
+        font-size: 12px;
+      }
+      .languages button[aria-pressed="true"] {
+        background: var(--soft);
+        color: var(--green);
+      }
+      .translation-note {
+        color: var(--muted);
+        font-size: 13px;
+        margin-bottom: 20px;
+      }
+      button {
+        font: inherit;
+        cursor: pointer;
+      }
+      button:focus-visible,
+      summary:focus-visible,
+      a:focus-visible {
+        outline: 3px solid #397e58;
+        outline-offset: 5px;
+      }
+      a {
+        color: var(--green);
+      }
+      p,
+      h1,
+      h2,
+      h3 {
+        margin: 0;
+      }
+      button {
+        color: inherit;
+      }
+      nav {
+        border-bottom: 1px solid var(--line);
+        background: #fff9;
+      }
+      nav > div {
+        max-width: 1220px;
+        margin: auto;
+        padding: 17px 28px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 15px;
+      }
+      .brand {
+        flex-shrink: 0;
+        white-space: nowrap;
+        font-weight: 750;
+        font-size: 20px;
+        letter-spacing: -0.5px;
+      }
+      .brand span {
+        color: var(--green);
+        margin-right: 9px;
+      }
+      .nav-note {
+        color: var(--muted);
+        font-size: 13px;
+      }
+      main {
+        max-width: 1220px;
+        margin: 0 auto;
+        padding: 38px 28px 48px;
+      }
+      .eyebrow {
+        font-size: 12px;
+        letter-spacing: 2px;
+        font-weight: 700;
+        color: var(--green);
+        margin-bottom: 8px;
+      }
+      h1 {
+        font-size: 36px;
+        line-height: 1.3;
+        letter-spacing: -1.4px;
+        font-weight: 740;
+      }
+      .lead {
+        color: var(--muted);
+        margin-top: 12px;
+      }
+      .head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 24px;
+      }
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        padding: 4px 11px;
+        border-radius: 99px;
+        font-size: 12px;
+        font-weight: 650;
+        background: var(--soft);
+        color: var(--green);
+      }
+      .pill.fail {
+        background: var(--redsoft);
+        color: var(--red);
+      }
+      .pill.neutral {
+        background: #f0f1ec;
+        color: var(--muted);
+      }
+      .replay {
+        margin-top: 28px;
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        border: 1px solid var(--line);
+        border-radius: 13px;
+        background: var(--paper);
+        overflow: hidden;
+      }
+      .condition {
+        padding: 16px 21px;
+        display: flex;
+        gap: 18px;
+        align-items: center;
+        border-right: 1px solid var(--line);
+      }
+      .condition:last-child {
+        border: 0;
+      }
+      .condition-label {
+        flex: 1;
+        font-size: 14px;
+        font-weight: 650;
+      }
+      .condition small {
+        display: block;
+        font-size: 11px;
+        color: var(--muted);
+        font-weight: 400;
+        letter-spacing: 0.3px;
+      }
+      .condition b {
+        font-size: 24px;
+        font-weight: 650;
+        font-variant-numeric: tabular-nums;
+      }
+      .condition b.failed {
+        color: var(--red);
+      }
+      .condition b span {
+        font-size: 14px;
+        color: var(--muted);
+        font-weight: 450;
+      }
+      .story {
+        display: flex;
+        align-items: center;
+        gap: 25px;
+        margin: 34px 0 22px;
+      }
+      .stat {
+        display: flex;
+        align-items: baseline;
+        gap: 11px;
+      }
+      .stat strong {
+        font-size: 48px;
+        font-weight: 650;
+        letter-spacing: -2px;
+        line-height: 1.1;
+      }
+      .stat span {
+        font-size: 16px;
+        color: var(--muted);
+      }
+      .arrow {
+        color: #9ba89d;
+        font-size: 27px;
+      }
+      .switch {
+        margin-left: auto;
+        display: flex;
+        gap: 4px;
+        background: #e8ece4;
+        border-radius: 9px;
+        padding: 4px;
+      }
+      .switch button {
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        padding: 7px 15px;
+        font-size: 13px;
+        color: var(--muted);
+      }
+      .switch button[aria-pressed="true"] {
+        background: white;
+        color: var(--ink);
+        box-shadow: 0 1px 4px #263f3310;
+      }
+      .section-meta {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 15px;
+        margin-bottom: 15px;
+        font-size: 13px;
+        color: var(--muted);
+      }
+      .section-meta h2 {
+        font-size: 16px;
+        color: var(--ink);
+      }
+      .cards {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 16px;
+      }
+      .card {
+        display: flex;
+        flex-direction: column;
+        text-align: left;
+        border: 1px solid var(--line);
+        border-radius: 13px;
+        background: var(--paper);
+        padding: 23px;
+        min-height: 270px;
+        transition:
+          border-color 0.15s,
+          box-shadow 0.15s;
+      }
+      .card:hover,
+      .card[aria-expanded="true"] {
+        border-color: var(--green);
+        box-shadow: 0 3px 18px #2452350c;
+      }
+      .card-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 9px;
+      }
+      .card-index {
+        font: 13px var(--mono);
+        color: var(--muted);
+      }
+      .card h3 {
+        font-size: 21px;
+        line-height: 1.4;
+        letter-spacing: -0.5px;
+        margin-top: 20px;
+      }
+      .observation {
+        font-size: 14px;
+        color: var(--muted);
+        margin: 12px 0 19px;
+        line-height: 1.7;
+      }
+      .card-bottom {
+        border-top: 1px solid var(--line);
+        padding-top: 16px;
+        margin-top: auto;
+      }
+      .card-bottom small {
+        font-size: 11px;
+        letter-spacing: 0.4px;
+        color: var(--green);
+        font-weight: 700;
+        display: block;
+        margin-bottom: 5px;
+      }
+      .action {
+        font-size: 14px;
+        line-height: 1.7;
+      }
+      .card-link {
+        display: block;
+        color: var(--green);
+        font-size: 13px;
+        margin-top: 17px;
+        font-weight: 600;
+      }
+      .detail {
+        margin-top: 20px;
+        background: var(--paper);
+        border: 1px solid var(--green);
+        border-radius: 13px;
+        padding: 24px;
+      }
+      .detail-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 16px;
+      }
+      .detail-head h3 {
+        font-size: 20px;
+      }
+      .close {
+        border: 0;
+        background: #f0f2ec;
+        border-radius: 6px;
+        padding: 2px 10px;
+        font-size: 19px;
+      }
+      .detail-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 28px;
+      }
+      .label {
+        font-size: 12px;
+        font-weight: 700;
+        color: var(--muted);
+        display: block;
+        margin-bottom: 6px;
+      }
+      .detail p {
+        font-size: 14px;
+        margin-bottom: 18px;
+      }
+      .code-title {
+        font: 12px var(--mono);
+        color: var(--muted);
+        margin: 13px 0 7px;
+      }
+      .code {
+        overflow: auto;
+        background: #f3f5ef;
+        border-radius: 7px;
+        padding: 12px 15px;
+        font: 12px/1.8 var(--mono);
+        white-space: pre;
+        word-break: normal;
+        color: #335545;
+      }
+      .code-line {
+        display: block;
+      }
+      .ln {
+        color: #929b91;
+        user-select: none;
+        display: inline-block;
+        min-width: 36px;
+      }
+      .evidence {
+        border-top: 1px solid var(--line);
+        padding-top: 17px;
+        margin-top: 6px;
+      }
+      .evidence summary {
+        font-size: 13px;
+        cursor: pointer;
+        color: var(--green);
+      }
+      .fact {
+        font-size: 12px;
+        padding: 9px 0;
+        color: var(--muted);
+        font-family: var(--mono);
+      }
+      .table-wrap {
+        overflow: auto;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        text-align: left;
+        font-size: 13px;
+        background: white;
+      }
+      th {
+        background: #f0f3ec;
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 600;
+        padding: 10px 14px;
+        white-space: nowrap;
+      }
+      td {
+        padding: 10px 14px;
+        border-top: 1px solid var(--line);
+        vertical-align: top;
+      }
+      td.response {
+        font: 11px/1.7 var(--mono);
+        min-width: 200px;
+        max-width: 320px;
+        word-break: break-word;
+      }
+      td.req {
+        white-space: nowrap;
+        font-family: var(--mono);
+        font-size: 12px;
+      }
+      .result-note {
+        margin-top: 21px;
+        display: flex;
+        gap: 10px;
+        align-items: baseline;
+        padding: 15px 19px;
+        border-radius: 10px;
+        background: #eaf0e5;
+        font-size: 14px;
+      }
+      .result-note strong {
+        white-space: nowrap;
+        color: var(--green);
+      }
+      .foot {
+        margin-top: 28px;
+        border-top: 1px solid var(--line);
+        padding-top: 18px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .foot summary {
+        cursor: pointer;
+        display: list-item;
+        font-size: 12px;
+      }
+      .provenance {
+        display: grid;
+        grid-template-columns: 150px 1fr;
+        gap: 7px 16px;
+        margin-top: 16px;
+      }
+      .provenance dt {
+        font-weight: 600;
+      }
+      .provenance dd {
+        margin: 0;
+        font-family: var(--mono);
+        font-size: 11px;
+        word-break: break-all;
+      }
+      .foot p {
+        margin-top: 12px;
+        max-width: 850px;
+      }
+      .unexplained {
+        margin-top: 15px;
+        color: var(--red);
+        font-size: 14px;
+      }
+      .empty {
+        padding: 35px;
+        background: white;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        color: var(--muted);
+      }
+      [hidden] {
+        display: none !important;
+      }
+      .example {
+        margin: 17px 0 21px;
+        font-size: 13px;
+      }
+      .example-request {
+        font: 11px var(--mono);
+        color: var(--muted);
+        margin-bottom: 9px;
+      }
+      .response-pair {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .response-pair code {
+        font: 14px/1.7 var(--mono);
+        background: #f1f4ee;
+        padding: 3px 9px;
+        border-radius: 5px;
+        word-break: break-word;
+      }
+      .response-pair code:last-child {
+        background: var(--redsoft);
+        color: var(--red);
+      }
+      .action {
+        display: -webkit-box;
+        -webkit-line-clamp: 4;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+      .cited {
+        background: #e3ecd9;
+        margin: 0 -6px;
+        padding: 0 6px;
+      }
+      .card h3 {
+        min-height: 2.8em;
+      }
+      .card {
+        min-height: 330px;
+      }
+      .cards[data-many="true"] {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .detail-grid > div {
+        min-width: 0;
+      }
+      .table-wrap {
+        max-width: 100%;
+      }
+      .code {
+        max-width: 100%;
+      }
+      @media (min-width: 1300px) {
+        main {
+          padding-top: 38px;
+        }
+        .card h3 {
+          font-size: 21px;
+        }
+      }
+      @media (max-width: 850px) {
+        .cards,
+        .cards[data-many="true"] {
+          grid-template-columns: 1fr;
+        }
+        .card {
+          min-height: 0;
+        }
+        .detail-grid {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .story {
+          flex-wrap: wrap;
+          gap: 16px;
+        }
+        .switch {
+          margin-left: 0;
+        }
+        .condition {
+          padding: 12px;
+          gap: 8px;
+        }
+        .condition b {
+          font-size: 20px;
+        }
+        .head {
+          align-items: flex-start;
+        }
+        h1 {
+          font-size: 29px;
+        }
+        .stat strong {
+          font-size: 37px;
+        }
+        .stat span {
+          font-size: 14px;
+        }
+      }
+      @media (max-width: 520px) {
+        main {
+          padding: 25px 16px;
+        }
+        nav > div {
+          padding: 14px 16px;
+        }
+        .nav-note {
+          font-size: 11px;
+        }
+        .replay {
+          grid-template-columns: 1fr;
+        }
+        .condition {
+          border-right: 0;
+          border-bottom: 1px solid var(--line);
+        }
+        .head > .pill {
+          display: none;
+        }
+        .section-meta {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+        .result-note {
+          display: block;
+        }
+        .provenance {
+          grid-template-columns: 1fr;
+        }
+        .detail {
+          padding: 17px;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        * {
+          transition: none !important;
+          scroll-behavior: auto !important;
+        }
+      }
+      @media print {
+        .switch,
+        .close {
+          display: none;
+        }
+        body {
+          background: white;
+        }
+        main {
+          padding: 12px;
+        }
+        .cards {
+          display: block;
+        }
+        .card {
+          break-inside: avoid;
+          margin-bottom: 12px;
+          min-height: 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <nav>
+      <div>
+        <div class="brand"><span aria-hidden="true">✳</span>Hibiscus</div>
+        <div class="nav-tools">
+          <span class="nav-note" id="record-label">실제 실행 기록</span>
+          <div
+            class="languages"
+            role="group"
+            aria-label="보고서 언어"
+            data-i18n-aria="languageLabel"
+          >
+            <button
+              type="button"
+              id="lang-ko"
+              lang="ko"
+              aria-label="한국어"
+              aria-pressed="true"
+            >
+              KO
+            </button>
+            <button
+              type="button"
+              id="lang-ja"
+              lang="ja"
+              aria-label="日本語"
+              aria-pressed="false"
+            >
+              JA
+            </button>
+          </div>
+        </div>
+      </div>
+    </nav>
+    <main>
+      <header class="head">
+        <div>
+          <p class="eyebrow">FAILURE DIAGNOSIS</p>
+          <h1 data-i18n="heading">어디부터 고칠까요?</h1>
+          <p class="lead" data-i18n="lead">
+            같은 요청을 다시 보냈을 때 달라진 응답을 코드와 함께 살펴봅니다.
+          </p>
+          <p class="lead" id="recorded-case">
+            저장된 실행의 분석 사례입니다. 현재 배포의 실시간 진단이 아닙니다.
+          </p>
+        </div>
+        <span class="pill fail" id="test-status">테스트 결과</span>
+      </header>
+      <section
+        class="replay"
+        id="conditions"
+        aria-label="조건별 재현 결과"
+        data-i18n-aria="conditionsLabel"
+      ></section>
+      <div class="story">
+        <div class="stat">
+          <strong id="mismatch-count">—</strong
+          ><span data-i18n="mismatches">응답 불일치</span>
+        </div>
+        <span class="arrow" aria-hidden="true">→</span>
+        <div class="stat">
+          <strong id="finding-count">—</strong
+          ><span data-i18n="findings">원인 가설</span>
+        </div>
+        <div
+          class="switch"
+          role="group"
+          aria-label="표시 방식"
+          data-i18n-aria="viewLabel"
+        >
+          <button
+            type="button"
+            id="show-raw"
+            data-i18n="raw"
+            aria-pressed="false"
+          >
+            실패 기록</button
+          ><button
+            type="button"
+            id="show-analysis"
+            data-i18n="analysis"
+            aria-pressed="true"
+          >
+            저장된 AI 분석
+          </button>
+        </div>
+      </div>
+      <p id="translation-note" class="translation-note" hidden></p>
+      <section id="analysis-view">
+        <div class="section-meta">
+          <h2 data-i18n="changesHeading">무엇을 바꾸면 될까요?</h2>
+          <span data-i18n="cardHelp"
+            >카드를 누르면 응답과 코드 근거가 열립니다.</span
+          >
+        </div>
+        <div id="cards" class="cards"></div>
+        <div id="empty" class="empty" hidden></div>
+        <p class="unexplained" id="unexplained" hidden></p>
+        <section
+          id="detail"
+          class="detail"
+          aria-label="원인과 근거"
+          data-i18n-aria="detailLabel"
+          tabindex="-1"
+          hidden
+        ></section>
+        <div class="result-note">
+          <strong data-i18n="nextStep">다음은 재검증</strong
+          ><span data-i18n="retestNote"
+            >원인을 고친 뒤 같은 요청으로 다시 확인합니다. 분석 결과만으로
+            배포를 허용하지 않습니다.</span
+          >
+        </div>
+      </section>
+      <section id="raw-view" hidden>
+        <div class="section-meta">
+          <h2 data-i18n="rawHeading">실제로 달라진 응답</h2>
+          <span data-i18n="rawNote"
+            >같은 요청이 여러 조건에서 실패하면 각각 셉니다.</span
+          >
+        </div>
+        <div id="raw-table"></div>
+      </section>
+      <footer class="foot">
+        <details>
+          <summary id="provenance-summary" data-i18n="provenanceSummary">
+            이 분석의 실행 기록과 한계
+          </summary>
+          <dl id="provenance" class="provenance"></dl>
+          <p data-i18n="integrityNote">
+            소스와 실행 산출물의 해시 일치를 확인했습니다. 주석·설명문과 정책의
+            해결 힌트는 AI 입력에서 제외했습니다. 이 검사는 기록 간 일관성을
+            확인하며, 별도의 서명 검증을 대신하지 않습니다.
+          </p>
+          <p data-i18n="limitsNote">
+            AI가 인용한 요청·파일·줄이 실제 입력에 있는지 검사합니다. 원인
+            가설의 정확성과 수정 효과는 코드 검토와 재실행으로 확인해야 합니다.
+            현재 VM의 실시간 상태를 표시하는 화면은 아닙니다.
+          </p>
+        </details>
+      </footer>
+    </main>
+    <!-- prettier-ignore -->
+    <script type="application/json" id="report-data">{"analysis": {"causal_review": "not_automatically_verified", "created_at": "2026-10-03T03:31:50Z", "duration_ms": 34886, "error_code": null, "format": "hibiscus-diagnosis-record-v1", "input_sha256": "c2ea19ca618a6c7b6b8922d32751513aed7365749bb99f804877f5d5d9b7af44", "model": "claude-sonnet-5-5", "output": {"findings": [{"fact_ids": [], "hypothesis": "로그인 세션이 모듈 전역 딕셔너리 SESSIONS에만 저장되고 /login에서 여기에 추가됩니다. 프로세스가 다시 시작하면 이 딕셔너리가 비므로 기존 sid 쿠키로 /me를 조회해도 이름을 찾지 못한다고 보는 것이 코드와 맞습니다. 저장소 수명 문제가 아니라 프로세스 메모리 문제이며, 이 코드에 영속 세션 저장소는 보이지 않습니다.", "id": "finding:1", "limit": "세션 유지만 다룹니다. 게시글 DB 초기화와 업로드 파일 소실은 해결하지 못합니다.", "mismatch_ids": ["restart:11", "restart:17", "replace:11", "replace:17"], "next_action": "세션을 프로세스 밖의 영속 저장소나 서명된 토큰으로 옮기는 방안을 검토하고, 그 저장소 자체가 재시작과 교체에서 유지되는지 정하세요.", "observed": "restart와 replace 모두 중단 후 GET /me가 200 alice 대신 401 login required를 반환했습니다(index 11, 17). 중단 없는 none 조건은 20/20으로 일치했습니다.", "scope": "code", "source_locations": [{"line_end": 58, "line_start": 58, "path": "app.py"}, {"line_end": 127, "line_start": 123, "path": "app.py"}, {"line_end": 166, "line_start": 165, "path": "app.py"}], "title": "세션이 프로세스 메모리에만 있음", "verification": "로그인 후 restart와 replace를 각각 수행하고, 같은 sid 쿠키로 GET /me가 200 {\"name\":\"alice\"}를 반환하는지 확인하세요."}, {"fact_ids": ["fact:1"], "hypothesis": "main이 시작할 때 init_db를 호출하고, init_db는 DROP TABLE IF EXISTS posts로 시작하는 SCHEMA를 실행합니다. 재시작은 컨테이너 쓰기 레이어를 지우지 않으므로 data.db 파일이 남아 있어도 시작 로직이 테이블을 다시 만들어 데이터를 지웠다고 보는 것이 가장 직접적입니다. replace의 같은 증상은 이 원인에 저장소 수명 문제(finding:3)가 겹쳐 있어 둘을 구분할 수 없습니다.", "id": "finding:2", "limit": "재시작 증상만 해결합니다. replace에서 data.db가 컨테이너 레이어에 있어 사라지는 문제는 별도 저장소 변경이 필요합니다.", "mismatch_ids": ["restart:12", "restart:13", "restart:14", "restart:20", "replace:12", "replace:13", "replace:14", "replace:20"], "next_action": "시작 시 스키마 초기화를 기존 데이터를 지우지 않는 방식으로 바꾸는 방안을 검토하세요. 예를 들어 테이블이 없을 때만 생성하도록 하는 방식입니다.", "observed": "restart 후에도 GET /posts에 carol 글 하나만 남았고 기존 alice, bob 글은 없었습니다. 새 글은 기대한 id 3이 아니라 id 1로 생성됐고, GET /posts/2는 404였습니다(restart:12, 13, 14, 20).", "scope": "code", "source_locations": [{"line_end": 55, "line_start": 47, "path": "app.py"}, {"line_end": 74, "line_start": 71, "path": "app.py"}, {"line_end": 218, "line_start": 218, "path": "app.py"}], "title": "시작할 때마다 posts 테이블 삭제", "verification": "restart 조건에서 posts를 저장한 뒤 재시작하고, GET /posts가 기존 id 1, 2와 기대 목록을 유지하는지 확인하세요. 이어서 POST /posts가 id 3을 반환하는지도 확인하세요."}, {"fact_ids": ["fact:1", "fact:2"], "hypothesis": "DB와 업로드 파일이 컨테이너 쓰기 레이어에 있다면 컨테이너를 제거하고 새로 만들 때 함께 사라질 수 있습니다. restart에서 업로드가 유지된 것은 같은 컨테이너의 레이어가 남았기 때문으로 보입니다. replace 후 notes.txt만 남은 이유는 이 자료만으로 설명되지 않아 불확실하며, 별도 조사가 필요합니다. replace의 DB 불일치는 finding:2의 DROP TABLE과 겹치므로 레이어 소실만이 원인이라고 단정할 수 없습니다.", "id": "finding:3", "limit": "스토리지 수명만 다룹니다. finding:2의 시작 시 DROP TABLE을 고치지 않으면 영속 볼륨에서도 posts가 초기화될 수 있습니다.", "mismatch_ids": ["replace:12", "replace:13", "replace:14", "replace:16", "replace:20"], "next_action": "/app/data와 /app/uploads를 컨테이너 교체 후에도 유지되는 볼륨 등 외부 저장소로 지정하는 방안을 검토하세요. 또 replace에서 notes.txt만 남은 경위를 조사하세요.", "observed": "replace 후 GET /uploads가 [\"cat.png\",\"notes.txt\"] 대신 [\"notes.txt\"]를 반환했습니다(replace:16). 반면 restart 조건에서는 업로드 목록이 일치했습니다. docker diff는 /app/data/data.db와 /app/uploads 아래 파일 2개가 컨테이너 레이어에 기록됐다고 보여줍니다.", "scope": "code_and_infrastructure", "source_locations": [{"line_end": 41, "line_start": 38, "path": "app.py"}, {"line_end": 208, "line_start": 207, "path": "app.py"}, {"line_end": 219, "line_start": 219, "path": "app.py"}], "title": "DB와 업로드가 컨테이너 레이어에 있음", "verification": "replace 조건에서 파일 두 개를 업로드하고 컨테이너를 교체한 뒤, GET /uploads가 cat.png와 notes.txt를 모두 반환하는지 확인하세요. DB 파일이 새 컨테이너에서도 보이는지도 확인하세요."}], "unexplained_mismatch_ids": []}, "prompt_sha256": "25e743d1113cc8a155b7402d49280fcd265885d214df5e1e4b1840bc43da0938", "provider": "anthropic_messages", "request_id": "req_011CfebcNosBeSYSTBX2tEvN", "run_id": "rehearsal-07d13af8ec-guestbook", "status": "succeeded", "usage": {"cost": null, "currency": null, "input_tokens": 7753, "output_tokens": 4521}}, "input": {"condition_semantics": {"none": "Same requests without lifecycle interruption.", "replace": "Remove the container and create a fresh container from the same image after the specified request indices.", "restart": "Restart the same container after the specified request indices."}, "conditions": [{"condition": "none", "matched": 20, "total": 20}, {"condition": "restart", "matched": 14, "total": 20}, {"condition": "replace", "matched": 13, "total": 20}], "facts": [{"evidence": "docker diff A /app/data/data.db; header 'SQLite format 3'", "id": "fact:1", "kind": "sqlite", "path": "/app/data/data.db", "storage": "container_layer"}, {"evidence": "docker diff: 2 file(s) written under /app/uploads", "id": "fact:2", "kind": "local_upload", "path": "/app/uploads", "storage": "container_layer"}], "format": "hibiscus-diagnosis-input-v1", "image_digest": "sha256:2424ca26e6da2d09d9f15a7b4087773b5848e31fb25ac430605cb3a08b83a2ac", "interrupt_after": [10], "mismatches": [{"actual": "401 {\"error\":\"login required\"}", "condition": "restart", "expected": "200 {\"name\":\"alice\"}", "id": "restart:11", "index": 11, "related_fact": null, "request": "GET /me"}, {"actual": "201 {\"id\":1,\"author\":\"carol\",\"message\":\"재방문했어요\",\"created_at\":\"2026-10-02T07:09:21.951+00:00\"}", "condition": "restart", "expected": "201 {\"id\":3,\"author\":\"carol\",\"message\":\"재방문했어요\",\"created_at\":\"2026-10-02T04:21:49.574+00:00\"}", "id": "restart:12", "index": 12, "related_fact": "/app/data/data.db", "request": "POST /posts"}, {"actual": "200 [{\"id\":1,\"author\":\"carol\",\"message\":\"재방문했어요\",\"created_at\":\"2026-10-02T07:09:21.951+00:00\"}]", "condition": "restart", "expected": "200 [{\"id\":1,\"author\":\"alice\",\"message\":\"첫 방문 기념!\",\"created_at\":\"2026-10-02T04:21:49.483+00:00\"},{\"id\":2,\"author\":\"bob\",\"message\":\"hello guestbook\",\"created_at\":\"2026-10-02T04:21:49.516+00:00\"},{\"id\"…", "id": "restart:13", "index": 13, "related_fact": "/app/data/data.db", "request": "GET /posts"}, {"actual": "404 {\"error\":\"post not found\"}", "condition": "restart", "expected": "200 {\"id\":2,\"author\":\"bob\",\"message\":\"hello guestbook\",\"created_at\":\"2026-10-02T04:21:49.516+00:00\"}", "id": "restart:14", "index": 14, "related_fact": "/app/data/data.db", "request": "GET /posts/2"}, {"actual": "401 {\"error\":\"login required\"}", "condition": "restart", "expected": "200 {\"name\":\"alice\"}", "id": "restart:17", "index": 17, "related_fact": null, "request": "GET /me"}, {"actual": "200 [{\"id\":1,\"author\":\"carol\",\"message\":\"재방문했어요\",\"created_at\":\"2026-10-02T07:09:21.951+00:00\"}]", "condition": "restart", "expected": "200 [{\"id\":1,\"author\":\"alice\",\"message\":\"첫 방문 기념!\",\"created_at\":\"2026-10-02T04:21:49.483+00:00\"},{\"id\":2,\"author\":\"bob\",\"message\":\"hello guestbook\",\"created_at\":\"2026-10-02T04:21:49.516+00:00\"},{\"id\"…", "id": "restart:20", "index": 20, "related_fact": "/app/data/data.db", "request": "GET /posts"}, {"actual": "401 {\"error\":\"login required\"}", "condition": "replace", "expected": "200 {\"name\":\"alice\"}", "id": "replace:11", "index": 11, "related_fact": null, "request": "GET /me"}, {"actual": "201 {\"id\":1,\"author\":\"carol\",\"message\":\"재방문했어요\",\"created_at\":\"2026-10-02T07:09:25.691+00:00\"}", "condition": "replace", "expected": "201 {\"id\":3,\"author\":\"carol\",\"message\":\"재방문했어요\",\"created_at\":\"2026-10-02T04:21:49.574+00:00\"}", "id": "replace:12", "index": 12, "related_fact": "/app/data/data.db", "request": "POST /posts"}, {"actual": "200 [{\"id\":1,\"author\":\"carol\",\"message\":\"재방문했어요\",\"created_at\":\"2026-10-02T07:09:25.691+00:00\"}]", "condition": "replace", "expected": "200 [{\"id\":1,\"author\":\"alice\",\"message\":\"첫 방문 기념!\",\"created_at\":\"2026-10-02T04:21:49.483+00:00\"},{\"id\":2,\"author\":\"bob\",\"message\":\"hello guestbook\",\"created_at\":\"2026-10-02T04:21:49.516+00:00\"},{\"id\"…", "id": "replace:13", "index": 13, "related_fact": "/app/data/data.db", "request": "GET /posts"}, {"actual": "404 {\"error\":\"post not found\"}", "condition": "replace", "expected": "200 {\"id\":2,\"author\":\"bob\",\"message\":\"hello guestbook\",\"created_at\":\"2026-10-02T04:21:49.516+00:00\"}", "id": "replace:14", "index": 14, "related_fact": "/app/data/data.db", "request": "GET /posts/2"}, {"actual": "200 [\"notes.txt\"]", "condition": "replace", "expected": "200 [\"cat.png\",\"notes.txt\"]", "id": "replace:16", "index": 16, "related_fact": "/app/uploads", "request": "GET /uploads"}, {"actual": "401 {\"error\":\"login required\"}", "condition": "replace", "expected": "200 {\"name\":\"alice\"}", "id": "replace:17", "index": 17, "related_fact": null, "request": "GET /me"}, {"actual": "200 [{\"id\":1,\"author\":\"carol\",\"message\":\"재방문했어요\",\"created_at\":\"2026-10-02T07:09:25.691+00:00\"}]", "condition": "replace", "expected": "200 [{\"id\":1,\"author\":\"alice\",\"message\":\"첫 방문 기념!\",\"created_at\":\"2026-10-02T04:21:49.483+00:00\"},{\"id\":2,\"author\":\"bob\",\"message\":\"hello guestbook\",\"created_at\":\"2026-10-02T04:21:49.516+00:00\"},{\"id\"…", "id": "replace:20", "index": 20, "related_fact": "/app/data/data.db", "request": "GET /posts"}], "notes_hidden": true, "policy_hints_included": false, "recorded_at": "2026-10-02T07:09:14.233684+00:00", "result_sha256": "6acc54cf8921678a03fac30af707f02cd22723fcdc315133bb911003263c5a45", "run_id": "rehearsal-07d13af8ec-guestbook", "source_revision": "86251f2f63aeb213aed4a48bf7c9066b427b8d52", "source_tree_sha256": "f72cdf694263523944679401a601a530156fe9626231fea25f96b38209e2eac3", "sources": [{"content": "                                 \n\n                                                      \n                                                 \n\n                              \n                                       \n                                  \n                                      \n                                                \n                                                               \n\n     \n                                                \n                                              \n                                               \n                                \n                                       \n                                             \n                                      \n                                                                \n                                         \n                                             \n   \nimport json\nimport mimetypes\nimport os\nimport re\nimport secrets\nimport signal\nimport sqlite3\nimport ssl\nfrom contextlib import closing\nfrom datetime import datetime, timezone\nfrom http.cookies import SimpleCookie\nfrom http.server import BaseHTTPRequestHandler, ThreadingHTTPServer\n\nDATA_DIR = os.environ.get(\"DATA_DIR\", \"/app/data\")\nUPLOAD_DIR = os.environ.get(\"UPLOAD_DIR\", \"/app/uploads\")\nPORT = int(os.environ.get(\"PORT\", \"8080\"))\nDB_PATH = os.path.join(DATA_DIR, \"data.db\")\n                                                             \nTLS_CERT = os.environ.get(\"TLS_CERT\")\nTLS_KEY = os.environ.get(\"TLS_KEY\")\n\n                                                                     \nSCHEMA = \"\"\"\nDROP TABLE IF EXISTS posts;\nCREATE TABLE posts (\n    id         INTEGER PRIMARY KEY,\n    author     TEXT NOT NULL,\n    message    TEXT NOT NULL,\n    created_at TEXT NOT NULL\n);\n\"\"\"\n\n                                        \nSESSIONS = {}\n\nFILENAME_RE = re.compile(r\"^[A-Za-z0-9._-]{1,100}$\")\nPOST_ID_RE = re.compile(r\"^/posts/(\\d+)$\")\nUPLOAD_RE = re.compile(r\"^/uploads/([^/]+)$\")\n\n\ndef connect():\n    conn = sqlite3.connect(DB_PATH)\n    conn.row_factory = sqlite3.Row\n    return conn\n\n\ndef init_db():\n    os.makedirs(DATA_DIR, exist_ok=True)\n    with closing(connect()) as conn:\n        conn.executescript(SCHEMA)\n\n\ndef now_iso():\n    return datetime.now(timezone.utc).isoformat(timespec=\"milliseconds\")\n\n\nclass Handler(BaseHTTPRequestHandler):\n    server_version = \"guestbook/1\"\n    protocol_version = \"HTTP/1.1\"\n\n                                                                        \n    def send_body(self, status, body, content_type, extra_headers=()):\n        self.send_response(status)\n        self.send_header(\"Content-Type\", content_type)\n        self.send_header(\"Content-Length\", str(len(body)))\n        for name, value in extra_headers:\n            self.send_header(name, value)\n        self.end_headers()\n        self.wfile.write(body)\n\n    def send_json(self, status, obj, extra_headers=()):\n        body = json.dumps(obj, ensure_ascii=False).encode(\"utf-8\")\n        self.send_body(status, body, \"application/json; charset=utf-8\", extra_headers)\n\n    def read_body(self):\n        length = int(self.headers.get(\"Content-Length\") or 0)\n        return self.rfile.read(length) if length > 0 else b\"\"\n\n    def read_json(self):\n        try:\n            data = json.loads(self.read_body() or b\"{}\")\n        except ValueError:\n            return None\n        return data if isinstance(data, dict) else None\n\n    def session_id(self):\n        cookie = [REDACTED]\"Cookie\") or \"\")\n        morsel = cookie.get(\"sid\")\n        return morsel.value if morsel else None\n\n    def route(self):\n        return self.path.split(\"?\", 1)[0]\n\n                                                                            \n    def do_GET(self):\n        path = self.route()\n        if path == \"/healthz\":\n            return self.send_json(200, {\"status\": \"ok\"})\n        if path == \"/me\":\n            name = SESSIONS.get(self.session_id())\n            if name is None:\n                return self.send_json(401, {\"error\": \"login required\"})\n            return self.send_json(200, {\"name\": name})\n        if path == \"/posts\":\n            with closing(connect()) as conn:\n                rows = conn.execute(\n                    \"SELECT id, author, message, created_at FROM posts ORDER BY id\"\n                ).fetchall()\n            return self.send_json(200, [dict(r) for r in rows])\n        m = POST_ID_RE.match(path)\n        if m:\n            with closing(connect()) as conn:\n                row = conn.execute(\n                    \"SELECT id, author, message, created_at FROM posts WHERE id = ?\",\n                    (int(m.group(1)),),\n                ).fetchone()\n            if row is None:\n                return self.send_json(404, {\"error\": \"post not found\"})\n            return self.send_json(200, dict(row))\n        if path == \"/uploads\":\n            return self.send_json(200, sorted(os.listdir(UPLOAD_DIR)))\n        m = UPLOAD_RE.match(path)\n        if m:\n            name = m.group(1)\n            file_path = os.path.join(UPLOAD_DIR, name)\n            if not FILENAME_RE.match(name) or not os.path.isfile(file_path):\n                return self.send_json(404, {\"error\": \"file not found\"})\n            with open(file_path, \"rb\") as f:\n                data = f.read()\n            ctype = mimetypes.guess_type(name)[0] or \"application/octet-stream\"\n            return self.send_body(200, data, ctype)\n        return self.send_json(404, {\"error\": \"not found\"})\n\n                                                                            \n    def do_POST(self):\n        path = self.route()\n        if path == \"/login\":\n            data = self.read_json()\n            name = (data or {}).get(\"name\")\n            if not isinstance(name, str) or not name:\n                return self.send_json(400, {\"error\": \"name required\"})\n            sid = secrets.token_hex(16)\n            SESSIONS[sid] = name\n            return self.send_json(\n                200, {\"name\": name},\n                [(\"Set-Cookie\", f\"sid={sid}; Path=/; HttpOnly\")],\n            )\n        if path == \"/logout\":\n            self.read_body()\n            SESSIONS.pop(self.session_id(), None)\n            return self.send_json(\n                200, {\"ok\": True},\n                [(\"Set-Cookie\", \"sid=; Path=/; Max-Age=0\")],\n            )\n        if path == \"/posts\":\n            data = self.read_json() or {}\n            author, message = data.get(\"author\"), data.get(\"message\")\n            if not isinstance(author, str) or not isinstance(message, str) or not author or not message:\n                return self.send_json(400, {\"error\": \"author and message required\"})\n            created_at = now_iso()\n            with closing(connect()) as conn:\n                with conn:\n                    cur = conn.execute(\n                        \"INSERT INTO posts (author, message, created_at) VALUES (?, ?, ?)\",\n                        (author, message, created_at),\n                    )\n                post_id = cur.lastrowid\n            return self.send_json(\n                201, {\"id\": post_id, \"author\": author, \"message\": message, \"created_at\": created_at}\n            )\n        self.read_body()\n        return self.send_json(404, {\"error\": \"not found\"})\n\n                                                                            \n    def do_PUT(self):\n        m = UPLOAD_RE.match(self.route())\n        body = self.read_body()\n        if not m:\n            return self.send_json(404, {\"error\": \"not found\"})\n        name = m.group(1)\n        if not FILENAME_RE.match(name):\n            return self.send_json(400, {\"error\": \"invalid file name\"})\n                                     \n        with open(os.path.join(UPLOAD_DIR, name), \"wb\") as f:\n            f.write(body)\n        return self.send_json(201, {\"name\": name, \"size\": len(body)})\n\n\ndef _graceful_exit(signum, frame):\n                                                                           \n    raise SystemExit(0)\n\n\ndef main():\n    init_db()\n    os.makedirs(UPLOAD_DIR, exist_ok=True)\n    signal.signal(signal.SIGTERM, _graceful_exit)\n    server = ThreadingHTTPServer((\"0.0.0.0\", PORT), Handler)\n    scheme = \"http\"\n    if TLS_CERT and TLS_KEY:\n        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)\n        context.load_cert_chain(TLS_CERT, TLS_KEY)\n        server.socket = context.wrap_socket(server.socket, server_side=True)\n        scheme = \"https\"\n    print(f\"guestbook listening on {scheme}://:{PORT} (db={DB_PATH}, uploads={UPLOAD_DIR})\", flush=True)\n    try:\n        server.serve_forever()\n    finally:\n        server.server_close()\n\n\nif __name__ == \"__main__\":\n    main()\n", "line_start": 1, "path": "app.py", "sha256": "794078fd236e6bec74926891ead45d7b637cc6a5bda51697d0eda781077c3166"}]}, "translations": {"ja": {"finding:1": {"hypothesis": "ログインセッションはモジュールのグローバル辞書SESSIONSにのみ保存され、/loginで追加されます。プロセスが再起動すると辞書が空になるため、既存のsid Cookieで/meを呼んでも名前を取得できないという説明がコードと整合します。ストレージの寿命ではなくプロセスメモリの問題であり、このコードには永続的なセッション保存先が見当たりません。", "limit": "セッションの維持のみを扱います。投稿DBの初期化やアップロードファイルの消失は解決できません。", "next_action": "セッションをプロセス外の永続ストレージ、または署名付きトークンに移す方法を検討し、再起動やコンテナ入れ替え後にも利用できる構成を決めてください。", "observed": "restartとreplaceのどちらでも、中断後のGET /meは期待した200 aliceではなく401 login requiredを返しました（index 11、17）。中断しないnone条件では20/20が一致しました。", "title": "セッションをプロセスのメモリにのみ保存", "verification": "ログイン後にrestartとreplaceをそれぞれ実行し、同じsid CookieでGET /meが200 {\"name\":\"alice\"}を返すことを確認してください。"}, "finding:2": {"hypothesis": "mainは起動時にinit_dbを呼び、init_dbはDROP TABLE IF EXISTS postsで始まるSCHEMAを実行します。再起動ではコンテナの書き込みレイヤーは消えないため、data.dbファイルが残っていても起動処理がテーブルを作り直してデータを削除したと考えるのが最も直接的です。replaceの同じ症状にはストレージの寿命の問題（finding:3）も重なるため、両者を切り分けられません。", "limit": "再起動時の症状のみを解決します。replaceではコンテナレイヤー上のdata.dbが消えるため、別途保存先の変更が必要です。", "next_action": "起動時のスキーマ初期化を、既存データを削除しない処理に変えることを検討してください。例えば、テーブルがない場合にのみ作成する方法です。", "observed": "restart後もGET /postsにはcarolの投稿1件しか残らず、既存のaliceとbobの投稿は消えていました。新規投稿のidは期待した3ではなく1となり、GET /posts/2は404でした（restart:12、13、14、20）。", "title": "起動のたびにpostsテーブルを削除", "verification": "restart条件で投稿を保存してから再起動し、GET /postsが既存のid 1、2と期待する一覧を維持するか確認してください。続けてPOST /postsがid 3を返すことも確認してください。"}, "finding:3": {"hypothesis": "DBとアップロードファイルがコンテナの書き込みレイヤーにある場合、コンテナを削除して作り直すと一緒に消える可能性があります。restartでアップロードが維持されたのは、同じコンテナのレイヤーが残るためと考えられます。replace後にnotes.txtだけが残った理由はこの資料だけでは説明できず、不確かなため別途調査が必要です。replaceでのDBの不一致にはfinding:2のDROP TABLEも重なるため、レイヤー消失だけが原因とは断定できません。", "limit": "ストレージの寿命のみを扱います。finding:2の起動時のDROP TABLEを直さないと、永続ボリュームでもpostsが初期化される可能性があります。", "next_action": "/app/dataと/app/uploadsを、コンテナを入れ替えても維持されるボリュームなどの外部ストレージに置くことを検討してください。あわせて、replaceでnotes.txtだけが残った経緯を調べてください。", "observed": "replace後のGET /uploadsは、期待した[\"cat.png\",\"notes.txt\"]ではなく[\"notes.txt\"]を返しました（replace:16）。一方、restartではアップロード一覧が一致しました。docker diffには、/app/data/data.dbと/app/uploads配下のファイル2個がコンテナレイヤーに書き込まれた記録があります。", "title": "DBとアップロードをコンテナ内に保存", "verification": "replace条件でファイル2個をアップロードしてコンテナを入れ替え、GET /uploadsがcat.pngとnotes.txtの両方を返すことを確認してください。新しいコンテナからDBファイルが見えることも確認してください。"}}}}</script>
+    <script>
+      "use strict";
+      const {
+        input,
+        analysis,
+        translations = {},
+      } = JSON.parse(document.getElementById("report-data").textContent);
+      const $ = (id) => document.getElementById(id);
+      const element = (tag, text, cls) => {
+        const e = document.createElement(tag);
+        if (text !== undefined) e.textContent = text;
+        if (cls) e.className = cls;
+        return e;
+      };
+      const successful = analysis?.status === "succeeded";
+      const originalFindings = successful ? analysis.output.findings : [];
+      const copy = {
+        pageTitle: ["Hibiscus · 실패 원인 분석", "Hibiscus · 失敗原因の分析"],
+        heading: ["어디부터 고칠까요?", "どこから直しますか？"],
+        lead: [
+          "같은 요청을 다시 보냈을 때 달라진 응답을 코드와 함께 살펴봅니다.",
+          "同じリクエストを再送したときに変わった応答を、コードと一緒に確認します。",
+        ],
+        conditionsLabel: ["조건별 재현 결과", "条件別の再現結果"],
+        mismatches: ["응답 불일치", "応答の不一致"],
+        findings: ["원인 가설", "原因の仮説"],
+        viewLabel: ["표시 방식", "表示内容"],
+        raw: ["실패 기록", "失敗記録"],
+        analysis: ["저장된 AI 분석", "保存済みAI分析"],
+        changesHeading: [
+          "무엇을 바꾸면 될까요?",
+          "何を変更すればよいでしょうか？",
+        ],
+        cardHelp: [
+          "카드를 누르면 응답과 코드 근거가 열립니다.",
+          "カードを押すと、根拠となる応答とコードが開きます。",
+        ],
+        detailLabel: ["원인과 근거", "原因と根拠"],
+        nextStep: ["다음은 재검증", "次は再検証"],
+        retestNote: [
+          "원인을 고친 뒤 같은 요청으로 다시 확인합니다. 분석 결과만으로 배포를 허용하지 않습니다.",
+          "修正後に同じリクエストで再検証します。分析結果だけではデプロイを許可しません。",
+        ],
+        rawHeading: ["실제로 달라진 응답", "実際に変わった応答"],
+        rawNote: [
+          "같은 요청이 여러 조건에서 실패하면 각각 셉니다.",
+          "同じリクエストが複数の条件で失敗した場合は、それぞれ数えます。",
+        ],
+        provenanceSummary: [
+          "이 분석의 실행 기록과 한계",
+          "この分析の実行記録と限界",
+        ],
+        integrityNote: [
+          "소스와 실행 산출물의 해시 일치를 확인했습니다. 주석·설명문과 정책의 해결 힌트는 AI 입력에서 제외했습니다. 이 검사는 기록 간 일관성을 확인하며, 별도의 서명 검증을 대신하지 않습니다.",
+          "ソースと実行成果物のハッシュの一致を確認しました。コメント・説明文とポリシーの解決ヒントはAIへの入力から除外しています。この検査は記録間の整合性を確認するもので、署名検証の代わりにはなりません。",
+        ],
+        limitsNote: [
+          "AI가 인용한 요청·파일·줄이 실제 입력에 있는지 검사합니다. 원인 가설의 정확성과 수정 효과는 코드 검토와 재실행으로 확인해야 합니다. 현재 VM의 실시간 상태를 표시하는 화면은 아닙니다.",
+          "AIが引用したリクエスト・ファイル・行が実際の入力に存在するかを検査します。原因の仮説の正しさと修正の効果は、コードレビューと再実行で確認する必要があります。現在のVMの状態をリアルタイムに表示する画面ではありません。",
+        ],
+        languageLabel: ["보고서 언어", "レポートの言語"],
+        translatedNote: [
+          "",
+          "保存済みの韓国語分析の日本語訳です。コード・応答・証拠は原文のまま表示します。",
+        ],
+        untranslatedNote: [
+          "",
+          "この分析の日本語訳はありません。分析本文は原文を表示します。",
+        ],
+        testFailed: ["재현 테스트 실패", "再現テスト失敗"],
+        testMatched: ["응답 일치", "応答一致"],
+        recordSuccess: [
+          "실제 실행 · 저장된 AI 분석",
+          "実際の実行 · 保存済みAI分析",
+        ],
+        recordPending: [
+          "실제 실행 · AI 분석 미완료",
+          "実際の実行 · AI分析未完了",
+        ],
+        recordedCase: [
+          "{date} 실행의 분석 사례 · 현재 배포의 실시간 진단이 아닙니다.",
+          "{date}の実行を分析した事例です。現在のデプロイのリアルタイム診断ではありません。",
+        ],
+        none: ["평상시", "通常時"],
+        restart: ["재시작", "再起動"],
+        replace: ["교체", "入れ替え"],
+        code: ["코드 수정", "コード修正"],
+        configuration: ["설정 변경", "設定変更"],
+        code_and_infrastructure: [
+          "코드 + 저장소·인프라",
+          "コード＋ストレージ・インフラ",
+        ],
+        unknown: ["추가 확인", "追加確認"],
+        matched: ["일치", "一致"],
+        mismatchCount: ["{count}건 불일치", "{count}件不一致"],
+        requestIndex: ["조건 · 요청", "条件・リクエスト番号"],
+        request: ["호출", "リクエスト"],
+        expected: ["기대 응답", "期待する応答"],
+        actual: ["실제 응답", "実際の応答"],
+        closeDetail: ["근거 닫기", "根拠を閉じる"],
+        observed: ["관측된 현상", "観測した現象"],
+        hypothesis: ["AI의 원인 가설", "AIによる原因の仮説"],
+        nextAction: ["다음 조치", "次の対応"],
+        verification: ["다음에 확인할 것", "次に確認すること"],
+        limit: [
+          "이 조치만으로 해결되지 않는 것",
+          "この対応だけでは解決しないこと",
+        ],
+        citedCode: ["AI가 근거로 지목한 코드", "AIが根拠として示したコード"],
+        codeContext: ["앞뒤 2줄 포함", "前後2行を含む"],
+        noSource: [
+          "특정 코드 위치를 확인하지 못했습니다.",
+          "具体的なコード位置は確認できませんでした。",
+        ],
+        relatedResponses: [
+          "관련 응답 {count}건 보기",
+          "関連する応答{count}件を見る",
+        ],
+        evidenceCount: ["근거 {count}건 보기 ↗", "根拠{count}件を見る ↗"],
+        noFindings: [
+          "근거로 뒷받침할 원인 가설을 찾지 못했습니다.",
+          "根拠で裏付けられる原因の仮説は見つかりませんでした。",
+        ],
+        noAnalysis: [
+          "아직 유효한 AI 분석이 없습니다. 실제 실패 기록을 먼저 확인할 수 있습니다.",
+          "有効なAI分析はまだありません。実際の失敗記録を先に確認できます。",
+        ],
+        unexplained: [
+          "원인 미확인 {count}건: {ids}",
+          "原因未確認{count}件：{ids}",
+        ],
+        overlap: [
+          "하나의 불일치에 여러 원인이 겹칠 수 있습니다. 카드의 근거 건수에는 중복이 포함됩니다.",
+          "1件の不一致に複数の原因が重なる場合があります。カードの根拠件数には重複が含まれます。",
+        ],
+        recordedAt: ["기록한 시점", "記録日時"],
+        runId: ["실행 ID", "実行ID"],
+        sourceCommit: ["소스 커밋", "ソースコミット"],
+        imageDigest: ["이미지 digest", "イメージdigest"],
+        resultHash: ["결과 SHA-256", "結果SHA-256"],
+        sourceHash: ["소스 SHA-256", "ソースSHA-256"],
+        model: ["AI 모델", "AIモデル"],
+        notCalled: ["호출하지 않음", "未呼び出し"],
+        analyzedAt: ["AI 분석 시점", "AI分析日時"],
+        analysisStatus: ["AI 분석 상태", "AI分析の状態"],
+        inputHash: ["분석 입력 SHA-256", "分析入力SHA-256"],
+        evidenceCheck: ["근거 검사", "根拠の検査"],
+        evidenceCheckNote: [
+          "참조 일치 검사. 원인 정확도는 자동 검증하지 않음",
+          "参照の整合性を検査。原因の正しさは自動検証していません",
+        ],
+      };
+      function readLanguage() {
+        const requested = new URLSearchParams(location.search).get("lang");
+        if (requested === "ja" || requested === "ko") return requested;
+        try {
+          return localStorage.getItem("hibiscus.lang") === "ja" ? "ja" : "ko";
+        } catch {
+          return "ko";
+        }
+      }
+      let lang = readLanguage();
+      let active = null;
+      let currentView = successful ? "analysis" : "raw";
+      const tr = (key, values = {}) =>
+        copy[key][lang === "ja" ? 1 : 0].replace(/\{(\w+)\}/g, (_, name) =>
+          String(values[name]),
+        );
+      function render() {
+        const previousActive = active;
+        active = null;
+        const findings = originalFindings.map((finding) => ({
+          ...finding,
+          ...(lang === "ja" ? translations.ja?.[finding.id] : {}),
+        }));
+        document.documentElement.lang = lang;
+        document.title = tr("pageTitle");
+        document.querySelectorAll("[data-i18n]").forEach((node) => {
+          node.textContent = tr(node.dataset.i18n);
+        });
+        document.querySelectorAll("[data-i18n-aria]").forEach((node) => {
+          node.setAttribute("aria-label", tr(node.dataset.i18nAria));
+        });
+        for (const locale of ["ko", "ja"])
+          $("lang-" + locale).setAttribute(
+            "aria-pressed",
+            String(lang === locale),
+          );
+        for (const id of [
+          "conditions",
+          "cards",
+          "raw-table",
+          "provenance",
+          "detail",
+        ])
+          $(id).replaceChildren();
+        for (const id of ["empty", "unexplained", "detail"])
+          $(id).hidden = true;
+        $("overlap-note")?.remove();
+        $("translation-note").hidden = lang !== "ja" || !findings.length;
+        $("translation-note").textContent = tr(
+          translations.ja ? "translatedNote" : "untranslatedNote",
+        );
+        const conditionNames = {
+          none: tr("none"),
+          restart: tr("restart"),
+          replace: tr("replace"),
+        };
+        const scopeNames = {
+          code: tr("code"),
+          configuration: tr("configuration"),
+          code_and_infrastructure: tr("code_and_infrastructure"),
+          unknown: tr("unknown"),
+        };
+        $("mismatch-count").textContent = input.mismatches.length;
+        $("finding-count").textContent = successful ? findings.length : "—";
+        $("test-status").textContent = input.mismatches.length
+          ? tr("testFailed")
+          : tr("testMatched");
+        $("test-status").classList.toggle("fail", input.mismatches.length > 0);
+        $("record-label").textContent = successful
+          ? tr("recordSuccess")
+          : tr("recordPending");
+        $("recorded-case").textContent = tr("recordedCase", {
+          date: input.recorded_at.slice(0, 10),
+        });
+        for (const c of input.conditions) {
+          const box = element("div", undefined, "condition");
+          const label = element(
+            "div",
+            conditionNames[c.condition],
+            "condition-label",
+          );
+          label.append(element("small", c.condition));
+          box.append(label);
+          const count = element(
+            "b",
+            String(c.matched),
+            c.matched < c.total ? "failed" : "",
+          );
+          count.append(element("span", " / " + c.total));
+          box.append(
+            count,
+            element(
+              "span",
+              c.matched === c.total
+                ? tr("matched")
+                : tr("mismatchCount", { count: c.total - c.matched }),
+              "pill " + (c.matched < c.total ? "fail" : "neutral"),
+            ),
+          );
+          $("conditions").append(box);
+        }
+        function table(mismatches) {
+          const wrap = element("div", undefined, "table-wrap"),
+            t = element("table"),
+            head = element("thead"),
+            hr = element("tr");
+          for (const label of [
+            "requestIndex",
+            "request",
+            "expected",
+            "actual",
+          ].map((key) => tr(key))) {
+            const h = element("th", label);
+            h.scope = "col";
+            hr.append(h);
+          }
+          head.append(hr);
+          t.append(head);
+          const body = element("tbody");
+          for (const m of mismatches) {
+            const row = element("tr");
+            row.append(
+              element("td", `${conditionNames[m.condition]} #${m.index}`),
+              element("td", m.request, "req"),
+              element("td", m.expected, "response"),
+              element("td", m.actual, "response"),
+            );
+            body.append(row);
+          }
+          t.append(body);
+          wrap.append(t);
+          return wrap;
+        }
+        $("raw-table").append(table(input.mismatches));
+        function closeDetail() {
+          active = null;
+          $("detail").hidden = true;
+          document
+            .querySelectorAll(".card")
+            .forEach((c) => c.setAttribute("aria-expanded", "false"));
+        }
+        function showDetail(f, button, focus = true) {
+          if (active === f.id) {
+            closeDetail();
+            return;
+          }
+          closeDetail();
+          active = f.id;
+          button.setAttribute("aria-expanded", "true");
+          const panel = $("detail");
+          panel.replaceChildren();
+          panel.hidden = false;
+          const head = element("div", undefined, "detail-head");
+          head.append(element("h3", f.title));
+          const close = element("button", "×", "close");
+          close.type = "button";
+          close.setAttribute("aria-label", tr("closeDetail"));
+          close.onclick = () => {
+            closeDetail();
+            button.focus();
+          };
+          head.append(close);
+          panel.append(head);
+          const grid = element("div", undefined, "detail-grid"),
+            explanation = element("div"),
+            code = element("div");
+          for (const [label, value] of [
+            [tr("observed"), f.observed],
+            [tr("hypothesis"), f.hypothesis],
+            [tr("nextAction"), f.next_action],
+            [tr("verification"), f.verification],
+            [tr("limit"), f.limit],
+          ])
+            explanation.append(
+              element("span", label, "label"),
+              element("p", value),
+            );
+          code.append(element("span", tr("citedCode"), "label"));
+          for (const loc of f.source_locations) {
+            const source = input.sources.find((s) => s.path === loc.path);
+            code.append(
+              element(
+                "div",
+                `${loc.path}:${loc.line_start}–${loc.line_end} · ${tr("codeContext")}`,
+                "code-title",
+              ),
+            );
+            const start = Math.max(1, loc.line_start - 2),
+              pre = element("pre", undefined, "code");
+            source.content
+              .split("\n")
+              .slice(start - 1, loc.line_end + 2)
+              .forEach((line, i) => {
+                const n = start + i,
+                  row = element(
+                    "span",
+                    undefined,
+                    "code-line" +
+                      (n >= loc.line_start && n <= loc.line_end
+                        ? " cited"
+                        : ""),
+                  );
+                row.append(
+                  element("span", String(n), "ln"),
+                  document.createTextNode(line),
+                );
+                pre.append(row);
+              });
+            code.append(pre);
+          }
+          if (!f.source_locations.length)
+            code.append(element("p", tr("noSource")));
+          for (const id of f.fact_ids) {
+            const fact = input.facts.find((x) => x.id === id);
+            code.append(
+              element(
+                "div",
+                `${fact.path} · ${fact.storage}\n${fact.evidence}`,
+                "fact",
+              ),
+            );
+          }
+          grid.append(explanation, code);
+          panel.append(grid);
+          const evidence = element("details", undefined, "evidence");
+          const rows = input.mismatches.filter((m) =>
+            f.mismatch_ids.includes(m.id),
+          );
+          evidence.append(
+            element("summary", tr("relatedResponses", { count: rows.length })),
+            table(rows),
+          );
+          panel.append(evidence);
+          if (!focus) return;
+          panel.focus({ preventScroll: true });
+          panel.scrollIntoView({
+            behavior: matchMedia("(prefers-reduced-motion: reduce)").matches
+              ? "instant"
+              : "smooth",
+            block: "nearest",
+          });
+        }
+        function responsePair(m) {
+          const parse = (s) => {
+            const match = s.match(/^(\d+)\s+([\s\S]*)$/);
+            if (!match) return null;
+            try {
+              return { status: match[1], body: JSON.parse(match[2]) };
+            } catch {
+              return { status: match[1], body: match[2] };
+            }
+          };
+          const expected = parse(m.expected),
+            actual = parse(m.actual);
+          if (expected && actual) {
+            if (expected.status !== actual.status)
+              return [expected.status, actual.status];
+            const a = expected.body,
+              b = actual.body;
+            if (
+              a &&
+              b &&
+              typeof a === "object" &&
+              typeof b === "object" &&
+              !Array.isArray(a) &&
+              !Array.isArray(b)
+            ) {
+              const key = Object.keys(a).find(
+                (k) => JSON.stringify(a[k]) !== JSON.stringify(b[k]),
+              );
+              if (key)
+                return [
+                  `${key}: ${JSON.stringify(a[key])}`,
+                  `${key}: ${JSON.stringify(b[key])}`,
+                ];
+            }
+            if (
+              Array.isArray(a) &&
+              Array.isArray(b) &&
+              a.every((x) => typeof x === "string") &&
+              b.every((x) => typeof x === "string")
+            )
+              return [a.join(", "), b.join(", ")];
+          }
+          return [m.expected, m.actual].map((s) =>
+            s.length > 80 ? s.slice(0, 77) + "…" : s,
+          );
+        }
+        $("cards").dataset.many = String(findings.length > 3);
+        findings.forEach((f, i) => {
+          const card = element("button", undefined, "card");
+          card.type = "button";
+          card.setAttribute("aria-expanded", "false");
+          card.setAttribute("aria-controls", "detail");
+          const top = element("div", undefined, "card-top");
+          top.append(
+            element("span", String(i + 1).padStart(2, "0"), "card-index"),
+            element("span", scopeNames[f.scope], "pill neutral"),
+          );
+          const bottom = element("div", undefined, "card-bottom");
+          bottom.append(
+            element("small", tr("nextAction")),
+            element(
+              "div",
+              f.next_action.split(/(?<=。)\s*|(?<=\.)\s+/)[0],
+              "action",
+            ),
+          );
+          const unique = f.mismatch_ids.find(
+            (id) =>
+              findings.filter((other) => other.mismatch_ids.includes(id))
+                .length === 1,
+          );
+          const example = input.mismatches.find(
+            (m) => m.id === (unique || f.mismatch_ids[0]),
+          );
+          const sample = element("div", undefined, "example"),
+            pair = element("div", undefined, "response-pair");
+          sample.append(
+            element(
+              "div",
+              `${example.request} · ${conditionNames[example.condition]} #${example.index}`,
+              "example-request",
+            ),
+          );
+          const [expected, actual] = responsePair(example);
+          pair.append(
+            element("code", expected),
+            element("span", "→"),
+            element("code", actual),
+          );
+          sample.append(pair);
+          card.append(
+            top,
+            element("h3", f.title),
+            sample,
+            bottom,
+            element(
+              "span",
+              tr("evidenceCount", { count: f.mismatch_ids.length }),
+              "card-link",
+            ),
+          );
+          card.onclick = () => showDetail(f, card);
+          $("cards").append(card);
+        });
+        if (!successful || !findings.length) {
+          $("empty").hidden = false;
+          $("empty").textContent = successful
+            ? tr("noFindings")
+            : tr("noAnalysis");
+        }
+        if (successful && analysis.output.unexplained_mismatch_ids.length) {
+          $("unexplained").hidden = false;
+          $("unexplained").textContent = tr("unexplained", {
+            count: analysis.output.unexplained_mismatch_ids.length,
+            ids: analysis.output.unexplained_mismatch_ids.join(", "),
+          });
+        }
+        if (
+          findings.reduce((n, f) => n + f.mismatch_ids.length, 0) >
+          input.mismatches.length
+        ) {
+          const note = element("p", tr("overlap"));
+          note.id = "overlap-note";
+          note.style.cssText =
+            "font-size:12px;color:var(--muted);margin-top:12px";
+          $("cards").after(note);
+        }
+        function view(name) {
+          currentView = name;
+          $("analysis-view").hidden = name !== "analysis";
+          $("raw-view").hidden = name !== "raw";
+          $("show-analysis").setAttribute(
+            "aria-pressed",
+            String(name === "analysis"),
+          );
+          $("show-raw").setAttribute("aria-pressed", String(name === "raw"));
+        }
+        $("show-analysis").onclick = () => view("analysis");
+        $("show-raw").onclick = () => view("raw");
+        view(currentView);
+        const fields = [
+          [tr("recordedAt"), input.recorded_at],
+          [tr("runId"), input.run_id],
+          [tr("sourceCommit"), input.source_revision],
+          [tr("imageDigest"), input.image_digest],
+          [tr("resultHash"), input.result_sha256],
+          [tr("sourceHash"), input.source_tree_sha256],
+          [tr("model"), analysis?.model || tr("notCalled")],
+          [tr("analyzedAt"), analysis?.created_at || "—"],
+          [tr("analysisStatus"), analysis?.status || "not_run"],
+          [tr("inputHash"), analysis?.input_sha256 || "—"],
+          [tr("evidenceCheck"), tr("evidenceCheckNote")],
+        ];
+        for (const [label, value] of fields)
+          $("provenance").append(element("dt", label), element("dd", value));
+        const selected = findings.findIndex(
+          (finding) => finding.id === previousActive,
+        );
+        if (selected >= 0)
+          showDetail(findings[selected], $("cards").children[selected], false);
+      }
+      for (const locale of ["ko", "ja"])
+        $("lang-" + locale).onclick = () => {
+          lang = locale;
+          try {
+            localStorage.setItem("hibiscus.lang", lang);
+          } catch {
+            /* file:// may deny storage */
+          }
+          try {
+            const url = new URL(location.href);
+            url.searchParams.set("lang", lang);
+            history.replaceState(null, "", url);
+          } catch {
+            /* Language switching also works without History API access. */
+          }
+          render();
+        };
+      render();
+    </script>
+  </body>
+</html>
