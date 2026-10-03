@@ -55,6 +55,18 @@ check() {
     printf '%s\n' "$out" | sed 's/^/      /' | tail -5
   fi
 }
+# 감사 로그에서 signed 줄을 빼고 seq·prev_hash·hash 를 다시 계산 (체인을 통째로 고쳐 쓰는 공격): recompute <원본> <결과>
+recompute() {
+  node_modules/.bin/tsx --eval '
+import { readFileSync, writeFileSync } from "node:fs";
+import { auditHash, GENESIS } from "./src/audit.ts";
+const [src, out] = process.argv.slice(-2);
+let prev = GENESIS;
+const kept = readFileSync(src, "utf8").trim().split("\n").map((l) => JSON.parse(l)).filter((l) => l.entry.result !== "signed" && l.cancels === undefined);
+const lines = kept.map((l, i) => { const { hash: _h, ...body } = { ...l, seq: i + 1, prev_hash: prev }; prev = auditHash(body); return { ...body, hash: prev }; });
+writeFileSync(out, lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+' "$1" "$2"
+}
 # json 파일 일부를 바꿔서 새 파일로: edit <원본> <결과> <JS 식(o 를 고침)>
 edit() { node -e 'const fs=require("fs");const o=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));(new Function("o",process.argv[3]))(o);fs.writeFileSync(process.argv[2],JSON.stringify(o,null,2))' "$1" "$2" "$3"; }
 
@@ -164,8 +176,14 @@ sed '$d' "$W/audit.jsonl" >"$W/audit-cut.jsonl"
 check 0 "(약점) 마지막 기록(승인 거절 줄) 삭제: 체인만 보면 통과함" signer audit --audit "$W/audit-cut.jsonl"
 check 1 "같은 파일을 끝 고정값과 맞춰 봄" signer audit --audit "$W/audit-cut.jsonl" --anchors "$W/anchors.jsonl" "${VERIFY[@]}"
 grep -v '"result":"signed"' "$W/audit.jsonl" >"$W/audit-nosign.jsonl"
-check 1 "서명 기록 줄을 빼고 체인을 다시 맞춘 로그로 v1 배포 확인" \
+check 1 "서명 기록 줄만 삭제한 로그로 v1 배포 확인 (seq_gap)" \
   signer verify --result "$W/sr.json" --audit "$W/audit-nosign.jsonl" "${VERIFY[@]}"
+recompute "$W/audit.jsonl" "$W/audit-rechain.jsonl"
+check 0 "(약점) 서명 기록 줄을 빼고 체인을 다시 계산: 체인만 보면 통과함" signer audit --audit "$W/audit-rechain.jsonl"
+check 1 "같은 로그로 v1 배포 확인: 이 서명 결과의 signed 줄이 없음" \
+  signer verify --result "$W/sr.json" --audit "$W/audit-rechain.jsonl" "${VERIFY[@]}"
+check 1 "같은 로그를 레지스트리 서명과 맞춰 봄: 로그에 없는 서명" \
+  signer audit --audit "$W/audit-rechain.jsonl" --images --image-repo "$REG" "${VERIFY[@]}"
 
 # --- 결과 ---
 step "결과"
