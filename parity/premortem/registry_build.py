@@ -125,6 +125,38 @@ def _verify_index(runner, repository, digest, platforms):
     return children
 
 
+def _verify_local_image(local, index_digest, platform, child, labels):
+    """Docker's classic store returns a config ID; containerd returns a descriptor ID.
+
+    Accept only identities in the already hash-verified index/manifest chain.
+    An index match alone must not bypass the selected platform or source labels.
+    """
+    if not isinstance(local, dict):
+        raise PremortemError("BUILD_IDENTITY_INVALID", "pull한 이미지 정보가 객체가 아님")
+    identities = {child["config_digest"]: "config", child["manifest_digest"]: "manifest",
+                  index_digest: "index"}
+    local_id = _digest(local.get("Id"))
+    kind = identities.get(local_id)
+    if kind is None:
+        raise PremortemError("BUILD_IDENTITY_INVALID",
+                             "로컬 이미지 ID가 검증한 index·platform manifest·config 중 어느 것과도 일치하지 않음")
+    descriptor = local.get("Descriptor")
+    if descriptor is not None:
+        media_types = _INDEX_TYPES if kind == "index" else _MANIFEST_TYPES
+        if (not isinstance(descriptor, dict) or descriptor.get("digest") != local_id
+                or kind == "config" or descriptor.get("mediaType") not in media_types):
+            raise PremortemError("BUILD_IDENTITY_INVALID", "로컬 이미지 descriptor와 ID가 다름")
+    config = local.get("Config") or {}
+    actual_labels = config.get("Labels") if isinstance(config, dict) else None
+    variants = (None, "", "v8") if platform == "linux/arm64" else (None, "")
+    if (f"{local.get('Os')}/{local.get('Architecture')}" != platform
+            or local.get("Variant") not in variants
+            or not isinstance(actual_labels, dict)
+            or any(actual_labels.get(key) != value for key, value in labels.items())):
+        raise PremortemError("BUILD_IDENTITY_INVALID", "로컬 이미지의 platform 또는 빌드 소스 라벨이 다름")
+    return kind
+
+
 def build_and_push(*, app: Path, image_repo: str, out_dir: Path, runner: CommandRunner,
                    run_id: str, platforms=("linux/amd64", "linux/arm64"), builder=None,
                    timeout=900) -> dict:
@@ -174,17 +206,12 @@ def build_and_push(*, app: Path, image_repo: str, out_dir: Path, runner: Command
         if not isinstance(images, list) or len(images) != 1 or not isinstance(images[0], dict):
             raise PremortemError("BUILD_IDENTITY_INVALID", "pull한 이미지 정보를 확인할 수 없음")
         local = images[0]
-        config = local.get("Config") or {}
-        actual_labels = (config.get("Labels") or {}) if isinstance(config, dict) else {}
-        if (local.get("Id") != children[native]["config_digest"]
-                or f"{local.get('Os')}/{local.get('Architecture')}" != native
-                or not isinstance(actual_labels, dict)
-                or any(actual_labels.get(key) != value for key, value in labels.items())):
-            raise PremortemError("BUILD_IDENTITY_INVALID", "로컬 이미지가 레지스트리 manifest 또는 빌드 소스 라벨과 다름")
+        identity_kind = _verify_local_image(local, digest, native, children[native], labels)
         result = {"schema_version": "premortem.build.v1", "run_id": run_id,
                   "created_at": datetime.now(timezone.utc).isoformat(), "source": source,
                   "image": {"reference": reference, "build_tag": tag, "registry_digest": digest,
                             "platforms": children, "platform": native, "local_image_id": local["Id"],
+                            "local_image_id_kind": identity_kind,
                             "source_build_link_verified": True, "registry_link_verified": True}}
         # 레지스트리 조회와 pull 동안 보관된 소스가 바뀌어도 성공 기록을 남기지 않는다.
         verify_source_tree(out_dir / "source", source["tree_sha256"])

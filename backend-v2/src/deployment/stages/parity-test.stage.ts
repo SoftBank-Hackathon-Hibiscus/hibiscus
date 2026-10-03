@@ -11,6 +11,10 @@ import {
   CommandRunner,
   type CommandSpec,
 } from '../../infrastructure/command-runner.js';
+import {
+  commandDiagnostics,
+  diagnosticTail,
+} from '../../infrastructure/command-diagnostics.js';
 import { ParityInputService } from '../parity-input.service.js';
 import { DeploymentRepository } from '../deployment.repository.js';
 import type { StageContext, StageOutcome } from '../types/deployment.type.js';
@@ -39,6 +43,14 @@ const stageSchema = z.object({
     .object({ stub: z.literal(false), test_passed: z.boolean() })
     .passthrough(),
 });
+
+class ParityCommandError extends Error {
+  constructor(readonly diagnostics: ReturnType<typeof commandDiagnostics>) {
+    super(
+      `Parity ${diagnostics.command_phase} command ${diagnostics.timed_out ? 'timed out' : `failed (exit ${diagnostics.exit_code ?? diagnostics.signal ?? 'unknown'})`}`,
+    );
+  }
+}
 
 interface ParityBaselineFact {
   mode: 'replay' | 'health';
@@ -82,14 +94,13 @@ export class ParityTestStage {
       const timeoutMs = this.config.get('backend.parityTimeoutMs', {
         infer: true,
       });
-      const run = async (spec: CommandSpec) => {
+      const run = async (
+        spec: CommandSpec,
+        phase: 'checkout' | 'build' | 'test',
+      ) => {
         const result = await this.runner.run(spec);
         if (result.timedOut || result.code !== 0) {
-          throw new Error(
-            result.timedOut
-              ? 'Parity command timed out'
-              : 'Parity build or test command failed',
-          );
+          throw new ParityCommandError(commandDiagnostics(phase, result));
         }
         return result;
       };
@@ -104,12 +115,15 @@ export class ParityTestStage {
         deployment.sourceRevision,
         join(stageWork, 'source'),
       );
-      const revision = await run({
-        command: 'git',
-        cwd: sourcePath,
-        args: ['rev-parse', '--verify', 'HEAD^{commit}'],
-        timeoutMs: 30_000,
-      });
+      const revision = await run(
+        {
+          command: 'git',
+          cwd: sourcePath,
+          args: ['rev-parse', '--verify', 'HEAD^{commit}'],
+          timeoutMs: 30_000,
+        },
+        'checkout',
+      );
       if (revision.stdout.trim() !== deployment.sourceRevision) {
         throw new Error('App checkout does not match the requested source SHA');
       }
@@ -176,7 +190,7 @@ export class ParityTestStage {
           infer: true,
         });
         if (builder) args.push('--builder', builder);
-        await run({ ...command, args });
+        await run({ ...command, args }, 'build');
         manifestPath = join(buildDir, 'build_manifest.json');
       }
       const build = buildSchema.parse(
@@ -214,19 +228,22 @@ export class ParityTestStage {
         flag: 'wx',
         mode: 0o600,
       });
-      await run({
-        ...command,
-        args: [
-          '-m',
-          'premortem',
-          'backend-test',
-          '--request',
-          requestPath,
-          '--out-dir',
-          paths.test,
-          '--json',
-        ],
-      });
+      await run(
+        {
+          ...command,
+          args: [
+            '-m',
+            'premortem',
+            'backend-test',
+            '--request',
+            requestPath,
+            '--out-dir',
+            paths.test,
+            '--json',
+          ],
+        },
+        'test',
+      );
       const stage = stageSchema.parse(
         JSON.parse(readFileSync(join(paths.test, 'stage_result.json'), 'utf8')),
       );
@@ -264,9 +281,12 @@ export class ParityTestStage {
         status: 'failed',
         exitCode: 1,
         artifacts: {},
+        ...(error instanceof ParityCommandError
+          ? { summary: error.diagnostics }
+          : {}),
         error:
           error instanceof Error
-            ? error.message
+            ? diagnosticTail(error.message)
             : 'Unable to run registry parity',
       };
     }
