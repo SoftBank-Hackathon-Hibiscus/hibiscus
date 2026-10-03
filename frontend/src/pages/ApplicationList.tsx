@@ -2,7 +2,9 @@ import { ChevronRight, Plus } from 'lucide-react';
 import type { DataSource } from '../api/client';
 import type { ApplicationView } from '../api/types';
 import { PageError } from '../components/PageError';
-import { PageTitle, Pill, SkeletonCard } from '../components/ui';
+import { Loader } from '../components/Loader';
+import { PageTitle, Pill } from '../components/ui';
+import { useMinVisible } from '../hooks/useMinVisible';
 import { usePolling } from '../hooks/usePolling';
 import { relTime } from '../lib/format';
 import { useLang } from '../lib/i18n';
@@ -18,6 +20,8 @@ export function ApplicationList({ source }: { source: DataSource }) {
   const { t, lang } = useLang();
   const poll = usePolling<ApplicationView[]>(() => source.listApplications(), POLL_MS, [source]);
   const apps = poll.data;
+  // mock 에서만 로더를 최소 0.9초 유지. real 은 응답 즉시
+  const showLoader = useMinVisible(poll.loading && !apps && poll.error === null, source.kind === 'mock' ? 900 : 0);
 
   return (
     <div className="page">
@@ -38,13 +42,8 @@ export function ApplicationList({ source }: { source: DataSource }) {
       />
       {poll.error && !apps ? <PageError error={poll.error} /> : null}
       {poll.error && apps ? <PageError error={poll.error} compact /> : null}
-      {poll.loading && !apps && !poll.error && (
-        <div className="app-grid" aria-busy="true">
-          <SkeletonCard lines={3} />
-          <SkeletonCard lines={3} />
-        </div>
-      )}
-      {apps && apps.length === 0 && (
+      {showLoader && <Loader label={t('loading')} />}
+      {!showLoader && apps && apps.length === 0 && (
         <section className="card empty-state">
           <h2 className="empty-title">{t('emptyAppsTitle')}</h2>
           <p className="empty-body">{t('emptyAppsBody')}</p>
@@ -55,7 +54,7 @@ export function ApplicationList({ source }: { source: DataSource }) {
           </div>
         </section>
       )}
-      {apps && apps.length > 0 && (
+      {!showLoader && apps && apps.length > 0 && (
         <ul className="app-grid">
           {apps.map((view) => (
             <li key={view.application.id}>

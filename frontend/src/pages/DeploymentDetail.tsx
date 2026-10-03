@@ -6,7 +6,9 @@ import type { ApplicationView, Decision, DeploymentStatus, DeploymentView, Stage
 import { ErrorNotice } from '../components/ErrorNotice';
 import { Modal } from '../components/Modal';
 import { PageError } from '../components/PageError';
-import { Collapsible, Crumbs, DemoBadge, Empty, Hash, Kv, PageSkeleton, PageTitle, Pill, type Tone } from '../components/ui';
+import { Loader } from '../components/Loader';
+import { Collapsible, Crumbs, DemoBadge, Empty, Hash, Kv, PageTitle, Pill, type Tone } from '../components/ui';
+import { useMinVisible } from '../hooks/useMinVisible';
 import { usePolling } from '../hooks/usePolling';
 import { findArtifact, latestStages, parseJsonArtifact } from '../lib/artifacts';
 import { fmtTime, relTime, targetLabel } from '../lib/format';
@@ -74,7 +76,9 @@ export function DeploymentDetail({ id, source }: { id: string; source: DataSourc
   const summary = useMemo(() => (view ? summarizeDeployment(view, lang) : null), [view, lang]);
   const appName = app?.application.name ?? view?.deployment.applicationId ?? '';
 
-  if (poll.loading && !view) return <PageSkeleton cards={4} />;
+  // mock 응답은 120ms 라 로더를 최소 0.9초 유지한다. real 은 지연 없이 응답 즉시 그린다
+  const showLoader = useMinVisible(poll.loading && !view, source.kind === 'mock' ? 900 : 0);
+  if (showLoader) return <Loader label={t('loading')} />;
   if (!view || !summary) return <PageError error={poll.error ?? new Error('no data')} />;
   const d = view.deployment;
   const needsApproval = d.decision === 'needs_approval' || d.status === 'awaiting_approval';

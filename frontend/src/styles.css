@@ -2233,3 +2233,123 @@ select.input {
     transform: translateX(-10px);
   }
 }
+
+/* ---- 화면 등장: 페이지 한 번, 홈은 제목 → 문구 → 버튼 → 흐름 순서, 데모 카드는 차례로 ---- */
+.page {
+  animation: rise-in 0.35s var(--ease-out) backwards;
+}
+.hero-title {
+  animation: rise-in 0.5s var(--ease-out) backwards;
+}
+.hero-sub {
+  animation: rise-in 0.5s var(--ease-out) 90ms backwards;
+}
+.hero-cta {
+  animation: rise-in 0.5s var(--ease-out) 180ms backwards;
+}
+.pipeline {
+  animation: rise-in 0.5s var(--ease-out) 320ms backwards;
+}
+.demo-card,
+.app-card {
+  animation: card-in 0.5s var(--ease-out) backwards;
+  animation-delay: calc(120ms + var(--i, 0) * 70ms);
+  transition:
+    border-color 0.15s,
+    transform 0.2s var(--ease-out),
+    box-shadow 0.2s var(--ease-out);
+}
+.demo-card:hover,
+.demo-card:focus-visible,
+.app-card:hover,
+.app-card:focus-visible {
+  transform: translateY(-2px);
+  box-shadow:
+    0 2px 4px rgba(47, 62, 70, 0.05),
+    0 10px 24px rgba(47, 62, 70, 0.08);
+}
+.demo-card:active,
+.app-card:active {
+  transform: translateY(0) scale(0.99);
+}
+.brand-mark svg {
+  animation: brand-bloom 0.6s var(--ease-out) backwards;
+}
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+@keyframes brand-bloom {
+  from {
+    opacity: 0;
+    transform: rotate(-60deg) scale(0.6);
+  }
+}
+
+/* ---- 로더: 꽃잎이 차례로 핀 뒤 72도씩 돌며 오므렸다 편다. 로딩 표시라 반복하되 reduced-motion 이면 멈춘 꽃만 보인다 ---- */
+.loader {
+  min-height: 46vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+}
+.loader-mark {
+  overflow: visible;
+}
+.loader-flower,
+.loader-petal,
+.loader-core {
+  transform-origin: 32px 32px;
+}
+.loader-flower {
+  animation: flower-turn 1.2s cubic-bezier(0.65, 0, 0.35, 1) 750ms infinite;
+}
+.loader-petal {
+  fill: var(--accent);
+  fill-opacity: 0.5;
+  animation:
+    petal-bloom 0.5s var(--ease-out) both,
+    petal-breathe 1.2s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+}
+.loader-core {
+  fill: var(--accent-ink);
+  animation:
+    core-in 0.4s var(--ease-out) 300ms both,
+    core-pulse 1.2s cubic-bezier(0.65, 0, 0.35, 1) 750ms infinite;
+}
+.loader-label {
+  color: var(--ink-3);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  animation: rise-in 0.4s var(--ease-out) 200ms backwards;
+}
+@keyframes flower-turn {
+  to {
+    transform: rotate(72deg);
+  }
+}
+@keyframes petal-bloom {
+  from {
+    transform: scale(0);
+    fill-opacity: 0;
+  }
+}
+@keyframes petal-breathe {
+  50% {
+    transform: scale(0.8);
+  }
+}
+@keyframes core-in {
+  from {
+    transform: scale(0);
+  }
+}
+@keyframes core-pulse {
+  50% {
+    transform: scale(1.35);
+  }
+}

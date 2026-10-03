@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react';
 import { Notice, PageTitle, Pill } from '../components/ui';
 import type { Tone } from '../lib/deployState';
 import { useLang, type DictKey } from '../lib/i18n';
@@ -40,8 +41,8 @@ export function Demos() {
       />
       <Notice tone="warning">{t('demosNote')}</Notice>
       <div className="demo-grid">
-        {SCENARIOS.map((card) => (
-          <a key={card.id} className="card demo-card" href={mockHref(card.id, paths.get(card.id) ?? '/')}>
+        {SCENARIOS.map((card, i) => (
+          <a key={card.id} className="card demo-card" style={{ '--i': i } as CSSProperties} href={mockHref(card.id, paths.get(card.id) ?? '/')}>
             <span className="demo-card-title">{t(card.title)}</span>
             <span className="demo-card-line">{t(card.line)}</span>
             <span className="demo-card-foot">

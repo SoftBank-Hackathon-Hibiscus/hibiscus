@@ -6,7 +6,9 @@ import type { AgentStatusResponse, ApplicationAgentSummary, ApplicationView, Dep
 import { ErrorNotice, describeError } from '../components/ErrorNotice';
 import { NewDeploymentModal } from '../components/NewDeploymentModal';
 import { PageError } from '../components/PageError';
-import { Crumbs, Empty, Hash, PageSkeleton, PageTitle, Pill, type Tone } from '../components/ui';
+import { Loader } from '../components/Loader';
+import { Crumbs, Empty, Hash, PageTitle, Pill, type Tone } from '../components/ui';
+import { useMinVisible } from '../hooks/useMinVisible';
 import { usePolling } from '../hooks/usePolling';
 import { detectRouteChange, markOf, type RouteChange, type RouteMark } from '../lib/failover';
 import { fmtTime, relTime, targetLabel } from '../lib/format';
@@ -115,7 +117,9 @@ export function ApplicationDetail({ id, source }: { id: string; source: DataSour
   }, [poll.data]);
 
   const snap = poll.data;
-  if (poll.loading && !snap) return <PageSkeleton cards={3} />;
+  // mock 응답은 120ms 라 로더를 최소 0.9초 유지한다. real 은 지연 없이 응답 즉시 그린다
+  const showLoader = useMinVisible(poll.loading && !snap, source.kind === 'mock' ? 900 : 0);
+  if (showLoader) return <Loader label={t('loading')} />;
   if (!snap) return <PageError error={poll.error ?? new Error('no data')} />;
 
   const a = snap.app.application;
