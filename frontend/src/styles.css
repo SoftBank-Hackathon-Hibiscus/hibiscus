@@ -416,35 +416,6 @@ code {
   font-size: 10px;
   padding: 1px 6px;
 }
-.conn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  font-weight: 600;
-  padding: 2px 10px;
-  border-radius: 999px;
-  background: var(--muted-soft);
-  color: var(--ink-2);
-}
-.conn-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: currentColor;
-}
-.conn-success {
-  background: var(--success-soft);
-  color: var(--success);
-}
-.conn-warning {
-  background: var(--warning-soft);
-  color: var(--warning);
-}
-.conn-danger {
-  background: var(--danger-soft);
-  color: var(--danger);
-}
 .lang-switch {
   display: inline-flex;
   padding: 2px;
@@ -961,20 +932,9 @@ main {
   background: var(--surface);
   color: var(--ink);
 }
-.tokenbar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0;
-  flex-wrap: wrap;
-}
-.tokenbar .input {
-  width: 300px;
-  max-width: 100%;
-}
-.tokenbar-state {
-  font-size: 13px;
-  color: var(--ink-2);
+textarea.input {
+  resize: vertical;
+  line-height: 1.5;
 }
 .table {
   width: 100%;
@@ -1795,11 +1755,11 @@ select.input {
   font-size: 11.5px;
 }
 
-/* ---- connect checklist ---- */
+/* ---- connect: 단계 카드 ---- */
 .connect {
   max-width: 760px;
 }
-.checklist {
+.steps {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -1807,20 +1767,97 @@ select.input {
   flex-direction: column;
   gap: 12px;
 }
-.check-item {
+.step-card {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   padding: 16px 20px;
 }
-.check-head {
+.step-card-idle {
+  color: var(--ink-2);
+}
+.step-card-head {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 15px;
+  flex-wrap: wrap;
 }
-.check-head .btn {
+.step-card-mark {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  font-size: 12.5px;
+  font-weight: 700;
+  background: var(--muted-soft);
+  color: var(--ink-2);
+}
+.step-card-mark.tone-success {
+  background: var(--success-soft);
+}
+.step-card-mark.tone-warning {
+  background: var(--warning-soft);
+}
+.step-card-mark.tone-danger {
+  background: var(--danger-soft);
+}
+.step-card-title {
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--ink);
+}
+.step-card-status {
+  font-size: 14px;
   margin-left: auto;
+}
+.step-card-status.tone-muted {
+  color: var(--ink-3);
+}
+.step-note {
+  font-size: 13.5px;
+  color: var(--ink-2);
+}
+.step-help {
+  font-size: 13.5px;
+  color: var(--ink-2);
+  max-width: 70ch;
+  line-height: 1.55;
+}
+.step-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.signin-steps {
+  margin: 0;
+  padding-left: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.signin-steps > li {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.signin-steps > li::marker {
+  color: var(--ink-3);
+  font-size: 13px;
+}
+.signin-form {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.signin-input {
+  width: 100%;
+  font-family: var(--mono);
+  font-size: 12.5px;
 }
 .check-mark {
   width: 24px;
@@ -1846,41 +1883,10 @@ select.input {
   background: var(--danger-soft);
   color: var(--danger);
 }
-.check-state {
-  color: var(--ink-2);
-  font-size: 14px;
-}
 .check-help {
   color: var(--ink-2);
   font-size: 13.5px;
   max-width: 80ch;
-}
-.check-body {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.app-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.app-link {
-  display: flex;
-  gap: 12px;
-  align-items: baseline;
-  padding: 8px 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  color: var(--ink);
-  background: var(--surface-2);
-}
-.app-link:hover {
-  border-color: var(--accent);
-  text-decoration: none;
 }
 .goto {
   display: flex;

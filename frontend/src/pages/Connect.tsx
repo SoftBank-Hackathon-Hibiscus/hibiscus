@@ -1,121 +1,80 @@
-import { useEffect, useState } from 'react';
-import type { DataSource } from '../api/client';
-import type { ApplicationView } from '../api/types';
-import { TokenBar } from '../components/TokenBar';
-import { ErrorNotice } from '../components/ErrorNotice';
-import { Collapsible, Empty, PageTitle } from '../components/ui';
+import { Check, ExternalLink, Minus, X } from 'lucide-react';
+import { useState, type ReactNode } from 'react';
+import { ApiError, type DataSource } from '../api/client';
+import { parsePastedToken, writeToken, writeTokens } from '../api/token';
+import { Collapsible, PageTitle } from '../components/ui';
 import type { ConnectionState } from '../hooks/useConnection';
+import { usePageTitle } from '../hooks/usePageTitle';
+import { backendBaseUrl, isLocalBackend, oauthStartUrl } from '../lib/backendUrl';
+import type { Tone } from '../lib/deployState';
 import { useLang } from '../lib/i18n';
-import { APPLICATIONS_PATH, applicationPath, deploymentPath, hrefFor, navigate } from '../lib/router';
+import { APPLICATIONS_PATH, REGISTER_PATH, applicationPath, deploymentPath, hrefFor, navigate } from '../lib/router';
 
-/** real 모드 홈. 백엔드 → 토큰 → 앱 선택 순서의 체크리스트. 실패해도 mock 으로 돌아가지 않는다. */
+type StepState = 'idle' | 'checking' | 'ok' | 'warn' | 'fail';
+
+/**
+ * 실제 환경 연결. ① 서버 연결 → ② GitHub 인증 → ③ 시작.
+ * backend 계약은 그대로다: GET /auth/github 는 { authorization_url } JSON 을 돌려주고, state 쿠키는 backend 호스트에 붙는다.
+ * 그래서 로그인 시작은 backend 주소를 새 탭으로 직접 열고, 콜백 JSON 을 붙여넣어 토큰을 저장한다.
+ * 실패해도 mock 으로 돌아가지 않는다.
+ */
 export function Connect({ source, connection, onTokenChange, onRecheck }: { source: DataSource; connection: ConnectionState; onTokenChange: () => void; onRecheck: () => void }) {
-  const { t, lang } = useLang();
-  const backendOk = connection.level === 'login' || connection.level === 'ok';
-  const tokenOk = connection.level === 'ok';
+  const { t } = useLang();
+  usePageTitle(t('connectTitle'));
+  const base = backendBaseUrl();
+  const local = isLocalBackend(base);
+  const serverOk = connection.level === 'login' || connection.level === 'ok';
+  const signedIn = connection.level === 'ok';
 
-  const [apps, setApps] = useState<ApplicationView[] | null>(null);
-  const [appsError, setAppsError] = useState<unknown>(null);
-  useEffect(() => {
-    if (!tokenOk) {
-      setApps(null);
-      return;
-    }
-    let cancelled = false;
-    source
-      .listApplications()
-      .then((list) => {
-        if (cancelled) return;
-        setApps(list);
-        setAppsError(null);
-      })
-      .catch((error: unknown) => !cancelled && setAppsError(error));
-    return () => {
-      cancelled = true;
-    };
-  }, [source, tokenOk]);
+  const serverState: StepState = connection.level === 'checking' ? 'checking' : serverOk ? 'ok' : 'fail';
+  const authState: StepState = !serverOk ? 'idle' : signedIn ? 'ok' : connection.level === 'login' && connection.tokenPresent ? 'warn' : 'idle';
+  const startState: StepState = signedIn ? 'ok' : 'idle';
 
   return (
     <div className="page connect">
       <PageTitle title={t('connectTitle')} sub={t('connectSub')} />
 
-      <ol className="checklist">
-        <li className={`card check-item ${connection.level === 'checking' ? '' : backendOk ? 'check-ok' : 'check-fail'}`}>
-          <div className="check-head">
-            <span className="check-mark" aria-hidden>{connection.level === 'checking' ? '…' : backendOk ? '✓' : '✕'}</span>
-            <strong>{t('backend')}</strong>
-            <span className="check-state">
-              {connection.level === 'checking' && t('connChecking')}
-              {connection.level === 'down' && t('notConnected')}
-              {backendOk && t('responds')}
-            </span>
-            <button type="button" className="btn btn-small" onClick={onRecheck}>{t('recheck')}</button>
-          </div>
+      <ol className="steps">
+        <StepCard n={1} state={serverState} title={t('stepServer')} status={connection.level === 'checking' ? t('connChecking') : serverOk ? t('serverResponds') : t('serverDown')}>
+          <p className="step-note">
+            {t('serverAddress')} <code>{base}</code>
+            {local ? ` · ${t('serverLocalNote')}` : ` · ${t('serverRemoteNote')}`}
+          </p>
           {connection.level === 'down' && (
-            <p className="check-help">
-              {lang === 'ja'
-                ? 'GET /healthz が応答しません。backend-v2 を起動し、アドレスが違う場合は '
-                : 'GET /healthz 가 응답하지 않습니다. backend-v2를 실행하고, 주소가 다르면 '}
-              <code>frontend/.env.local</code> <code>VITE_BACKEND_URL</code>
-              {lang === 'ja' ? ' を変更して開発サーバーを再起動してください。' : ' 을 바꾼 뒤 개발 서버를 다시 시작하세요.'} <span className="muted">({connection.detail})</span>
-            </p>
-          )}
-        </li>
-
-        <li className={`card check-item ${!backendOk ? 'check-idle' : tokenOk ? 'check-ok' : 'check-warn'}`}>
-          <div className="check-head">
-            <span className="check-mark" aria-hidden>{!backendOk ? '–' : tokenOk ? '✓' : '!'}</span>
-            <strong>{t('token')}</strong>
-            <span className="check-state">
-              {!backendOk && t('backendFirst')}
-              {backendOk && connection.level === 'login' && (connection.tokenPresent ? t('tokenInvalid') : t('loginNeeded'))}
-              {tokenOk && `@${connection.user.login}`}
-            </span>
-          </div>
-          {backendOk && !tokenOk && (
-            <div className="check-body">
-              <p className="check-help">{t('loginHelp1', { url: '<backend>/auth/github' })}</p>
-              <p className="check-help">
-                {t('loginHelp2')}
-                {connection.level === 'login' && connection.tokenPresent && <span className="muted"> ({connection.detail})</span>}
-              </p>
-              <TokenBar onChange={onTokenChange} />
-            </div>
-          )}
-          {tokenOk && (
-            <div className="check-body">
-              <TokenBar onChange={onTokenChange} />
+            <div className="step-body">
+              <p className="step-help">{local ? t('serverDownHelpLocal') : t('serverDownHelpRemote')}</p>
+              <p className="small muted mono">{connection.detail}</p>
               <div>
-                <a className="btn btn-primary" href={hrefFor(APPLICATIONS_PATH)}>{t('openApps')}</a>
+                <button type="button" className="btn btn-small" onClick={onRecheck}>
+                  {t('recheck')}
+                </button>
               </div>
             </div>
           )}
-        </li>
+        </StepCard>
 
-        <li className={`card check-item ${tokenOk ? (apps && apps.length ? 'check-ok' : 'check-warn') : 'check-idle'}`}>
-          <div className="check-head">
-            <span className="check-mark" aria-hidden>{tokenOk ? (apps && apps.length ? '✓' : '!') : '–'}</span>
-            <strong>{t('pickApp')}</strong>
-            <span className="check-state">{!tokenOk ? t('tokenFirst') : apps === null ? t('loading') : `${apps.length}`}</span>
-          </div>
-          {tokenOk && appsError !== null && <ErrorNotice error={appsError} />}
-          {tokenOk && apps && apps.length === 0 && <Empty>{t('noApps')}</Empty>}
-          {tokenOk && apps && apps.length > 0 && (
-            <ul className="app-list">
-              {apps.map((view) => (
-                <li key={view.application.id}>
-                  <a className="app-link" href={hrefFor(applicationPath(view.application.id))}>
-                    <strong>{view.application.name}</strong>
-                    <span className="small muted">{view.application.publicHost ?? view.application.slug}</span>
-                    <span className="small muted">
-                      {t('agent')} {view.agents.length}
-                    </span>
-                  </a>
-                </li>
-              ))}
-            </ul>
+        <StepCard
+          n={2}
+          state={authState}
+          title={t('stepGithubAuth')}
+          status={!serverOk ? t('serverFirst') : signedIn ? `@${connection.user.login}` : connection.level === 'login' && connection.tokenPresent ? t('tokenInvalid') : t('loginNeeded')}
+        >
+          {serverOk && !signedIn && <SignIn source={source} connection={connection} base={base} onTokenChange={onTokenChange} />}
+          {signedIn && <p className="step-help">{t('signedInNote')}</p>}
+        </StepCard>
+
+        <StepCard n={3} state={startState} title={t('stepStart')} status={signedIn ? t('ready') : t('authFirst')}>
+          {signedIn && (
+            <div className="row">
+              <a className="btn btn-primary" href={hrefFor(APPLICATIONS_PATH)}>
+                {t('homeCtaApps')}
+              </a>
+              <a className="btn" href={hrefFor(REGISTER_PATH)}>
+                {t('registerApp')}
+              </a>
+            </div>
           )}
-        </li>
+        </StepCard>
       </ol>
 
       <section className="card card-collapsed">
@@ -125,6 +84,124 @@ export function Connect({ source, connection, onTokenChange, onRecheck }: { sour
       </section>
     </div>
   );
+}
+
+const STATE_TONE: Record<StepState, Tone> = { idle: 'muted', checking: 'muted', ok: 'success', warn: 'warning', fail: 'danger' };
+
+function StepCard({ n, state, title, status, children }: { n: number; state: StepState; title: string; status: string; children?: ReactNode }) {
+  const tone = STATE_TONE[state];
+  const Icon = state === 'ok' ? Check : state === 'fail' ? X : state === 'warn' ? Minus : null;
+  return (
+    <li className={`card step-card step-card-${state}`}>
+      <div className="step-card-head">
+        <span className={`step-card-mark tone-${tone}`} aria-hidden>
+          {Icon ? <Icon size={14} /> : <span className="num">{n}</span>}
+        </span>
+        <h2 className="step-card-title">{title}</h2>
+        <span className={`step-card-status tone-${tone}`}>{status}</span>
+      </div>
+      {children}
+    </li>
+  );
+}
+
+/** GitHub 로그인 시작 + 콜백 JSON 붙여넣기. 저장 즉시 /users/me 로 확인하고, 되면 앱 목록으로 간다. */
+function SignIn({ source, connection, base, onTokenChange }: { source: DataSource; connection: ConnectionState; base: string; onTokenChange: () => void }) {
+  const { t } = useLang();
+  const [draft, setDraft] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const startUrl = oauthStartUrl(base);
+
+  const submit = async () => {
+    const parsed = parsePastedToken(draft);
+    if (!parsed.ok) {
+      setError(parsed.reason === 'invalid_json' ? t('tokenInvalidJson') : parsed.reason === 'no_access_token' ? t('tokenNoAccess') : t('tokenEmpty'));
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    writeTokens({ accessToken: parsed.accessToken, refreshToken: parsed.refreshToken });
+    try {
+      await source.me();
+      setDraft('');
+      onTokenChange();
+      navigate(APPLICATIONS_PATH);
+    } catch (e) {
+      // 확인에 실패한 토큰은 두지 않는다. 상단 상태도 "로그인 필요"로 돌아간다.
+      writeToken(null);
+      onTokenChange();
+      setError(describeAuthError(e, t));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="step-body">
+      {connection.level === 'login' && connection.tokenPresent && <p className="step-help tone-warning">{t('savedTokenInvalid')}</p>}
+      <ol className="signin-steps">
+        <li>
+          <a className="btn btn-primary" href={startUrl} target="_blank" rel="noopener noreferrer">
+            {t('startGithubLogin')} <ExternalLink size={14} aria-hidden />
+          </a>
+          <span className="step-help">{t('signinHelp1')}</span>
+        </li>
+        <li>
+          <span className="step-help">{t('signinHelp2')}</span>
+        </li>
+        <li>
+          <form
+            className="signin-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void submit();
+            }}
+          >
+            <label className="field-label" htmlFor="callback-json">
+              {t('pasteLabel')}
+            </label>
+            <textarea
+              id="callback-json"
+              className="input signin-input"
+              rows={3}
+              placeholder='{"access_token": "...", "refresh_token": "..."}'
+              value={draft}
+              onChange={(event) => {
+                setDraft(event.target.value);
+                setError(null);
+              }}
+              autoComplete="off"
+              spellCheck={false}
+              aria-invalid={error ? true : undefined}
+              aria-describedby={error ? 'callback-error' : undefined}
+            />
+            <div className="row">
+              <button type="submit" className="btn btn-primary" disabled={busy || !draft.trim()}>
+                {busy ? t('verifying') : t('saveAndVerify')}
+              </button>
+              <span className="small muted">{t('pasteNote')}</span>
+            </div>
+            {error && (
+              <p id="callback-error" className="small tone-danger" role="alert">
+                {error}
+              </p>
+            )}
+          </form>
+        </li>
+      </ol>
+    </div>
+  );
+}
+
+function describeAuthError(error: unknown, t: ReturnType<typeof useLang>['t']): string {
+  if (error instanceof ApiError) {
+    if (error.status === 403) return t('authForbidden');
+    if (error.status === 401) return t('authExpired');
+    if (error.status === 0) return t('backendUnreachable');
+    return `${t('requestFailed')} (${error.status})`;
+  }
+  return error instanceof Error ? error.message : String(error);
 }
 
 function GoTo() {
@@ -141,12 +218,14 @@ function GoTo() {
         navigate(kind === 'application' ? applicationPath(id) : deploymentPath(id));
       }}
     >
-      <select className="input" value={kind} onChange={(e) => setKind(e.target.value as 'application' | 'deployment')}>
+      <select className="input" value={kind} onChange={(e) => setKind(e.target.value as 'application' | 'deployment')} aria-label={t('gotoKind')}>
         <option value="application">application id</option>
         <option value="deployment">deployment id</option>
       </select>
-      <input className="input mono" placeholder="id" value={value} onChange={(e) => setValue(e.target.value)} spellCheck={false} />
-      <button type="submit" className="btn btn-small">{t('goto')}</button>
+      <input className="input mono" placeholder="id" value={value} onChange={(e) => setValue(e.target.value)} spellCheck={false} aria-label="id" />
+      <button type="submit" className="btn btn-small">
+        {t('goto')}
+      </button>
     </form>
   );
 }
