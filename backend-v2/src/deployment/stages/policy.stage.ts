@@ -120,6 +120,20 @@ export class PolicyStage implements StageRunner {
       };
     }
     const repoRoot = this.config.get('backend.repoRoot', { infer: true });
+    const sourcePath =
+      this.config.get('backend.parityTestMode', { infer: true }) === 'registry'
+        ? join(paths.test, 'parity', 'source')
+        : application.sourcePath;
+    if (
+      this.config.get('backend.parityTestMode', { infer: true }) === 'registry' &&
+      !existsSync(sourcePath)
+    ) {
+      return {
+        status: 'failed',
+        artifacts: {},
+        error: 'Tested source snapshot not found',
+      };
+    }
     const result = await this.runner.run({
       command: npmCommand(this.config),
       cwd: join(repoRoot, 'policy'),
@@ -129,7 +143,7 @@ export class PolicyStage implements StageRunner {
         'stage',
         '--',
         '--src',
-        application.sourcePath,
+        sourcePath,
         '--test',
         testResult,
         '--policy',
@@ -140,6 +154,8 @@ export class PolicyStage implements StageRunner {
         paths.decisionsLog,
         '--source-revision',
         deployment.sourceRevision,
+        '--classifier',
+        'heuristic',
         '--json',
         '--explain',
       ],

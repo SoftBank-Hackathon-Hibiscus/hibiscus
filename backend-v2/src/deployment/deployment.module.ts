@@ -8,6 +8,7 @@ import { CommandRunner } from '../infrastructure/command-runner.js';
 import { DeploymentWorker } from './deployment.worker.js';
 import { DeploymentArtifactService } from './deployment-artifact.service.js';
 import { TestStage } from './stages/test.stage.js';
+import { ParityTestStage } from './stages/parity-test.stage.js';
 import { PolicyStage } from './stages/policy.stage.js';
 import { SignStage } from './stages/sign.stage.js';
 import { DeployStage } from './stages/deploy.stage.js';
@@ -22,6 +23,7 @@ import { DeployStage } from './stages/deploy.stage.js';
     DeploymentArtifactService,
     CommandRunner,
     TestStage,
+    ParityTestStage,
     PolicyStage,
     SignStage,
     DeployStage,

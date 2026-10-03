@@ -165,7 +165,7 @@ describe('deploy stage (e2e)', () => {
       id: randomUUID(),
       applicationId,
       trigger: 'manual',
-      sourceRevision: '0123456789abcdef',
+      sourceRevision: '0123456789abcdef0123456789abcdef01234567',
       sourceRevisionVerified,
       imageDigest: digest,
       digestSource: 'registry',

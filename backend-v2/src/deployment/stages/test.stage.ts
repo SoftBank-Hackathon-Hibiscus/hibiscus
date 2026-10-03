@@ -1,4 +1,7 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import type { BackendConfig } from '../../config/configs/backend.config.js';
+import { ParityTestStage } from './parity-test.stage.js';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type {
@@ -11,7 +14,24 @@ import type {
 export class TestStage implements StageRunner {
   readonly name = 'test' as const;
 
+  constructor(
+    private readonly config: ConfigService<BackendConfig, true>,
+    private readonly parity: ParityTestStage,
+  ) {}
+
   async run(context: StageContext): Promise<StageOutcome> {
+    if (
+      this.config.get('backend.parityTestMode', { infer: true }) === 'registry'
+    ) {
+      if (context.deployment.executionMode !== 'cli') {
+        return {
+          status: 'failed',
+          artifacts: {},
+          error: 'Registry parity requires STAGE_MODE=cli',
+        };
+      }
+      return this.parity.run(context);
+    }
     const { application, deployment, paths } = context;
     const templatePath = resolve(
       process.cwd(),
