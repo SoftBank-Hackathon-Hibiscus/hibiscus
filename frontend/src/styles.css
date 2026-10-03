@@ -70,9 +70,14 @@ a:focus-visible,
 button:focus-visible,
 input:focus-visible,
 select:focus-visible,
+textarea:focus-visible,
 summary:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+.input:focus-visible {
+  outline-offset: 0;
+  border-color: var(--accent);
 }
 h1,
 h2,

@@ -74,7 +74,8 @@ export function DeploymentDetail({ id, source }: { id: string; source: DataSourc
 
   const summary = useMemo(() => (view ? summarizeDeployment(view, lang) : null), [view, lang]);
   const appName = app?.application.name ?? view?.deployment.applicationId ?? '';
-  usePageTitle(view ? `${appName} v${view.deployment.version}` : null);
+  // 앱 이름이 아직 없으면 id 대신 버전만 쓴다 (탭 제목에 긴 id 가 잠깐 보이지 않게)
+  usePageTitle(view ? `${app ? `${app.application.name} ` : ''}v${view.deployment.version}` : null);
 
   if (poll.loading && !view) return <PageSkeleton cards={4} />;
   if (!view || !summary) return <PageError error={poll.error ?? new Error('no data')} />;
@@ -102,7 +103,7 @@ export function DeploymentDetail({ id, source }: { id: string; source: DataSourc
             {progressing && (
               <span className="live">
                 {t('autoRefresh', { s: 2 })}
-                {poll.lastUpdated ? ` · ${t('lastChecked', { when: relTime(new Date(poll.lastUpdated).toISOString()) })}` : ''}
+                {poll.lastUpdated ? ` · ${t('lastChecked', { when: relTime(new Date(poll.lastUpdated).toISOString(), lang) })}` : ''}
               </span>
             )}
           </div>

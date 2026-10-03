@@ -16,7 +16,7 @@ const POLL_MS = 15000;
  * 현재 트래픽 위치·최근 배포는 앱 상세에서 정확히 보여주므로 여기서 앱마다 추가 호출로 집계하지 않는다.
  */
 export function ApplicationList({ source }: { source: DataSource }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   usePageTitle(t('appsTitle'));
   const poll = usePolling<ApplicationView[]>(() => source.listApplications(), POLL_MS, [source]);
   const apps = poll.data;
@@ -30,7 +30,7 @@ export function ApplicationList({ source }: { source: DataSource }) {
           <div className="title-badges">
             <span className="live">
               {t('autoRefresh', { s: POLL_MS / 1000 })}
-              {poll.lastUpdated ? ` · ${t('lastChecked', { when: relTime(new Date(poll.lastUpdated).toISOString()) })}` : ''}
+              {poll.lastUpdated ? ` · ${t('lastChecked', { when: relTime(new Date(poll.lastUpdated).toISOString(), lang) })}` : ''}
             </span>
             <a className="btn btn-primary btn-small" href={hrefFor(REGISTER_PATH)}>
               <Plus size={14} aria-hidden /> {t('registerApp')}

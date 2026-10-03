@@ -148,7 +148,7 @@ export function ApplicationDetail({ id, source }: { id: string; source: DataSour
             {a.publicHost && <span className="mono muted small">{a.publicHost}</span>}
             <span className="live">
               {t('autoRefresh', { s: POLL_MS / 1000 })}
-              {poll.lastUpdated ? ` · ${t('lastChecked', { when: relTime(new Date(poll.lastUpdated).toISOString()) })}` : ''}
+              {poll.lastUpdated ? ` · ${t('lastChecked', { when: relTime(new Date(poll.lastUpdated).toISOString(), lang) })}` : ''}
             </span>
             <button type="button" className="btn btn-primary btn-small" onClick={() => setDeployOpen(true)}>
               <Plus size={14} aria-hidden /> {t('newDeployment')}
@@ -346,7 +346,7 @@ function TrafficCard({ snap, degraded, lang }: { snap: Snapshot; degraded: boole
 }
 
 function TargetsCard({ snap }: { snap: Snapshot }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const route = snap.route;
   const kinds: TargetKind[] = ['onprem', 'cloud_run'];
   const rows = kinds.map((kind) => {
@@ -377,7 +377,7 @@ function TargetsCard({ snap }: { snap: Snapshot }) {
                   {!primary
                     ? t('notRegisteredNote', { target: targetLabel(kind) })
                     : primary.health
-                      ? `${t('lastObserved')} ${relTime(primary.health.observedAt)}${primary.health.consecutiveFailures > 0 ? ` · ${t('consecutiveFail', { n: primary.health.consecutiveFailures })}` : ''}`
+                      ? `${t('lastObserved')} ${relTime(primary.health.observedAt, lang)}${primary.health.consecutiveFailures > 0 ? ` · ${t('consecutiveFail', { n: primary.health.consecutiveFailures })}` : ''}`
                       : t('noHealth')}
                 </div>
               </div>
@@ -391,7 +391,7 @@ function TargetsCard({ snap }: { snap: Snapshot }) {
 }
 
 function AgentsCard({ rows, deployments, activeDeploymentId }: { rows: AgentRow[]; deployments: Deployment[]; activeDeploymentId: string | null }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   return (
     <section className="card">
       <h2 className="card-title">{t('agentCard')}</h2>
@@ -417,7 +417,7 @@ function AgentsCard({ rows, deployments, activeDeploymentId }: { rows: AgentRow[
               <dl className="fields-v">
                 <div className="field-v">
                   <dt>{t('lastSeen')}</dt>
-                  <dd>{status?.last_seen_at ? `${relTime(status.last_seen_at)} (${fmtTime(status.last_seen_at)})` : agent.lastSeenAt ? relTime(agent.lastSeenAt) : t('none')}</dd>
+                  <dd>{status?.last_seen_at ? `${relTime(status.last_seen_at, lang)} (${fmtTime(status.last_seen_at)})` : agent.lastSeenAt ? relTime(agent.lastSeenAt, lang) : t('none')}</dd>
                 </div>
                 <div className="field-v">
                   <dt>{t('serving')}</dt>

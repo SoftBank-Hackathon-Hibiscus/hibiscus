@@ -13,26 +13,31 @@ export function fmtTime(iso: string | null | undefined): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
-export function relTime(iso: string | null | undefined, now = Date.now()): string {
+type Lang = 'ko' | 'ja';
+
+/** "방금 / n초 전 / n분 전 …". 선택한 언어로 쓴다. */
+export function relTime(iso: string | null | undefined, lang: Lang = 'ko', now = Date.now()): string {
   if (!iso) return '—';
   const t = Date.parse(iso);
   if (Number.isNaN(t)) return iso;
   const diff = Math.round((now - t) / 1000);
-  if (Math.abs(diff) < 5) return '방금';
-  if (diff < 60) return `${diff}초 전`;
-  if (diff < 3600) return `${Math.floor(diff / 60)}분 전`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}시간 전`;
-  return `${Math.floor(diff / 86400)}일 전`;
+  const ja = lang === 'ja';
+  if (Math.abs(diff) < 5) return ja ? 'たった今' : '방금';
+  if (diff < 60) return ja ? `${diff}秒前` : `${diff}초 전`;
+  if (diff < 3600) return ja ? `${Math.floor(diff / 60)}分前` : `${Math.floor(diff / 60)}분 전`;
+  if (diff < 86400) return ja ? `${Math.floor(diff / 3600)}時間前` : `${Math.floor(diff / 3600)}시간 전`;
+  return ja ? `${Math.floor(diff / 86400)}日前` : `${Math.floor(diff / 86400)}일 전`;
 }
 
-export function durationBetween(start: string | null | undefined, end: string | null | undefined): string {
+export function durationBetween(start: string | null | undefined, end: string | null | undefined, lang: Lang = 'ko'): string {
   if (!start || !end) return '—';
   const ms = Date.parse(end) - Date.parse(start);
   if (!Number.isFinite(ms) || ms < 0) return '—';
   if (ms < 1000) return `${ms}ms`;
   const s = Math.round(ms / 1000);
-  if (s < 60) return `${s}초`;
-  return `${Math.floor(s / 60)}분 ${s % 60}초`;
+  const ja = lang === 'ja';
+  if (s < 60) return ja ? `${s}秒` : `${s}초`;
+  return ja ? `${Math.floor(s / 60)}分 ${s % 60}秒` : `${Math.floor(s / 60)}분 ${s % 60}초`;
 }
 
 export function targetLabel(kind: string | null | undefined): string {

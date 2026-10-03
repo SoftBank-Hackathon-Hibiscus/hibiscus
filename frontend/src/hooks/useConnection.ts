@@ -24,13 +24,13 @@ export function useConnection(source: DataSource, tokenVersion: number, interval
       try {
         // 다른 서버가 8080 을 쓰고 있어도 초록으로 보이지 않게 body 까지 확인한다
         const health = await source.healthz();
-        if (!health || health.ok !== true) throw new Error('GET /healthz 응답이 backend-v2 형식({ ok: true })이 아님');
+        if (!health || health.ok !== true) throw new Error('GET /healthz did not return the backend-v2 shape ({ ok: true })');
       } catch (error) {
         if (!cancelled) setState({ level: 'down', detail: error instanceof Error ? error.message : String(error) });
         return;
       }
       if (!readToken()) {
-        if (!cancelled) setState({ level: 'login', detail: '토큰이 없음', tokenPresent: false });
+        if (!cancelled) setState({ level: 'login', detail: 'no token', tokenPresent: false });
         return;
       }
       try {
@@ -38,8 +38,8 @@ export function useConnection(source: DataSource, tokenVersion: number, interval
         if (!cancelled) setState({ level: 'ok', user });
       } catch (error) {
         if (cancelled) return;
-        if (error instanceof ApiError && error.status === 401) setState({ level: 'login', detail: '토큰이 만료되었거나 유효하지 않음', tokenPresent: true });
-        else if (error instanceof ApiError && error.status === 403) setState({ level: 'login', detail: '이 GitHub 계정은 허용 목록에 없음 (403)', tokenPresent: true });
+        if (error instanceof ApiError && error.status === 401) setState({ level: 'login', detail: 'token expired or invalid (401)', tokenPresent: true });
+        else if (error instanceof ApiError && error.status === 403) setState({ level: 'login', detail: 'GitHub account is not in the allow list (403)', tokenPresent: true });
         else setState({ level: 'down', detail: error instanceof Error ? error.message : String(error) });
       }
     };

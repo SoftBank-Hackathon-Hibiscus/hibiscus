@@ -29,7 +29,7 @@ async function send(fetchImpl: FetchLike, method: 'GET' | 'POST', path: string, 
   try {
     return await fetchImpl(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   } catch (error) {
-    throw new ApiError(0, `백엔드에 연결할 수 없습니다 (${(error as Error).message})`);
+    throw new ApiError(0, `backend unreachable: ${(error as Error).message}`);
   }
 }
 
