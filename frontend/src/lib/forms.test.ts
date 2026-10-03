@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { EMPTY_REGISTRATION, friendlyBackendError, repoShortName, slugify, toCreateDeploymentInput, toGithubApplicationInput, validateDeployment, validateRegistration, type RegistrationDraft } from './forms';
+import { EMPTY_REGISTRATION, friendlyBackendError, registeredPath, repoShortName, slugify, isGithubSource, toCreateDeploymentInput, toGithubApplicationInput, validateDeployment, validateRegistration, type RegistrationDraft } from './forms';
+import { applicationPath, deploymentPath } from './router';
+import type { GithubApplicationCreated } from '../api/types';
 
 const valid: RegistrationDraft = {
   ...EMPTY_REGISTRATION,
@@ -106,5 +108,39 @@ describe('friendlyBackendError', () => {
     expect(friendlyBackendError('GitHub login is required')).toBe('beGithubReconnect');
     expect(friendlyBackendError('Cannot connect to GitHub')).toBe('beGithubUnavailable');
     expect(friendlyBackendError('something else')).toBeNull();
+  });
+});
+
+describe('registeredPath (등록 직후 이동)', () => {
+  const view = { application: { id: 'app-1' } } as unknown as GithubApplicationCreated;
+  it('initial_deployment 가 있으면 그 배포 상세로 간다', () => {
+    const created = { ...view, initial_deployment: { id: 'dep-1' } } as GithubApplicationCreated;
+    expect(registeredPath(created)).toBe(deploymentPath('dep-1'));
+  });
+  it('없으면 (#40 이전 backend) 앱 상세로 간다', () => {
+    expect(registeredPath(view)).toBe(applicationPath('app-1'));
+  });
+});
+
+describe('validateDeployment requireFullSha (GitHub 저장소 앱)', () => {
+  const full = '1f6947dce692de48ef4580b1a3f5366adf66f5ae';
+  it('40자리 소문자 16진수만 받는다', () => {
+    expect(validateDeployment({ sourceRevision: full, imageDigest: '' }, { requireFullSha: true })).toEqual({});
+    expect(validateDeployment({ sourceRevision: ` ${full} `, imageDigest: '' }, { requireFullSha: true })).toEqual({});
+    for (const bad of ['abcdef1', full.slice(0, 39), full.toUpperCase(), `${full}0`]) {
+      expect(validateDeployment({ sourceRevision: bad, imageDigest: '' }, { requireFullSha: true }).sourceRevision).toBe('errSourceRevisionFull');
+    }
+  });
+  it('기본(GitHub 이 아닌 앱)은 DTO 규칙 7–40자리 그대로', () => {
+    expect(validateDeployment({ sourceRevision: 'abcdef1', imageDigest: '' })).toEqual({});
+  });
+});
+
+describe('isGithubSource (parity-test.stage isGithubSource 와 같은 규칙)', () => {
+  it('backend 가 GitHub 등록 때 만드는 sourcePath 만 true', () => {
+    expect(isGithubSource('https://github.com/hibiscus-demo/guestbook.git')).toBe(true);
+    expect(isGithubSource('/srv/apps/guestbook')).toBe(false);
+    expect(isGithubSource('https://github.com/hibiscus-demo/guestbook')).toBe(false);
+    expect(isGithubSource('https://gitlab.com/a/b.git')).toBe(false);
   });
 });

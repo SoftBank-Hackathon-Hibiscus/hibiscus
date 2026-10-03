@@ -5,6 +5,7 @@ import { MockDataSource } from '../api/mock';
 import type { AgentStatusResponse, ApplicationAgentSummary, ApplicationView, Deployment, DeploymentStatus, PolicyResult, RouteSnapshot, RoutingTargetHealth, RoutingTargetView, TargetKind } from '../api/types';
 import { ErrorNotice, describeError } from '../components/ErrorNotice';
 import { NewDeploymentModal } from '../components/NewDeploymentModal';
+import { isGithubSource } from '../lib/forms';
 import { PageError } from '../components/PageError';
 import { Loader } from '../components/Loader';
 import { Crumbs, Empty, Hash, PageTitle, Pill, type Tone } from '../components/ui';
@@ -160,7 +161,7 @@ export function ApplicationDetail({ id, source }: { id: string; source: DataSour
           </div>
         }
       />
-      {deployOpen && <NewDeploymentModal source={source} applicationId={a.id} onClose={() => setDeployOpen(false)} />}
+      {deployOpen && <NewDeploymentModal source={source} applicationId={a.id} requireFullSha={isGithubSource(a.sourcePath)} onClose={() => setDeployOpen(false)} />}
       {(mockCaption || (source instanceof MockDataSource && source.actions().length > 0)) && (
         <div className="mock-row">
           {mockCaption && (

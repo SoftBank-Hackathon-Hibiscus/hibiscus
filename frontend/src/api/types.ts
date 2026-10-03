@@ -19,7 +19,8 @@ export type StageStatus =
   | 'skipped';
 export type ExecutionMode = 'skeleton' | 'cli';
 export type DigestSource = 'registry' | 'placeholder';
-export type Trigger = 'manual' | 'webhook';
+/** schema.ts deployments.trigger. registration = POST /github/applications 가 만드는 최초 배포 */
+export type Trigger = 'manual' | 'webhook' | 'registration';
 export type TargetKind = 'onprem' | 'cloud_run';
 export type HealthStatus = 'healthy' | 'unhealthy' | 'unknown';
 export type FailureKind = 'application' | 'network';
@@ -311,8 +312,12 @@ export interface GithubApplicationLink {
   createdAt: string;
 }
 
-/** POST /github/applications 응답: ApplicationView + github 링크 */
-export type GithubApplicationCreated = ApplicationView & { github: GithubApplicationLink };
+/**
+ * POST /github/applications 응답: ApplicationView + github 링크 + 최초 배포.
+ * backend 는 같은 트랜잭션에서 선택한 브랜치의 최신 커밋(40자리 SHA)으로 trigger='registration' 배포를 만든다.
+ * auto_deploy 와 상관없이 항상 만든다. #40 이전 backend 는 이 필드가 없으므로 optional 로 둔다.
+ */
+export type GithubApplicationCreated = ApplicationView & { github: GithubApplicationLink; initial_deployment?: Deployment };
 
 /** POST /applications/:id/deployments 요청 본문 = CreateDeploymentDto (deployment.dto.ts) */
 export interface CreateDeploymentInput {

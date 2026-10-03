@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError } from './client';
-import { MockDataSource } from './mock';
+import { MockDataSource, mockBranchHead } from './mock';
 import { buildScenario } from '../mocks';
 import { APP_ID } from '../mocks/common';
 import { MOCK_INSTALLATION_ID, MOCK_REPO_CONTACTS_ID, MOCK_REPO_GUESTBOOK_ID } from '../mocks/github';
@@ -41,6 +41,29 @@ describe('mock GitHub 조회', () => {
 });
 
 describe('mock 애플리케이션 등록 (POST /github/applications 흉내)', () => {
+  it('backend 처럼 선택한 브랜치 최신 커밋(40자리)으로 registration 최초 배포를 만든다', async () => {
+    const s = source();
+    const created = await s.createGithubApplication(input);
+    const initial = created.initial_deployment!;
+    expect(initial).toMatchObject({ applicationId: created.application.id, version: 1, trigger: 'registration', status: 'queued', sourceRevision: mockBranchHead('hibiscus-demo/contacts', 'main'), sourceRevisionVerified: false, digestSource: 'placeholder', decision: null, deploymentPerformed: false });
+    expect(initial.sourceRevision).toMatch(/^[0-9a-f]{40}$/);
+    const view = await s.getDeployment(initial.id);
+    expect(view.deployment.trigger).toBe('registration');
+    // 가짜 파이프라인 자동 진행 없음
+    expect(view.stages).toEqual([]);
+    expect(view.deployment.status).toBe('queued');
+  });
+  it('auto_deploy 를 꺼도 최초 배포는 만든다 (자동 배포는 이후 push 만 제어)', async () => {
+    const s = source();
+    const created = await s.createGithubApplication({ ...input, auto_deploy: false, branch: 'release/1.0' });
+    expect(created.github.autoDeploy).toBe(false);
+    expect(created.initial_deployment).toMatchObject({ trigger: 'registration', sourceRevision: mockBranchHead('hibiscus-demo/contacts', 'release/1.0') });
+  });
+  it('실패한 등록은 앱도 최초 배포도 만들지 않는다', async () => {
+    const s = source();
+    await expect(s.createGithubApplication({ ...input, branch: 'nope' })).rejects.toMatchObject({ status: 404 });
+    expect((await s.listApplications()).map((v) => v.application.id)).toEqual([APP_ID]);
+  });
   it('등록하면 목록·상세에 보이고 route 는 아직 없다(404), target 은 비어 있다', async () => {
     const s = source();
     const created = await s.createGithubApplication(input);
@@ -56,7 +79,7 @@ describe('mock 애플리케이션 등록 (POST /github/applications 흉내)', ()
     const list = await s.listApplications();
     expect(list.map((v) => v.application.id)).toEqual([APP_ID, created.application.id]);
     expect((await s.getApplication(created.application.id)).application.name).toBe('Contacts');
-    expect(await s.listDeployments(created.application.id)).toEqual([]);
+    expect((await s.listDeployments(created.application.id)).map((d) => d.id)).toEqual([created.initial_deployment!.id]);
     expect(await s.getTargets(created.application.id)).toEqual([]);
     await expect(s.getRouting(created.application.id)).rejects.toMatchObject({ status: 404, message: 'Application route not found' });
   });
