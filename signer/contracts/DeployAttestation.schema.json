@@ -1,0 +1,132 @@
+{
+  "$id": "DeployAttestation.schema.json",
+  "title": "DeployAttestation",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]{1,64}$",
+      "description": "파이프라인 실행 id (plan.run_id 그대로)"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "컨테이너 이미지 지문. 'sha256:' + 소문자 hex 64자 (plan.digest 그대로)"
+    },
+    "source_revision": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{7,40}$",
+      "description": "커밋 SHA. plan 에 있을 때만"
+    },
+    "decision": {
+      "type": "string",
+      "enum": [
+        "allow",
+        "needs_approval"
+      ],
+      "description": "서명한 정책 결정. block 은 서명 안 해서 없음"
+    },
+    "targets": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "failover_allowed": {
+      "type": "boolean"
+    },
+    "plan_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "plan.plan_hash 그대로. 접두어 없이 소문자 hex 64자"
+    },
+    "plan_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "plan.json 전체(키 정렬 JSON) 해시"
+    },
+    "matched_rules": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "정책에서 걸린 규칙 id"
+    },
+    "requester": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]{1,64}$",
+      "description": "GitHub 아이디 등 사람 id"
+    },
+    "approver": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]{1,64}$",
+      "description": "승인자. allow 면 auto"
+    },
+    "approved_at": {
+      "description": "사람 승인일 때 승인 시각",
+      "type": "string"
+    },
+    "approval_sha256": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "none"
+        },
+        {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      ],
+      "description": "승인 기록(키 정렬 JSON) 해시. 자동 승인이면 none"
+    },
+    "audit_head": {
+      "description": "감사 로그를 켰을 때 서명 직전 체인 끝",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "signature_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "signed_at": {
+      "type": "string"
+    },
+    "signer": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "const": "hibiscus-signer"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "run_id",
+    "digest",
+    "decision",
+    "targets",
+    "failover_allowed",
+    "plan_hash",
+    "plan_sha256",
+    "matched_rules",
+    "requester",
+    "approver",
+    "approval_sha256",
+    "signature_ref",
+    "signed_at",
+    "signer"
+  ],
+  "additionalProperties": false,
+  "description": "배포 증명서 predicate. in-toto Statement 의 predicate 로 이미지에 붙음"
+}

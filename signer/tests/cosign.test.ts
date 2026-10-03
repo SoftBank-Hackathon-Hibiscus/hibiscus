@@ -50,6 +50,27 @@ describe("CosignSigner", () => {
     expect(readFileSync(argsFile, "utf8").trim().split("\n").slice(0, 4)).toEqual(["sign", "--yes", "--key", KMS]);
   });
 
+  it("attest: cosign attest --yes --key <키> [Rekor 끄기] --type <종류> --predicate <임시 파일> -- <이미지>", async () => {
+    const dir = tmp();
+    const key = join(dir, "cosign.key");
+    writeFileSync(key, "dummy");
+    const { bin, argsFile } = fakeCosign(dir);
+    await new CosignSigner(key, bin, { noTlog: true }).attest(`${REPO}@${DIGEST}`, "t", { run_id: "r-1" });
+    const args = readFileSync(argsFile, "utf8").trim().split("\n");
+    expect(args.slice(0, 8)).toEqual(["attest", "--yes", "--key", key, "--use-signing-config=false", "--tlog-upload=false", "--type", "t"]);
+    expect(args[8]).toBe("--predicate");
+    expect(args.slice(10)).toEqual(["--", `${REPO}@${DIGEST}`]);
+    expect(existsSync(args[9]!)).toBe(false); // 임시 predicate 파일은 지움
+  });
+
+  it("attest: cosign 이 실패하면 ATTEST_FAILED", async () => {
+    const dir = tmp();
+    const key = join(dir, "cosign.key");
+    writeFileSync(key, "dummy");
+    const { bin } = fakeCosign(dir, { code: 1 });
+    await expect(new CosignSigner(key, bin).attest(`${REPO}@${DIGEST}`, "t", {})).rejects.toMatchObject({ code: "ATTEST_FAILED" });
+  });
+
   it("키 파일이 없으면 cosign 을 부르지 않고 KEY_MISSING", async () => {
     const dir = tmp();
     const { bin } = fakeCosign(dir);
@@ -156,6 +177,28 @@ describe("CosignVerifier", () => {
     const dir2 = tmp();
     const denied = fakeCosign(dir2, { code: 1, stderr: "Error: GET https://x/v2/: DENIED: Permission denied" });
     await expect(new CosignVerifier(pubKey(dir2), denied.bin).signatures(`${REPO}@${DIGEST}`)).rejects.toMatchObject({ code: "REGISTRY_UNAVAILABLE" });
+  });
+
+  it("attestations: --type·--policy 를 넘기고 DSSE 봉투의 payload 를 in-toto Statement 로 풂", async () => {
+    const dir = tmp();
+    const statement = { _type: "https://in-toto.io/Statement/v0.1", subject: [], predicateType: "t", predicate: { run_id: "r-1" } };
+    const envelope = { payloadType: "application/vnd.in-toto+json", payload: Buffer.from(JSON.stringify(statement)).toString("base64"), signatures: [] };
+    const { bin, argsFile } = fakeCosign(dir, { stdout: JSON.stringify(envelope) });
+    const pub = pubKey(dir);
+    expect(await new CosignVerifier(pub, bin, { noTlog: true }).attestations(`${REPO}@${DIGEST}`, "t", "deploy.rego")).toEqual([statement]);
+    expect(readFileSync(argsFile, "utf8").trim().split("\n")).toEqual([
+      "verify-attestation", "--key", pub, "--insecure-ignore-tlog=true", "--type", "t", "--policy", "deploy.rego", "--", `${REPO}@${DIGEST}`,
+    ]);
+  });
+
+  it.each([
+    ["Error: 1 validation errors occurred", "POLICY_DENIED"],
+    ["error during command execution: no matching attestations: ", "SIGNATURE_INVALID"],
+    ["error during command execution: none of the attestations matched the predicate type: t, found: x", "SIGNATURE_INVALID"],
+  ])("attestations: cosign stderr '%s' → %s", async (stderr, code) => {
+    const dir = tmp();
+    const { bin } = fakeCosign(dir, { code: 1, stderr });
+    await expect(new CosignVerifier(pubKey(dir), bin).attestations(`${REPO}@${DIGEST}`, "t")).rejects.toMatchObject({ code });
   });
 
   it("공개키 자리에 KMS 키 주소를 주면 파일 확인 없이 그대로 넘김", async () => {

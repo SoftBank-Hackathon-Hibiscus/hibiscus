@@ -2,6 +2,7 @@
 import { fileURLToPath } from "node:url";
 import { logAnnotations, NO_APPROVAL, signAnnotations } from "./annotations.js";
 import { loadApproval } from "./approval.js";
+import { DEPLOY_PREDICATE_TYPE, findDeployStatement } from "./attestation.js";
 import { checkAuditChain, findSignedLine, GENESIS, readAuditFile, type AuditBreak } from "./audit.js";
 import { imageRefOf, type ImageVerifier } from "./cosign.js";
 import { canonicalize, parseWith, readJson, sha256Hex, SignerError } from "./io.js";
@@ -10,7 +11,16 @@ import { AUTO_APPROVER, SignResultSchema, type AuditLine, type SignResult } from
 
 export const DEFAULT_PUBLIC_KEY = fileURLToPath(new URL("../keys/cosign.pub", import.meta.url));
 
-export type VerifyReason = "dry_run" | "ref_invalid" | "repo_mismatch" | "plan_mismatch" | "approval_mismatch" | "audit_mismatch" | "signature_invalid";
+export type VerifyReason =
+  | "dry_run"
+  | "ref_invalid"
+  | "repo_mismatch"
+  | "plan_mismatch"
+  | "approval_mismatch"
+  | "audit_mismatch"
+  | "signature_invalid"
+  | "attestation_invalid"
+  | "policy_denied";
 
 export interface VerifyOptions {
   resultPath: string;
@@ -24,6 +34,8 @@ export interface VerifyOptions {
   auditPath?: string;
   /** 있으면 이 승인 기록으로 서명했는지까지 확인 (사람 승인일 때) */
   approvalPath?: string;
+  /** 있으면 배포 증명서(in-toto)도 확인. policyPath 를 주면 Rego 정책까지 */
+  attestation?: { policyPath?: string };
 }
 
 export type VerifyOutcome =
@@ -84,6 +96,21 @@ export async function runVerify(o: VerifyOptions): Promise<VerifyOutcome> {
   } catch (e) {
     if (e instanceof SignerError && e.code === "SIGNATURE_INVALID") return fail("signature_invalid", e.message);
     throw e;
+  }
+
+  // 배포 증명서: 서명된 Statement 가 이 sign_result 와 같고, 정책(Rego)도 통과하는지
+  if (o.attestation !== undefined) {
+    if (!o.verifier.attestations) throw new SignerError("ARG_INVALID", "이 확인기는 배포 증명서를 확인할 수 없음");
+    let statements: unknown[];
+    try {
+      statements = await o.verifier.attestations(imageRef, DEPLOY_PREDICATE_TYPE, o.attestation.policyPath);
+    } catch (e) {
+      if (e instanceof SignerError && e.code === "POLICY_DENIED") return fail("policy_denied", e.message);
+      if (e instanceof SignerError && e.code === "SIGNATURE_INVALID") return fail("attestation_invalid", e.message);
+      throw e;
+    }
+    const found = findDeployStatement(statements, result);
+    if (!found.ok) return fail("attestation_invalid", found.detail);
   }
   return { code: 0, result, imageRef, annotations };
 }

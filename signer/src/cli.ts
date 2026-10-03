@@ -6,6 +6,7 @@ import { CosignSigner, CosignVerifier, DryRunSigner, isKmsKey } from "./cosign.j
 import { SignerError, writeJson } from "./io.js";
 import { DEFAULT_PLAN_SCHEMA, loadPlan } from "./plan.js";
 import { checkPublicKeyPin, publicKeyFingerprint } from "./keys.js";
+import { DEFAULT_POLICY } from "./attestation.js";
 import { runSign } from "./sign.js";
 import { DEFAULT_PUBLIC_KEY, runAuditVerify, runVerify } from "./verify.js";
 
@@ -16,6 +17,7 @@ const USAGE = `사용법
                           [--out sign_result.json] [--log decisions.jsonl] [--audit <감사 로그>] [--approval-ttl <분>]
                           [--plan-schema <Plan.schema.json>]
   npx tsx src/cli.ts verify --result <sign_result.json> [--plan <plan.json>] [--approval <approval.json>] [--audit <감사 로그>] [--image-repo <저장소>]
+                            [--attestation [--policy <deploy.rego>]]
                             [--pub <cosign.pub>] [--no-tlog] [--plan-schema <Plan.schema.json>]
   npx tsx src/cli.ts audit --audit <감사 로그> [--images [--image-repo <저장소>] [--pub <cosign.pub>] [--no-tlog]]
   npx tsx src/cli.ts fingerprint [--pub <cosign.pub>] [--pubkey-sha256 <지문>]
@@ -26,6 +28,7 @@ const USAGE = `사용법
                 배포 쪽 verify 에도 --insecure-ignore-tlog=true 필요
   --dry-run     cosign 을 부르지 않고 signature_ref 를 dry-run:... 으로 채움 (연결 확인용, 실제 배포에 쓰지 말 것)
   --audit       서명 감사 로그(해시 체인) 경로. 없으면 SIGNER_AUDIT_LOG 환경변수, 둘 다 없으면 안 씀
+  --attest      배포 증명서(in-toto attestation)도 이미지에 붙임. 없으면 SIGNER_ATTEST=1
   --self-verify 서명 직후 공개키(--pub)로 바로 다시 확인. 실패하면 sign_result 안 남김. 없으면 SIGNER_SELF_VERIFY=1
   --pubkey-sha256 공개키 지문 고정. 확인에 쓰는 공개키가 이 지문과 다르면 멈춤. 없으면 SIGNER_PUBKEY_SHA256
   --approval-ttl 승인 유효시간(분). 승인한 지 이보다 오래되면 서명 안 함 (approval_expired). 없으면 SIGNER_APPROVAL_TTL_MIN 환경변수, 둘 다 없으면 시간은 안 봄
@@ -33,6 +36,7 @@ const USAGE = `사용법
   verify        sign_result.json 의 targets·approver 등이 서명된 값 그대로인지 cosign verify 로 확인
   --plan        plan 내용과 plan 파일 해시까지 확인
   --approval    이 승인 기록(누가, 언제 승인)으로 서명했는지까지 확인
+  --attestation 배포 증명서도 확인 (서명·내용이 sign_result 와 같은지 + Rego 정책). 정책 기본값은 policy/deploy.rego
   --pub         cosign 공개키 경로 또는 KMS 키 주소. 없으면 COSIGN_PUBLIC_KEY 환경변수, 그것도 없으면 keys/cosign.pub
   --no-tlog     Rekor 없이 서명한 이미지 확인 (cosign verify --insecure-ignore-tlog=true)
 
@@ -78,6 +82,9 @@ async function main(argv: string[]): Promise<number> {
       "approval-ttl": { type: "string" },
       "pubkey-sha256": { type: "string" },
       "self-verify": { type: "boolean", default: false },
+      attest: { type: "boolean", default: false },
+      attestation: { type: "boolean", default: false },
+      policy: { type: "string" },
     },
   });
   const planSchema = values["plan-schema"] ?? DEFAULT_PLAN_SCHEMA;
@@ -114,6 +121,7 @@ async function main(argv: string[]): Promise<number> {
     // 시험 실행은 실제 서명이 없어서 자기 확인을 안 함. 지문 확인은 서명 전에 끝냄
     const selfVerify = !dryRun && (values["self-verify"] === true || process.env.SIGNER_SELF_VERIFY === "1");
     const selfVerifier = selfVerify ? new CosignVerifier(trustedPub(), "cosign", { noTlog }) : undefined;
+    const attest = !dryRun && (values.attest === true || process.env.SIGNER_ATTEST === "1");
     const outcome = await runSign({
       planPath: required(values.plan, "plan"),
       requester: required(values.requester, "requester"),
@@ -126,6 +134,7 @@ async function main(argv: string[]): Promise<number> {
       ...(auditPath !== undefined ? { auditPath } : {}),
       ...(approvalTtlMs !== undefined ? { approvalTtlMs } : {}),
       ...(selfVerifier !== undefined ? { selfVerifier } : {}),
+      ...(attest ? { attest } : {}),
     });
     if (outcome.code === 0) {
       const r = outcome.result;
@@ -136,6 +145,7 @@ async function main(argv: string[]): Promise<number> {
       console.log(`  저장     : ${out}`);
       if (auditPath !== undefined) console.log(`  감사 로그: ${auditPath}`);
       if (selfVerifier !== undefined) console.log(`  자기 확인: 통과 (${pub})`);
+      if (attest) console.log(`  배포 증명서: 붙임 (in-toto)`);
     } else {
       console.error(`[signer] 서명 안 함 (${outcome.reason}): ${outcome.detail}`);
     }
@@ -150,6 +160,7 @@ async function main(argv: string[]): Promise<number> {
       ...(imageRepo !== undefined ? { imageRepo } : {}),
       ...(values.plan !== undefined ? { planPath: values.plan } : {}),
       ...(values.approval ? { approvalPath: values.approval } : {}),
+      ...(values.attestation === true ? { attestation: { policyPath: values.policy || DEFAULT_POLICY } } : {}),
       planSchemaPath: planSchema,
       ...(auditPath !== undefined ? { auditPath } : {}),
     });
@@ -159,6 +170,7 @@ async function main(argv: string[]): Promise<number> {
       console.log(`  targets  : ${r.targets.join(", ")}`);
       console.log(`  approver : ${r.approver}`);
       console.log(`  확인한 주석: ${Object.keys(outcome.annotations).join(", ")}`);
+      if (values.attestation === true) console.log(`  배포 증명서: 서명·내용 일치, 정책 통과 (${values.policy || DEFAULT_POLICY})`);
       if (!isKmsKey(pub)) console.log(`  공개키 지문: sha256:${publicKeyFingerprint(pub)}${pinnedPub !== undefined ? " (고정값과 같음)" : ""}`);
     } else {
       console.error(`[signer] 서명 확인 실패 (${outcome.reason}): ${outcome.detail}`);

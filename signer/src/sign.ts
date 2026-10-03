@@ -2,6 +2,7 @@
 // 거절이면 sign_result.json 을 안 남김 (이전 파일도 지움). plan 을 못 읽으면 run_id 를 몰라서 기록 없이 오류
 import { existsSync, rmSync } from "node:fs";
 import { NO_APPROVAL, signAnnotations } from "./annotations.js";
+import { buildPredicate, DEPLOY_PREDICATE_TYPE } from "./attestation.js";
 import { loadApproval } from "./approval.js";
 import { appendAudit, readAuditHead, type AuditOptions } from "./audit.js";
 import { imageRefOf, type ImageSigner, type ImageVerifier } from "./cosign.js";
@@ -26,6 +27,8 @@ export interface SignOptions {
   approvalTtlMs?: number;
   /** 있으면 서명 직후 이 확인기(고정한 공개키)로 다시 확인. 실패하면 sign_result 를 안 남김 */
   selfVerifier?: ImageVerifier;
+  /** true 면 배포 증명서(in-toto attestation)도 붙임. 못 붙이면 sign_result 를 안 남김 */
+  attest?: boolean;
   now?: () => Date;
 }
 
@@ -126,6 +129,17 @@ async function signOnce(o: SignOptions, seen: { runId?: string }): Promise<SignO
     signature_ref: signatureRef,
     signed_at: signedAt.toISOString(),
   });
+
+  // 배포 증명서: 결정·승인·감사 기록을 서명된 문서로 이미지에 붙임 (시험 실행 서명기는 붙일 수 없어서 건너뜀)
+  if (o.attest && o.signer.attest) {
+    try {
+      const predicate = buildPredicate({ result, plan, planSha256: loaded.planSha256, approval: decision.approver === AUTO_APPROVER ? undefined : approval, approvalSha256, auditHead });
+      await o.signer.attest(imageRef, DEPLOY_PREDICATE_TYPE, predicate);
+    } catch (e) {
+      await refused(signLogLine({ ...base, result: "refused", approver: decision.approver, reason: "sign_failed", signature_ref: null }, now()));
+      return { code: 2, reason: "sign_failed", detail: `배포 증명서를 붙이지 못함: ${e instanceof SignerError ? e.message : String(e)}` };
+    }
+  }
   const line = signLogLine({ ...base, result: "signed", approver: decision.approver, reason: null, signature_ref: signatureRef }, signedAt);
   // 감사 로그를 못 쓰면 sign_result 도 안 남김 (기록 없는 서명 결과로 배포되지 않게)
   if (o.auditPath) await appendAudit(o.auditPath, line, auditHead, o.audit);

@@ -36,6 +36,7 @@ export function copyPlan(src: string, dir: string, patch: Record<string, unknown
 export class RecordingSigner implements ImageSigner, ImageVerifier {
   calls: Array<{ imageRef: string; annotations: Record<string, string> }> = [];
   verifyCalls: Array<{ imageRef: string; annotations: Record<string, string> }> = [];
+  attests: Array<{ imageRef: string; predicateType: string; predicate: unknown }> = [];
   constructor(private readonly fail = false) {}
   async sign(imageRef: string, annotations: Record<string, string>): Promise<string> {
     this.calls.push({ imageRef, annotations });
@@ -49,6 +50,17 @@ export class RecordingSigner implements ImageSigner, ImageVerifier {
   }
   async signatures(imageRef: string): Promise<Array<Record<string, string>>> {
     return this.calls.filter((c) => c.imageRef === imageRef).map((c) => c.annotations);
+  }
+  async attest(imageRef: string, predicateType: string, predicate: unknown): Promise<void> {
+    if (this.fail) throw new Error("registry unreachable");
+    this.attests.push({ imageRef, predicateType, predicate: JSON.parse(JSON.stringify(predicate)) });
+  }
+  /** cosign verify-attestation 처럼 in-toto Statement 를 돌려줌. 정책(Rego)은 가짜라서 안 봄 */
+  async attestations(imageRef: string, predicateType: string): Promise<unknown[]> {
+    const mine = this.attests.filter((a) => a.imageRef === imageRef && a.predicateType === predicateType);
+    if (mine.length === 0) throw new SignerError("SIGNATURE_INVALID", "cosign verify 실패: no matching attestations");
+    const [name, digest] = imageRef.split("@");
+    return mine.map((a) => ({ _type: "https://in-toto.io/Statement/v0.1", subject: [{ name, digest: { sha256: digest!.slice("sha256:".length) } }], predicateType, predicate: a.predicate }));
   }
 }
 
