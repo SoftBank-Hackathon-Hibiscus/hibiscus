@@ -1821,7 +1821,62 @@ describe('deployment API (e2e)', () => {
       });
   });
 
+  it('uses server sessions rather than Agent claims for SSH connectivity', async () => {
+    const ctx = await createAgentContext('ssh-report-status');
+    await agentApi(ctx.token)
+      .post('/agent/v1/heartbeat')
+      .send({
+        schema_version: 1,
+        agent_id: ctx.agentId,
+        updated_at: new Date().toISOString(),
+        serving: null,
+        ssh: {
+          state: 'connected',
+          retry_count: 0,
+          platform: 'linux',
+          arch: 'arm64',
+          version: '0.1.0',
+          last_error: 'password=hidden-value',
+          last_error_code: 'TEST_ERROR',
+        },
+      })
+      .expect(200);
+    const status = await api().get(`/agents/${ctx.agentId}/tunnel`).expect(200);
+    expect(status.body.connected).toBe(false);
+    expect(status.body.state).toBe('idle');
+    expect(status.body.report).toMatchObject({
+      platform: 'linux',
+      arch: 'arm64',
+    });
+    expect(status.body.events.length).toBeGreaterThan(0);
+    expect(JSON.stringify(status.body)).not.toContain('hidden-value');
+    await agentApi(ctx.token)
+      .post('/agent/v1/heartbeat')
+      .send({
+        schema_version: 1,
+        agent_id: ctx.agentId,
+        updated_at: new Date().toISOString(),
+        serving: null,
+        ssh: {
+          state: 'connected',
+          retry_count: -1,
+          platform: 'linux',
+          arch: 'arm64',
+          version: '0.1.0',
+        },
+      })
+      .expect(400);
+    await request(app.getHttpServer())
+      .get(`/agents/${ctx.agentId}/tunnel`)
+      .expect(401);
+  });
+
   it('uses an SSH reverse forward to carry Gateway requests to an on-prem port', async () => {
+    let releaseSlow: (() => void) | undefined;
+    let signalSlow: (() => void) | undefined;
+    const slowStarted = new Promise<void>((resolve) => {
+      signalSlow = resolve;
+    });
     const localServer = createServer((incoming, outgoing) => {
       let body = '';
       incoming.setEncoding('utf8');
@@ -1829,6 +1884,11 @@ describe('deployment API (e2e)', () => {
         body += chunk;
       });
       incoming.on('end', () => {
+        if (incoming.url === '/slow') {
+          releaseSlow = () => outgoing.end('completed-after-unforward');
+          signalSlow?.();
+          return;
+        }
         outgoing.setHeader('x-hibiscus-tunnel', 'ok');
         outgoing.end(`${incoming.method} ${incoming.url} ${body}`);
       });
@@ -1978,15 +2038,27 @@ describe('deployment API (e2e)', () => {
           expect(result.body.connected).toBe(true);
           expect(result.body.active_forwards).toBe(1);
         });
+      const inFlight = request(app.getHttpServer())
+        .get('/slow')
+        .set('Host', 'tunnel-http.apps.test')
+        .then((response) => response);
+      await slowStarted;
       await new Promise<void>((resolve, reject) => {
         sshClient.unforwardIn('127.0.0.1', target.body.gatewayPort, (error) =>
           error ? reject(error) : resolve(),
         );
       });
+      releaseSlow?.();
+      const drained = await inFlight;
+      expect(drained.status).toBe(200);
+      expect(drained.text).toBe('completed-after-unforward');
       await api()
         .get(`/agents/${context.agentId}/tunnel`)
         .expect(200)
-        .expect((result) => expect(result.body.connected).toBe(false));
+        .expect((result) => {
+          expect(result.body.connected).toBe(true);
+          expect(result.body.active_forwards).toBe(0);
+        });
       await new Promise<void>((resolve, reject) => {
         sshClient.forwardIn('127.0.0.1', target.body.gatewayPort, (error) =>
           error ? reject(error) : resolve(),
@@ -2589,7 +2661,10 @@ describe('deployment API (e2e)', () => {
         request(server)
           .patch(url)
           .set('Authorization', `Bearer ${defaultToken}`),
-      delete: (url: string) => request(server).delete(url).set('Authorization', `Bearer ${defaultToken}`),
+      delete: (url: string) =>
+        request(server)
+          .delete(url)
+          .set('Authorization', `Bearer ${defaultToken}`),
       put: (url: string) =>
         request(server).put(url).set('Authorization', `Bearer ${defaultToken}`),
     };

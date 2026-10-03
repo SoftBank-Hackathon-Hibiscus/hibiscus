@@ -3,6 +3,7 @@ import type {
   AgentRegistration,
   AgentSshEnrollment,
   AgentStatusResponse,
+  AgentTunnelStatus,
   AgentSummary,
   AgentTokenRotation,
   ApplicationView,
@@ -300,6 +301,7 @@ export class MockDataSource implements DataSource {
     return this.fail(404, 'Application not found');
   }
 
+  async getAgentTunnel(_id:string):Promise<AgentTunnelStatus> {throw new ApiError(503,'실제 SSH 상태는 실제 콘솔에서 확인하세요.');}
   async getAgentStatus(agentId: string): Promise<AgentStatusResponse> {
     this.tick();
     const status = this.frame().agents[agentId];

@@ -426,3 +426,12 @@ export interface GithubCommitsPage {
   branch: string; page: number; hasMore: boolean;
   commits: Array<{sha:string; message:string; author:string; date:string|null; url:string}>;
 }
+
+export interface AgentTunnelStatus {
+ connected:boolean; state:'idle'|'connecting'|'connected'|'reconnecting'|'disconnected';
+ connected_at:string|null; uptime_seconds:number; requested_forwards:number;active_forwards:number;
+ endpoint:AgentSshConnection; report_received_at:string|null;report_stale:boolean;
+ report:{state:string;retry_count:number;next_retry_at?:string;last_error?:string;last_error_code?:string;last_error_at?:string;platform:string;arch:string;version:string}|null;
+ forwards:Array<{target_id:string;application_id:string;deployment_id:string;gateway_port:number;local_port:number;connected:boolean;health:RoutingTargetHealth|null}>;
+ events:Array<{id:string;kind:string;code:string|null;message:string;port:number|null;createdAt:string}>;
+}
