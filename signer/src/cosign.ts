@@ -21,6 +21,14 @@ export function imageRefOf(imageRepo: string, digest: string): string {
   return `${imageRepo}@${digest}`;
 }
 
+// cosign 이 직접 여는 KMS 키 주소 (예: gcpkms://projects/<p>/locations/<l>/keyRings/<r>/cryptoKeys/<k>). 파일이 아니라서 존재 확인 안 함
+const KMS_KEY_RE = /^(gcpkms|awskms|azurekms|hashivault):\/\/./;
+
+/** 파일 경로가 아니라 KMS 키 주소인지 */
+export function isKmsKey(key: string): boolean {
+  return KMS_KEY_RE.test(key);
+}
+
 export interface CosignOptions {
   /** Rekor(투명성 로그)에 안 올림. 이렇게 서명한 이미지는 verify 에도 --insecure-ignore-tlog=true 필요 */
   noTlog?: boolean;
@@ -34,7 +42,7 @@ export class CosignSigner implements ImageSigner {
   ) {}
 
   async sign(imageRef: string, annotations: Record<string, string>): Promise<string> {
-    if (!existsSync(this.keyPath)) throw new SignerError("KEY_MISSING", `cosign 키 파일이 없음: ${this.keyPath}`);
+    if (!isKmsKey(this.keyPath) && !existsSync(this.keyPath)) throw new SignerError("KEY_MISSING", `cosign 키 파일이 없음: ${this.keyPath}`);
     const args = ["sign", "--yes", "--key", this.keyPath];
     // v3 는 --use-signing-config=false 없이 --tlog-upload=false 만 주면 에러
     if (this.options.noTlog) args.push("--use-signing-config=false", "--tlog-upload=false");
@@ -64,7 +72,7 @@ export class CosignVerifier implements ImageVerifier {
   ) {}
 
   async verify(imageRef: string, annotations: Record<string, string>): Promise<void> {
-    if (!existsSync(this.pubKeyPath)) throw new SignerError("KEY_MISSING", `cosign 공개키 파일이 없음: ${this.pubKeyPath}`);
+    if (!isKmsKey(this.pubKeyPath) && !existsSync(this.pubKeyPath)) throw new SignerError("KEY_MISSING", `cosign 공개키 파일이 없음: ${this.pubKeyPath}`);
     const args = ["verify", "--key", this.pubKeyPath];
     if (this.options.noTlog) args.push("--insecure-ignore-tlog=true");
     for (const [key, value] of Object.entries(annotations)) args.push("-a", `${key}=${value}`);

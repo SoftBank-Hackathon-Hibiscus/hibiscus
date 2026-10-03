@@ -1,10 +1,11 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { CosignSigner, CosignVerifier } from "../src/cosign.js";
+import { CosignSigner, CosignVerifier, isKmsKey } from "../src/cosign.js";
 import { fakeCosign, REPO, tmp } from "./helpers.js";
 
 const DIGEST = `sha256:${"a".repeat(64)}`;
+const KMS = "gcpkms://projects/hib/locations/asia-northeast3/keyRings/hibiscus/cryptoKeys/cosign";
 
 describe("CosignSigner", () => {
   it("cosign sign --yes --key <키> -a 주석 <저장소>@<digest> 로 부르고 signature_ref 를 돌려줌", async () => {
@@ -40,6 +41,13 @@ describe("CosignSigner", () => {
     writeFileSync(key, "dummy");
     const { bin } = fakeCosign(dir, { code: 1 });
     await expect(new CosignSigner(key, bin).sign(`${REPO}@${DIGEST}`, {})).rejects.toMatchObject({ code: "SIGN_FAILED", message: /registry denied/ });
+  });
+
+  it("KMS 키 주소면 파일 확인 없이 --key 로 그대로 넘김 (비밀번호 불필요)", async () => {
+    const dir = tmp();
+    const { bin, argsFile } = fakeCosign(dir);
+    await new CosignSigner(KMS, bin).sign(`${REPO}@${DIGEST}`, { run_id: "r-1" });
+    expect(readFileSync(argsFile, "utf8").trim().split("\n").slice(0, 4)).toEqual(["sign", "--yes", "--key", KMS]);
   });
 
   it("키 파일이 없으면 cosign 을 부르지 않고 KEY_MISSING", async () => {
@@ -88,6 +96,20 @@ describe("CosignVerifier", () => {
       message: /registry denied/,
     });
   });
+
+  it("공개키 자리에 KMS 키 주소를 주면 파일 확인 없이 그대로 넘김", async () => {
+    const dir = tmp();
+    const { bin, argsFile } = fakeCosign(dir);
+    await new CosignVerifier(KMS, bin).verify(`${REPO}@${DIGEST}`, {});
+    expect(readFileSync(argsFile, "utf8").trim().split("\n").slice(0, 3)).toEqual(["verify", "--key", KMS]);
+  });
+
+  it.each([["gcpkms://projects/p/locations/l/keyRings/r/cryptoKeys/k", true], ["awskms://alias/x", true], ["hashivault://cosign", true], ["/tmp/cosign.key", false], ["gcpkms://", false], ["file://cosign.key", false]])(
+    "isKmsKey(%s) = %s",
+    (key, kms) => {
+      expect(isKmsKey(key)).toBe(kms);
+    },
+  );
 
   it("공개키 파일이 없으면 cosign 을 부르지 않고 KEY_MISSING", async () => {
     const dir = tmp();
