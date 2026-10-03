@@ -8,7 +8,7 @@ import { ApplicationDetail } from './pages/ApplicationDetail';
 import { ApplicationList } from './pages/ApplicationList';
 import { Connect } from './pages/Connect';
 import { DeploymentDetail } from './pages/DeploymentDetail';
-import { Launcher } from './pages/Launcher';
+import { Home } from './pages/Home';
 import { RegisterApplication } from './pages/RegisterApplication';
 
 export function App() {
@@ -42,10 +42,8 @@ function Shell() {
         {route.page === 'application' && <ApplicationDetail key={`${route.id}-${tokenVersion}`} id={route.id} source={source} />}
         {route.page === 'applications' && <ApplicationList key={`apps-${tokenVersion}`} source={source} />}
         {route.page === 'register' && <RegisterApplication key={`register-${tokenVersion}`} source={source} />}
-        {route.page === 'home' && !isReal && <Launcher />}
-        {(route.page === 'connect' || (route.page === 'home' && isReal)) && (
-          <Connect source={source} connection={connection.state} onTokenChange={onTokenChange} onRecheck={connection.recheck} />
-        )}
+        {route.page === 'home' && <Home isReal={isReal} connection={connection.state} route={route} />}
+        {route.page === 'connect' && <Connect source={source} connection={connection.state} onTokenChange={onTokenChange} onRecheck={connection.recheck} />}
       </main>
     </div>
   );

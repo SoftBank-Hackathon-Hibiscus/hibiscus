@@ -53,9 +53,7 @@ html[lang='ko'] body {
 }
 h1,
 .page-sub,
-.headline-text,
-.launch-line,
-.launch-title {
+.headline-text {
   text-wrap: balance;
 }
 .page-sub .line {
@@ -1215,13 +1213,129 @@ main {
   font-weight: 700;
 }
 
-/* ---- launcher ---- */
-.launch-grid {
+/* ---- home ---- */
+.home {
+  gap: 56px;
+  padding-top: 20px;
+}
+.hero {
+  max-width: 820px;
+}
+.hero-title {
+  font-size: 40px;
+  line-height: 1.18;
+  letter-spacing: -0.03em;
+  font-weight: 760;
+  color: #1f2b31;
+  text-wrap: balance;
+}
+.hero-sub {
+  margin-top: 14px;
+  font-size: 17px;
+  line-height: 1.6;
+  color: var(--ink-2);
+  max-width: 60ch;
+}
+.hero-cta {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 28px;
+}
+.btn-large {
+  padding: 11px 20px;
+  font-size: 15px;
+  border-radius: 10px;
+}
+/* 핵심 흐름: 배포 상세의 stepper 와 같은 생김새. 선 하나가 네 단계를 잇는다 */
+.flow-track {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0 18px;
+}
+.flow-item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 0;
+}
+.flow-item::before {
+  content: '';
+  position: absolute;
+  top: 21px;
+  left: 44px;
+  right: -18px;
+  height: 2px;
+  background: var(--accent-soft);
+}
+.flow-item:last-child::before {
+  display: none;
+}
+.flow-mark {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  position: relative;
+  z-index: 1;
+}
+.flow-title {
+  font-size: 16px;
+  font-weight: 650;
+  line-height: 1.3;
+}
+.flow-line {
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--ink-2);
+}
+.section-head {
+  margin-bottom: 20px;
+}
+.section-head h2 {
+  font-size: 21px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+.section-head p {
+  margin-top: 4px;
+  color: var(--ink-2);
+  font-size: 14.5px;
+}
+.pillars {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 28px;
+}
+.pillar {
+  border-left: 2px solid var(--accent);
+  padding-left: 16px;
+}
+.pillar h3 {
+  font-size: 16px;
+  font-weight: 650;
+  line-height: 1.35;
+  margin-bottom: 8px;
+}
+.pillar p {
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: var(--ink-2);
+}
+.demo-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--gap);
 }
-.launch-card {
+.demo-card {
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -1229,30 +1343,37 @@ main {
   min-height: 132px;
   transition: border-color 0.15s;
 }
-.launch-card:hover,
-.launch-card:focus-visible {
+.demo-card:hover,
+.demo-card:focus-visible {
   border-color: var(--accent);
   text-decoration: none;
 }
-.launch-index {
-  font-size: 12px;
-  font-weight: 650;
-  color: var(--ink-3);
-  font-variant-numeric: tabular-nums;
-}
-.launch-title {
+.demo-card-title {
   font-size: 15px;
   font-weight: 650;
+  text-wrap: balance;
 }
-.launch-line {
+.demo-card-line {
   color: var(--ink-2);
   font-size: 13.5px;
+  text-wrap: balance;
 }
-.launch-foot {
+.demo-card-foot {
   margin-top: auto;
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   padding-top: 10px;
+}
+.demo-tag {
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 0 7px;
+  border-radius: 6px;
+  background: var(--warning-soft);
+  color: var(--warning);
+  line-height: 1.7;
 }
 
 /* ---- deployment: stepper ---- */
@@ -1779,8 +1900,25 @@ select.input {
     border-top: 1px solid var(--line);
     padding-top: 12px;
   }
-  .launch-grid {
+  .demo-grid,
+  .flow-track {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .flow-track {
+    gap: 24px 18px;
+  }
+  .flow-item:nth-child(2)::before {
+    display: none;
+  }
+  .pillars {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+  .hero-title {
+    font-size: 32px;
+  }
+  .home {
+    gap: 44px;
   }
   .kv-3 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1843,11 +1981,37 @@ select.input {
   h1 {
     font-size: 21px;
   }
-  .launch-grid,
+  .demo-grid,
+  .flow-track,
   .kv-2,
   .kv-3,
   .form-grid {
     grid-template-columns: 1fr;
+  }
+  .flow-item::before {
+    display: none;
+  }
+  .flow-item {
+    display: grid;
+    grid-template-columns: 44px 1fr;
+    gap: 2px 12px;
+  }
+  .flow-mark {
+    grid-row: 1 / span 2;
+  }
+  .hero-title {
+    font-size: 27px;
+  }
+  .hero-sub {
+    font-size: 15px;
+  }
+  .hero-cta .btn {
+    width: 100%;
+    justify-content: center;
+  }
+  .home {
+    gap: 36px;
+    padding-top: 8px;
   }
   .stepper {
     grid-template-columns: 1fr;
