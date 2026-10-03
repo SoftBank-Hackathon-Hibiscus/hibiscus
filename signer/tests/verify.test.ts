@@ -17,6 +17,7 @@ const FIELDS = {
   failover_allowed: false,
   requester: "alice",
   approver: "auto",
+  signed_at: "2026-10-01T03:00:00.000Z",
 };
 
 describe("signAnnotations", () => {
@@ -29,6 +30,7 @@ describe("signAnnotations", () => {
       ["failover_allowed", "false"],
       ["requester", "alice"],
       ["approver", "auto"],
+      ["signed_at", "2026-10-01T03%3A00%3A00.000Z"],
     ]);
   });
 
@@ -93,6 +95,7 @@ describe("runVerify", () => {
       requester: "alice",
       approver: "auto",
       approval_sha256: "none",
+      signed_at: encodeURIComponent(NOW.toISOString()),
     });
   });
 
@@ -112,6 +115,7 @@ describe("runVerify", () => {
     ["requester 바꿔치기", { requester: "mallory" }],
     ["plan_hash 바꾸기", { plan_hash: "f".repeat(64) }],
     ["run_id 바꾸기", { run_id: "r-999" }],
+    ["signed_at 을 최근으로 고치기", { signed_at: "2026-10-03T09:00:00.000Z" }],
     ["source_revision 지우기", { source_revision: undefined }],
   ])("서명 뒤 %s → signature_invalid", async (_, patch) => {
     const dir = tmp();
@@ -237,6 +241,25 @@ describe("runVerify", () => {
       const approvalPath = join(dir, "approval.json");
       writeJson(approvalPath, createApproval(loadPlan(plan("needs-approval")), "alice", "bob", NOW));
       expect(await runVerify({ resultPath, verifier: signer, approvalPath })).toMatchObject({ code: 1, reason: "approval_mismatch" });
+    });
+  });
+
+  describe("서명 유효기간 (--max-age)", () => {
+    const DAY = 24 * 60 * 60_000;
+    it.each([
+      ["서명 직후", 0, 0],
+      ["23시간 뒤", 23 * 60 * 60_000, 0],
+      ["25시간 뒤", 25 * 60 * 60_000, 1],
+    ])("%s 면 code %i (유효 24시간)", async (_, ms, code) => {
+      const { signer, resultPath } = await signed(tmp());
+      const outcome = await runVerify({ resultPath, verifier: signer, maxAgeMs: DAY, now: () => new Date(NOW.getTime() + ms) });
+      expect(outcome.code).toBe(code);
+      if (code === 1) expect(outcome).toMatchObject({ reason: "expired" });
+    });
+
+    it("signed_at 이 미래면 expired", async () => {
+      const { signer, resultPath } = await signed(tmp());
+      expect(await runVerify({ resultPath, verifier: signer, maxAgeMs: DAY, now: () => new Date(NOW.getTime() - 5 * 60_000) })).toMatchObject({ code: 1, reason: "expired" });
     });
   });
 });

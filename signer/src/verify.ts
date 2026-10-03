@@ -20,7 +20,8 @@ export type VerifyReason =
   | "audit_mismatch"
   | "signature_invalid"
   | "attestation_invalid"
-  | "policy_denied";
+  | "policy_denied"
+  | "expired";
 
 export interface VerifyOptions {
   resultPath: string;
@@ -36,6 +37,9 @@ export interface VerifyOptions {
   approvalPath?: string;
   /** 있으면 배포 증명서(in-toto)도 확인. policyPath 를 주면 Rego 정책까지 */
   attestation?: { policyPath?: string };
+  /** 있으면 서명한 지 이 시간(ms)이 지난 결과는 거부. signed_at 도 서명 주석에 묶여 있어서 고쳐도 걸림 */
+  maxAgeMs?: number;
+  now?: () => Date;
 }
 
 export type VerifyOutcome =
@@ -49,6 +53,14 @@ const fail = (reason: VerifyReason, detail: string): VerifyOutcome => ({ code: 1
 
 export async function runVerify(o: VerifyOptions): Promise<VerifyOutcome> {
   const result = parseWith(SignResultSchema, readJson(o.resultPath, "sign_result"), "sign_result");
+
+  if (o.maxAgeMs !== undefined) {
+    const signedAt = Date.parse(result.signed_at);
+    const age = (o.now ?? (() => new Date()))().getTime() - signedAt;
+    if (Number.isNaN(signedAt)) return fail("expired", `signed_at 을 시각으로 읽을 수 없음: ${result.signed_at}`);
+    if (age < -60_000) return fail("expired", `signed_at 이 미래임: ${result.signed_at}`);
+    if (age > o.maxAgeMs) return fail("expired", `서명한 지 ${Math.floor(age / 60_000)}분 지남 (유효 ${Math.round(o.maxAgeMs / 60_000)}분)`);
+  }
 
   const ref = result.signature_ref;
   if (ref.startsWith("dry-run:")) return fail("dry_run", "dry-run 결과라 실제 서명이 없음");

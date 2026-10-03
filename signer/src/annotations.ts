@@ -3,7 +3,7 @@ import { SignerError } from "./io.js";
 import type { SignLog, SignResult } from "./schema.js";
 
 /** 서명으로 보장하는 sign_result 필드 */
-export type SignedFields = Pick<SignResult, "run_id" | "plan_hash" | "source_revision" | "targets" | "failover_allowed" | "requester" | "approver">;
+export type SignedFields = Pick<SignResult, "run_id" | "plan_hash" | "source_revision" | "targets" | "failover_allowed" | "requester" | "approver" | "signed_at">;
 
 export interface AnnotationExtras {
   /** plan.json 전체 해시. plan 의 rules 등 나머지까지 묶음 */
@@ -44,6 +44,8 @@ export function signAnnotations(f: SignedFields, x: AnnotationExtras = {}): Reco
     requester: f.requester,
     approver: f.approver,
     ...(x.approvalSha256 !== undefined ? { approval_sha256: x.approvalSha256 } : {}),
+    // 서명 시각도 묶음 (sign_result 의 signed_at 만 고쳐서 유효기간 검사를 피하지 못하게). ISO 시각의 : 는 인코딩
+    signed_at: encodeURIComponent(f.signed_at),
     ...(x.planSha256 !== undefined ? { plan_sha256: x.planSha256 } : {}),
     ...(x.auditHead !== undefined ? { audit_head: x.auditHead } : {}),
   });
@@ -58,6 +60,7 @@ export function logAnnotations(entry: SignLog, anchor: string): Record<string, s
     source_revision: entry.source_revision ?? NO_SOURCE_REVISION,
     requester: entry.requester,
     approver: entry.approver,
+    signed_at: encodeURIComponent(entry.time),
     audit_head: anchor,
   });
 }

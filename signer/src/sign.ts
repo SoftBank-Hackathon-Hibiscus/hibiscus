@@ -102,7 +102,9 @@ async function signOnce(o: SignOptions, seen: { runId?: string }): Promise<SignO
   const auditHead = o.auditPath ? await readAuditHead(o.auditPath, o.audit) : undefined;
   // 사람 승인이면 그 승인 기록(누가, 언제)까지 서명에 묶음. 자동 승인이면 none
   const approvalSha256 = decision.approver === AUTO_APPROVER || !approval ? NO_APPROVAL : sha256Hex(canonicalize(approval));
-  const annotations = signAnnotations(claims, { planSha256: loaded.planSha256, auditHead, approvalSha256 });
+  // 서명 시각은 서명 전에 정해서 주석·sign_result·감사 로그에 같은 값으로 씀
+  const signedAt = now();
+  const annotations = signAnnotations({ ...claims, signed_at: signedAt.toISOString() }, { planSha256: loaded.planSha256, auditHead, approvalSha256 });
 
   let signatureRef: string;
   try {
@@ -123,7 +125,6 @@ async function signOnce(o: SignOptions, seen: { runId?: string }): Promise<SignO
     }
   }
 
-  const signedAt = now();
   const result = SignResultSchema.parse({
     ...claims,
     signature_ref: signatureRef,

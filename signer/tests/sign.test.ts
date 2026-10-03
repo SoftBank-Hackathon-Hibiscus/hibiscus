@@ -52,6 +52,7 @@ describe("runSign", () => {
           requester: "alice",
           approver: "auto",
           approval_sha256: "none",
+          signed_at: encodeURIComponent(NOW.toISOString()),
           plan_sha256: loadPlan(plan("allow-onprem")).planSha256,
         },
       },

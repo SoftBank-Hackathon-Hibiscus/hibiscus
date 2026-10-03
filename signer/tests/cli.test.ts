@@ -80,6 +80,30 @@ describe("cli fingerprint / 공개키 고정", () => {
   });
 });
 
+describe("cli verify --json", () => {
+  it("실행 오류도 JSON 한 줄 (code 2, error 코드)", () => {
+    const r = cli(["verify", "--result", "/nope/sign_result.json", "--json"]);
+    expect(r.code).toBe(2);
+    expect(JSON.parse(r.stdout.trim())).toMatchObject({ ok: false, code: 2, error: "READ_FAILED" });
+  });
+
+  it("dry-run 결과는 JSON 으로 code 1, reason dry_run", () => {
+    const dir = tmp();
+    const result = join(dir, "sign_result.json");
+    const signed = cli(["sign", "--plan", plan("allow"), "--requester", "alice", "--image-repo", "localhost:5001/hib/app", "--dry-run", "--out", result, "--log", join(dir, "d.jsonl")]);
+    expect(signed.code).toBe(0);
+    const r = cli(["verify", "--result", result, "--json"]);
+    expect(r.code).toBe(1);
+    expect(JSON.parse(r.stdout.trim())).toMatchObject({ ok: false, code: 1, reason: "dry_run" });
+  });
+
+  it("--max-age 가 숫자가 아니면 ARG_INVALID", () => {
+    const r = cli(["verify", "--result", "x.json", "--max-age=abc", "--json"]);
+    expect(r.code).toBe(2);
+    expect(JSON.parse(r.stdout.trim())).toMatchObject({ error: "ARG_INVALID" });
+  });
+});
+
 describe("cli audit", () => {
   /** dry-run 서명 2번으로 감사 로그 2줄 */
   function auditLog(dir: string): string {

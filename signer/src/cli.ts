@@ -17,7 +17,7 @@ const USAGE = `사용법
                           [--out sign_result.json] [--log decisions.jsonl] [--audit <감사 로그>] [--approval-ttl <분>]
                           [--plan-schema <Plan.schema.json>]
   npx tsx src/cli.ts verify --result <sign_result.json> [--plan <plan.json>] [--approval <approval.json>] [--audit <감사 로그>] [--image-repo <저장소>]
-                            [--attestation [--policy <deploy.rego>]]
+                            [--attestation [--policy <deploy.rego>]] [--max-age <분>] [--json]
                             [--pub <cosign.pub>] [--no-tlog] [--plan-schema <Plan.schema.json>]
   npx tsx src/cli.ts audit --audit <감사 로그> [--images [--image-repo <저장소>] [--pub <cosign.pub>] [--no-tlog]]
   npx tsx src/cli.ts fingerprint [--pub <cosign.pub>] [--pubkey-sha256 <지문>]
@@ -36,6 +36,8 @@ const USAGE = `사용법
   verify        sign_result.json 의 targets·approver 등이 서명된 값 그대로인지 cosign verify 로 확인
   --plan        plan 내용과 plan 파일 해시까지 확인
   --approval    이 승인 기록(누가, 언제 승인)으로 서명했는지까지 확인
+  --max-age     서명한 지 이 시간(분)이 지난 결과는 거부 (expired). 없으면 SIGNER_MAX_AGE_MIN
+  --json        결과를 JSON 한 줄로 출력 (실행 오류도)
   --attestation 배포 증명서도 확인 (서명·내용이 sign_result 와 같은지 + Rego 정책). 정책 기본값은 policy/deploy.rego
   --pub         cosign 공개키 경로 또는 KMS 키 주소. 없으면 COSIGN_PUBLIC_KEY 환경변수, 그것도 없으면 keys/cosign.pub
   --no-tlog     Rekor 없이 서명한 이미지 확인 (cosign verify --insecure-ignore-tlog=true)
@@ -85,6 +87,8 @@ async function main(argv: string[]): Promise<number> {
       attest: { type: "boolean", default: false },
       attestation: { type: "boolean", default: false },
       policy: { type: "string" },
+      "max-age": { type: "string" },
+      json: { type: "boolean", default: false },
     },
   });
   const planSchema = values["plan-schema"] ?? DEFAULT_PLAN_SCHEMA;
@@ -153,25 +157,72 @@ async function main(argv: string[]): Promise<number> {
   }
 
   if (command === "verify") {
+    const json = values.json === true;
     const imageRepo = values["image-repo"] || process.env.IMAGE_REPO || undefined;
-    const outcome = await runVerify({
-      resultPath: required(values.result, "result"),
-      verifier: new CosignVerifier(trustedPub(), "cosign", { noTlog }),
-      ...(imageRepo !== undefined ? { imageRepo } : {}),
-      ...(values.plan !== undefined ? { planPath: values.plan } : {}),
-      ...(values.approval ? { approvalPath: values.approval } : {}),
-      ...(values.attestation === true ? { attestation: { policyPath: values.policy || DEFAULT_POLICY } } : {}),
-      planSchemaPath: planSchema,
-      ...(auditPath !== undefined ? { auditPath } : {}),
-    });
+    const policyPath = values.policy || DEFAULT_POLICY;
+    let maxAgeMs: number | undefined;
+    let outcome: Awaited<ReturnType<typeof runVerify>>;
+    try {
+      maxAgeMs = minutes(values["max-age"] || process.env.SIGNER_MAX_AGE_MIN, "max-age");
+      outcome = await runVerify({
+        resultPath: required(values.result, "result"),
+        verifier: new CosignVerifier(trustedPub(), "cosign", { noTlog }),
+        ...(imageRepo !== undefined ? { imageRepo } : {}),
+        ...(values.plan !== undefined ? { planPath: values.plan } : {}),
+        ...(values.approval ? { approvalPath: values.approval } : {}),
+        ...(values.attestation === true ? { attestation: { policyPath } } : {}),
+        ...(maxAgeMs !== undefined ? { maxAgeMs } : {}),
+        planSchemaPath: planSchema,
+        ...(auditPath !== undefined ? { auditPath } : {}),
+      });
+    } catch (e) {
+      // --json 이면 실행 오류도 JSON 한 줄로 (콘솔·backend 가 그대로 읽게)
+      if (json && e instanceof SignerError) {
+        console.log(JSON.stringify({ ok: false, code: 2, error: e.code, message: e.message }));
+        return 2;
+      }
+      throw e;
+    }
+    const fingerprint = isKmsKey(pub) ? undefined : publicKeyFingerprint(pub);
+    if (json) {
+      console.log(
+        JSON.stringify(
+          outcome.code === 0
+            ? {
+                ok: true,
+                code: 0,
+                run_id: outcome.result.run_id,
+                digest: outcome.result.digest,
+                image: outcome.imageRef,
+                targets: outcome.result.targets,
+                failover_allowed: outcome.result.failover_allowed,
+                requester: outcome.result.requester,
+                approver: outcome.result.approver,
+                signed_at: outcome.result.signed_at,
+                checked: {
+                  annotations: Object.keys(outcome.annotations),
+                  plan: values.plan !== undefined,
+                  approval: Boolean(values.approval),
+                  audit: auditPath !== undefined,
+                  attestation: values.attestation === true ? { policy: policyPath } : false,
+                  max_age_min: maxAgeMs !== undefined ? maxAgeMs / 60_000 : null,
+                },
+                ...(fingerprint !== undefined ? { pubkey_sha256: `sha256:${fingerprint}`, pubkey_pinned: pinnedPub !== undefined } : {}),
+              }
+            : { ok: false, code: 1, reason: outcome.reason, detail: outcome.detail },
+        ),
+      );
+      return outcome.code;
+    }
     if (outcome.code === 0) {
       const r = outcome.result;
       console.log(`[signer] 서명 확인함 run_id=${r.run_id} digest=${r.digest}`);
       console.log(`  targets  : ${r.targets.join(", ")}`);
       console.log(`  approver : ${r.approver}`);
       console.log(`  확인한 주석: ${Object.keys(outcome.annotations).join(", ")}`);
-      if (values.attestation === true) console.log(`  배포 증명서: 서명·내용 일치, 정책 통과 (${values.policy || DEFAULT_POLICY})`);
-      if (!isKmsKey(pub)) console.log(`  공개키 지문: sha256:${publicKeyFingerprint(pub)}${pinnedPub !== undefined ? " (고정값과 같음)" : ""}`);
+      if (values.attestation === true) console.log(`  배포 증명서: 서명·내용 일치, 정책 통과 (${policyPath})`);
+      if (maxAgeMs !== undefined) console.log(`  유효기간: ${maxAgeMs / 60_000}분 안에 서명함`);
+      if (fingerprint !== undefined) console.log(`  공개키 지문: sha256:${fingerprint}${pinnedPub !== undefined ? " (고정값과 같음)" : ""}`);
     } else {
       console.error(`[signer] 서명 확인 실패 (${outcome.reason}): ${outcome.detail}`);
     }
