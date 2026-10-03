@@ -1,7 +1,8 @@
 // 등록·배포 입력 검증. backend-v2 DTO(origin/main) 와 같은 규칙을 화면에서 먼저 적용한다.
 //  - CreateApplicationDto / GithubApplicationDto (application.dto.ts, github.dto.ts)
 //  - CreateDeploymentDto (deployment.dto.ts)
-import type { CreateDeploymentInput, GithubApplicationInput } from '../api/types';
+import type { CreateDeploymentInput, GithubApplicationCreated, GithubApplicationInput } from '../api/types';
+import { applicationPath, deploymentPath } from './router';
 import type { DictKey } from './i18n';
 
 /** CreateApplicationDto.slug: /^[a-z0-9]+(?:-[a-z0-9]+)*$/ , MaxLength(64) */
@@ -116,6 +117,11 @@ export function toGithubApplicationInput(d: RegistrationDraft): GithubApplicatio
   const policyPath = d.policyPath.trim();
   if (policyPath) input.policy_path = policyPath;
   return input;
+}
+
+/** 등록 직후 갈 곳. backend 가 만든 최초 배포가 있으면 그 진행(테스트 → 정책 → 서명 → 배포)을 바로 보여 주고, 없으면 앱 상세 */
+export function registeredPath(created: GithubApplicationCreated): string {
+  return created.initial_deployment ? deploymentPath(created.initial_deployment.id) : applicationPath(created.application.id);
 }
 
 // ---------------------------------------------------------------- 새 배포

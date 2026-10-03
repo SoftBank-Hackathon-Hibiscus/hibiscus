@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { EMPTY_REGISTRATION, friendlyBackendError, repoShortName, slugify, toCreateDeploymentInput, toGithubApplicationInput, validateDeployment, validateRegistration, type RegistrationDraft } from './forms';
+import { EMPTY_REGISTRATION, friendlyBackendError, registeredPath, repoShortName, slugify, toCreateDeploymentInput, toGithubApplicationInput, validateDeployment, validateRegistration, type RegistrationDraft } from './forms';
+import { applicationPath, deploymentPath } from './router';
+import type { GithubApplicationCreated } from '../api/types';
 
 const valid: RegistrationDraft = {
   ...EMPTY_REGISTRATION,
@@ -106,5 +108,16 @@ describe('friendlyBackendError', () => {
     expect(friendlyBackendError('GitHub login is required')).toBe('beGithubReconnect');
     expect(friendlyBackendError('Cannot connect to GitHub')).toBe('beGithubUnavailable');
     expect(friendlyBackendError('something else')).toBeNull();
+  });
+});
+
+describe('registeredPath (등록 직후 이동)', () => {
+  const view = { application: { id: 'app-1' } } as unknown as GithubApplicationCreated;
+  it('initial_deployment 가 있으면 그 배포 상세로 간다', () => {
+    const created = { ...view, initial_deployment: { id: 'dep-1' } } as GithubApplicationCreated;
+    expect(registeredPath(created)).toBe(deploymentPath('dep-1'));
+  });
+  it('없으면 (#40 이전 backend) 앱 상세로 간다', () => {
+    expect(registeredPath(view)).toBe(applicationPath('app-1'));
   });
 });

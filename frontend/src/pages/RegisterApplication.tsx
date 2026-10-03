@@ -5,9 +5,9 @@ import type { GithubBranchesPage, GithubConnection, GithubInstallation, GithubRe
 import { GITHUB_PAGE_SIZE } from '../api/real';
 import { ErrorNotice, describeError } from '../components/ErrorNotice';
 import { Collapsible, Crumbs, Empty, Notice, PageTitle, Pill } from '../components/ui';
-import { EMPTY_REGISTRATION, friendlyBackendError, repoShortName, slugify, toGithubApplicationInput, validateRegistration, type RegistrationDraft, type RegistrationErrors } from '../lib/forms';
+import { EMPTY_REGISTRATION, friendlyBackendError, registeredPath, repoShortName, slugify, toGithubApplicationInput, validateRegistration, type RegistrationDraft, type RegistrationErrors } from '../lib/forms';
 import { useLang } from '../lib/i18n';
-import { APPLICATIONS_PATH, applicationPath, navigate, realHref } from '../lib/router';
+import { APPLICATIONS_PATH, navigate, realHref } from '../lib/router';
 
 type Loadable<T> = { state: 'idle' } | { state: 'loading' } | { state: 'ok'; value: T } | { state: 'error'; error: unknown };
 
@@ -89,7 +89,7 @@ export function RegisterApplication({ source }: { source: DataSource }) {
     setSubmitError(null);
     try {
       const created = await source.createGithubApplication(toGithubApplicationInput(draft));
-      navigate(applicationPath(created.application.id));
+      navigate(registeredPath(created));
     } catch (error) {
       setSubmitError(error);
     } finally {
@@ -223,6 +223,7 @@ export function RegisterApplication({ source }: { source: DataSource }) {
                 <label className="check-row">
                   <input type="checkbox" checked={draft.autoDeploy} onChange={(e) => setDraft((d) => ({ ...d, autoDeploy: e.target.checked }))} /> {t('autoDeployLabel')}
                 </label>
+                <p className="form-hint">{t('autoDeployHint')}</p>
                 <label className="check-row">
                   <input type="checkbox" checked={draft.requiresApproval} onChange={(e) => setDraft((d) => ({ ...d, requiresApproval: e.target.checked }))} /> {t('requiresApprovalLabel')}
                 </label>
@@ -239,6 +240,8 @@ export function RegisterApplication({ source }: { source: DataSource }) {
             </Collapsible>
           </div>
         </StepCard>
+
+        <p className="small muted">{t('registerInitialDeploy')}</p>
 
         {submitError !== null && <SubmitError error={submitError} lang={lang} />}
 
