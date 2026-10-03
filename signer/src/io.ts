@@ -22,7 +22,8 @@ export function canonicalize(value: unknown): string {
 function sortKeys(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(sortKeys);
   if (value !== null && typeof value === "object") {
-    const out: Record<string, unknown> = {};
+    // 프로토타입 없는 객체: JSON 의 "__proto__" 키를 보통 객체에 넣으면 프로토타입이 바뀌고 해시에서 빠짐
+    const out: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
     for (const key of Object.keys(value as object).sort()) {
       const v = (value as Record<string, unknown>)[key];
       if (v !== undefined) out[key] = sortKeys(v);

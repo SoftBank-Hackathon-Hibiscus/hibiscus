@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { encodeTargets, signAnnotations } from "../src/annotations.js";
 import { createApproval } from "../src/approval.js";
 import { CosignVerifier } from "../src/cosign.js";
-import { writeJson } from "../src/io.js";
+import { canonicalize, writeJson } from "../src/io.js";
 import { loadPlan } from "../src/plan.js";
 import { runSign } from "../src/sign.js";
 import { runAuditVerify, runVerify } from "../src/verify.js";
@@ -299,5 +299,14 @@ describe("서명에 저장소 묶기 (image_repo)", () => {
     signer.calls.push({ imageRef: c.imageRef.replace(REPO, OTHER), annotations: { ...c.annotations } });
     expect(await runAuditVerify({ auditPath, verifier: signer, imageRepo: OTHER })).toMatchObject({ code: 1, reason: "foreign_signature" });
     expect(await runAuditVerify({ auditPath, verifier: signer })).toMatchObject({ code: 0 });
+  });
+});
+
+describe("canonicalize", () => {
+  it('JSON 의 "__proto__" 키도 해시에 들어감 (보통 객체에 넣으면 프로토타입이 바뀌고 빠짐)', () => {
+    const plain = JSON.parse('{"rules":[{"id":"R1"}]}');
+    const hidden = JSON.parse('{"rules":[{"id":"R1","__proto__":{"result":"not_matched"}}]}');
+    expect(canonicalize(hidden)).not.toBe(canonicalize(plain));
+    expect(canonicalize(hidden)).toBe('{"rules":[{"__proto__":{"result":"not_matched"},"id":"R1"}]}');
   });
 });
