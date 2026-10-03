@@ -4,12 +4,14 @@ export type Route =
   | { page: 'deployment'; id: string }
   | { page: 'application'; id: string }
   | { page: 'applications' }
+  | { page: 'register' }
   | { page: 'none' };
 
 export function parseHash(hash: string = window.location.hash): Route {
   const path = hash.replace(/^#/, '');
   let match = /^\/deployments\/([^/?#]+)/.exec(path);
   if (match?.[1]) return { page: 'deployment', id: decodeURIComponent(match[1]) };
+  if (/^\/applications\/new\/?$/.test(path)) return { page: 'register' };
   match = /^\/applications\/([^/?#]+)/.exec(path);
   if (match?.[1]) return { page: 'application', id: decodeURIComponent(match[1]) };
   if (/^\/applications\/?$/.test(path)) return { page: 'applications' };
@@ -17,6 +19,7 @@ export function parseHash(hash: string = window.location.hash): Route {
 }
 
 export const APPLICATIONS_PATH = '/applications';
+export const REGISTER_PATH = '/applications/new';
 
 export function useHashRoute(): Route {
   const [route, setRoute] = useState<Route>(() => parseHash());

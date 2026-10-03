@@ -11,6 +11,7 @@ import { ApplicationList } from './pages/ApplicationList';
 import { Connect } from './pages/Connect';
 import { DeploymentDetail } from './pages/DeploymentDetail';
 import { Launcher } from './pages/Launcher';
+import { RegisterApplication } from './pages/RegisterApplication';
 
 export function App() {
   return (
@@ -70,6 +71,7 @@ function Shell() {
         {route.page === 'deployment' && <DeploymentDetail key={`${route.id}-${tokenVersion}`} id={route.id} source={source} />}
         {route.page === 'application' && <ApplicationDetail key={`${route.id}-${tokenVersion}`} id={route.id} source={source} />}
         {route.page === 'applications' && <ApplicationList key={`apps-${tokenVersion}`} source={source} />}
+        {route.page === 'register' && <RegisterApplication key={`register-${tokenVersion}`} source={source} />}
         {route.page === 'none' && !isReal && <Launcher />}
         {route.page === 'none' && isReal && <Connect source={source} connection={connection.state} onTokenChange={onTokenChange} onRecheck={connection.recheck} />}
       </main>

@@ -4,6 +4,12 @@ import type {
   CurrentUser,
   Deployment,
   DeploymentView,
+  GithubApplicationCreated,
+  GithubApplicationInput,
+  GithubBranchesPage,
+  GithubConnection,
+  GithubInstallationsPage,
+  GithubRepositoriesPage,
   RouteSnapshot,
   RoutingTargetView,
 } from './types';
@@ -42,4 +48,16 @@ export interface DataSource {
   getRouting(applicationId: string): Promise<RouteSnapshot>;
   getTargets(applicationId: string): Promise<RoutingTargetView[]>;
   getAgentStatus(agentId: string): Promise<AgentStatusResponse>;
+
+  // ---- GitHub 연동 (backend-v2 github.controller, origin/main 기준)
+  /** GET /github/connection */
+  getGithubConnection(): Promise<GithubConnection>;
+  /** GET /github/installations */
+  listGithubInstallations(page?: number): Promise<GithubInstallationsPage>;
+  /** GET /github/repositories?installation_id= */
+  listGithubRepositories(installationId: number, page?: number): Promise<GithubRepositoriesPage>;
+  /** GET /github/repositories/:repositoryId/branches?installation_id= */
+  listGithubBranches(installationId: number, repositoryId: number, page?: number): Promise<GithubBranchesPage>;
+  /** POST /github/applications. real 에서는 실제 애플리케이션이 만들어진다 */
+  createGithubApplication(input: GithubApplicationInput): Promise<GithubApplicationCreated>;
 }

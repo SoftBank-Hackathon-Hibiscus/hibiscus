@@ -1,4 +1,4 @@
-import { Boxes, ChevronRight } from 'lucide-react';
+import { Boxes, ChevronRight, Plus } from 'lucide-react';
 import type { DataSource } from '../api/client';
 import { ApiError } from '../api/client';
 import type { ApplicationView, RouteSnapshot } from '../api/types';
@@ -7,7 +7,7 @@ import { Empty, PageTitle, Pill } from '../components/ui';
 import { usePolling } from '../hooks/usePolling';
 import { relTime, targetLabel } from '../lib/format';
 import { useLang } from '../lib/i18n';
-import { applicationPath, hrefFor } from '../lib/router';
+import { REGISTER_PATH, applicationPath, hrefFor } from '../lib/router';
 
 const POLL_MS = 15000;
 
@@ -45,17 +45,29 @@ export function ApplicationList({ source }: { source: DataSource }) {
         title={t('appsTitle')}
         sub={t('appsSub')}
         right={
-          <span className="live">
-            {t('refreshing15s')}
-            {poll.lastUpdated ? `, ${relTime(new Date(poll.lastUpdated).toISOString())}` : ''}
-          </span>
+          <div className="title-badges">
+            <span className="live">
+              {t('refreshing15s')}
+              {poll.lastUpdated ? `, ${relTime(new Date(poll.lastUpdated).toISOString())}` : ''}
+            </span>
+            <a className="btn btn-primary btn-small" href={hrefFor(REGISTER_PATH)}>
+              <Plus size={14} aria-hidden /> {t('registerApp')}
+            </a>
+          </div>
         }
       />
       {poll.error ? <ErrorNotice error={poll.error} /> : null}
       {poll.loading && !rows && <Empty>{t('loading')}</Empty>}
       {rows && rows.length === 0 && (
         <section className="card">
-          <Empty>{t('noApps')}</Empty>
+          <div className="stack-sm">
+            <Empty>{t('noApps')}</Empty>
+            <div>
+              <a className="btn btn-primary btn-small" href={hrefFor(REGISTER_PATH)}>
+                <Plus size={14} aria-hidden /> {t('registerApp')}
+              </a>
+            </div>
+          </div>
         </section>
       )}
       {rows && rows.length > 0 && (

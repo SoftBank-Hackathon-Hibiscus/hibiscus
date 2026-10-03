@@ -234,3 +234,82 @@ export interface AgentStatusResponse {
   serving: ServingContainer | null;
   public_url: string | null;
 }
+
+// ---------------------------------------------------------------- GitHub 연동 (backend-v2 github.controller, origin/main)
+
+/** GET /github/connection */
+export interface GithubConnection {
+  connected: boolean;
+  /** GitHub App slug 가 설정돼 있을 때만. 없으면 null */
+  installation_url: string | null;
+}
+
+export interface GithubInstallation {
+  id: number;
+  /** 설치된 계정/조직 login */
+  account: string;
+}
+
+/** GET /github/installations */
+export interface GithubInstallationsPage {
+  total_count: number;
+  page: number;
+  installations: GithubInstallation[];
+}
+
+export interface GithubRepository {
+  id: number;
+  full_name: string;
+  default_branch: string;
+  private: boolean;
+}
+
+/** GET /github/repositories?installation_id= */
+export interface GithubRepositoriesPage {
+  total_count: number;
+  page: number;
+  repositories: GithubRepository[];
+}
+
+/** GET /github/repositories/:repositoryId/branches?installation_id= (total_count 없음) */
+export interface GithubBranchesPage {
+  repository_id: number;
+  default_branch: string;
+  page: number;
+  branches: Array<{ name: string }>;
+}
+
+/**
+ * POST /github/applications 요청 본문 = GithubApplicationDto (CreateApplicationDto 확장).
+ * backend 가 채우는 값은 보내지 않는다: source_path(기본 'github' → https://github.com/{repo}.git), repo, default_branch, public_host.
+ * health_check 는 DTO 기본값(/health, GET, 5s/2s, 200–399, 1/3)을 쓰므로 생략한다.
+ */
+export interface GithubApplicationInput {
+  name: string;
+  slug: string;
+  image_repo: string;
+  container_port?: number;
+  policy_path?: string;
+  test_template?: 'allow' | 'block-test-failed';
+  requires_approval?: boolean;
+  installation_id: number;
+  repository_id: number;
+  branch: string;
+  auto_deploy?: boolean;
+}
+
+/** github_application_links 행 */
+export interface GithubApplicationLink {
+  applicationId: string;
+  userId: string;
+  installationId: number;
+  repositoryId: number;
+  repositoryFullName: string;
+  branch: string;
+  autoDeploy: boolean;
+  active: boolean;
+  createdAt: string;
+}
+
+/** POST /github/applications 응답: ApplicationView + github 링크 */
+export type GithubApplicationCreated = ApplicationView & { github: GithubApplicationLink };

@@ -7,9 +7,18 @@ import type {
   CurrentUser,
   Deployment,
   DeploymentView,
+  GithubApplicationCreated,
+  GithubApplicationInput,
+  GithubBranchesPage,
+  GithubConnection,
+  GithubInstallationsPage,
+  GithubRepositoriesPage,
   RouteSnapshot,
   RoutingTargetView,
 } from './types';
+
+/** GitHub 목록은 한 페이지에 최대 100개(backend GithubPageDto 의 per_page 상한) */
+export const GITHUB_PAGE_SIZE = 100;
 
 async function send(fetchImpl: FetchLike, method: 'GET' | 'POST', path: string, body: unknown): Promise<Response> {
   const headers: Record<string, string> = { Accept: 'application/json' };
@@ -58,6 +67,10 @@ export class RealDataSource implements DataSource {
     return request<T>('GET', path, undefined, this.fetchImpl);
   }
 
+  private post<T>(path: string, body: unknown) {
+    return request<T>('POST', path, body, this.fetchImpl);
+  }
+
   healthz() {
     return this.get<{ ok: boolean }>('/healthz');
   }
@@ -83,7 +96,7 @@ export class RealDataSource implements DataSource {
   }
 
   approveDeployment(deploymentId: string) {
-    return request<Deployment>('POST', `/deployments/${encodeURIComponent(deploymentId)}/approve`, {}, this.fetchImpl);
+    return this.post<Deployment>(`/deployments/${encodeURIComponent(deploymentId)}/approve`, {});
   }
 
   getRouting(applicationId: string) {
@@ -96,5 +109,26 @@ export class RealDataSource implements DataSource {
 
   getAgentStatus(agentId: string) {
     return this.get<AgentStatusResponse>(`/agents/${encodeURIComponent(agentId)}/status`);
+  }
+
+  getGithubConnection() {
+    return this.get<GithubConnection>('/github/connection');
+  }
+
+  listGithubInstallations(page = 1) {
+    return this.get<GithubInstallationsPage>(`/github/installations?page=${page}&per_page=${GITHUB_PAGE_SIZE}`);
+  }
+
+  listGithubRepositories(installationId: number, page = 1) {
+    return this.get<GithubRepositoriesPage>(`/github/repositories?installation_id=${installationId}&page=${page}&per_page=${GITHUB_PAGE_SIZE}`);
+  }
+
+  listGithubBranches(installationId: number, repositoryId: number, page = 1) {
+    return this.get<GithubBranchesPage>(`/github/repositories/${repositoryId}/branches?installation_id=${installationId}&page=${page}&per_page=${GITHUB_PAGE_SIZE}`);
+  }
+
+  createGithubApplication(input: GithubApplicationInput) {
+    // backend 는 whitelist + forbidNonWhitelisted 라 DTO 에 없는 키를 보내면 400. input 은 DTO 키만 담는다 (lib/forms.ts).
+    return this.post<GithubApplicationCreated>('/github/applications', input);
   }
 }

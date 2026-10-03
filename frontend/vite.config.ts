@@ -6,6 +6,7 @@ import react from '@vitejs/plugin-react';
 // 백엔드 주소는 .env.local 의 VITE_BACKEND_URL 로 바꾼다 (기본 http://127.0.0.1:8080).
 const proxiedPrefixes = [
   '/auth',
+  '/github',
   '/applications',
   '/deployments',
   '/agents',
