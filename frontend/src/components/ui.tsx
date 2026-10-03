@@ -138,38 +138,6 @@ export function Empty({ children }: { children: ReactNode }) {
   return <div className="empty">{children}</div>;
 }
 
-/** 불러오는 동안의 자리 표시. 글줄 폭만 다르게 해서 실제 내용처럼 보이게 한다. */
-export function Skeleton({ width = '100%', height = 14 }: { width?: string | number; height?: number }) {
-  return <span className="skeleton" style={{ width, height }} aria-hidden />;
-}
-
-export function SkeletonCard({ lines = 2, title = true }: { lines?: number; title?: boolean }) {
-  const widths = ['62%', '84%', '48%', '72%'];
-  return (
-    <div className="card skeleton-card" aria-hidden>
-      {title && <Skeleton width="38%" height={16} />}
-      {Array.from({ length: lines }, (_, i) => (
-        <Skeleton key={i} width={widths[i % widths.length]} />
-      ))}
-    </div>
-  );
-}
-
-/** 상세 화면 전체의 자리 표시: 제목 줄 + 카드 몇 개 */
-export function PageSkeleton({ cards = 3 }: { cards?: number }) {
-  return (
-    <div className="page" aria-busy="true">
-      <div className="skeleton-title">
-        <Skeleton width="22%" height={13} />
-        <Skeleton width="40%" height={26} />
-      </div>
-      {Array.from({ length: cards }, (_, i) => (
-        <SkeletonCard key={i} lines={i === 0 ? 1 : 3} />
-      ))}
-    </div>
-  );
-}
-
 export function DemoBadge({ small = false }: { small?: boolean }) {
   return (
     <span className={`demo-badge ${small ? 'demo-badge-small' : ''}`} title="mock data">

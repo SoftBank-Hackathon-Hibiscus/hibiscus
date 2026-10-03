@@ -1747,34 +1747,6 @@ textarea.input {
 .error-state > div {
   margin-top: 8px;
 }
-/* 로딩 자리 표시 */
-.skeleton {
-  display: block;
-  border-radius: 6px;
-  background: linear-gradient(90deg, var(--muted-soft) 0%, var(--surface-2) 40%, var(--muted-soft) 80%);
-  background-size: 200% 100%;
-  animation: shimmer 1.4s ease-in-out infinite;
-}
-@keyframes shimmer {
-  from {
-    background-position: 200% 0;
-  }
-  to {
-    background-position: -200% 0;
-  }
-}
-.skeleton-card {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  min-height: 96px;
-}
-.skeleton-title {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding-bottom: 6px;
-}
 
 /* ---- forms (등록 / 새 배포) ---- */
 /* 좁은 내용: 쉘 폭은 유지하고 자식만 왼쪽 정렬로 제한 */
