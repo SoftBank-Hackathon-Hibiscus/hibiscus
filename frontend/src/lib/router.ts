@@ -5,7 +5,9 @@ export type Route =
   | { page: 'application'; id: string }
   | { page: 'applications' }
   | { page: 'register' }
-  | { page: 'none' };
+  | { page: 'connect' }
+  /** 서비스 첫 화면. section 은 홈 안의 특정 부분으로 스크롤할 때 (예: 데모 시나리오) */
+  | { page: 'home'; section?: 'demos' };
 
 export function parseHash(hash: string = window.location.hash): Route {
   const path = hash.replace(/^#/, '');
@@ -15,9 +17,14 @@ export function parseHash(hash: string = window.location.hash): Route {
   match = /^\/applications\/([^/?#]+)/.exec(path);
   if (match?.[1]) return { page: 'application', id: decodeURIComponent(match[1]) };
   if (/^\/applications\/?$/.test(path)) return { page: 'applications' };
-  return { page: 'none' };
+  if (/^\/connect\/?$/.test(path)) return { page: 'connect' };
+  if (/^\/demos\/?$/.test(path)) return { page: 'home', section: 'demos' };
+  return { page: 'home' };
 }
 
+export const HOME_PATH = '/';
+export const DEMOS_PATH = '/demos';
+export const CONNECT_PATH = '/connect';
 export const APPLICATIONS_PATH = '/applications';
 export const REGISTER_PATH = '/applications/new';
 

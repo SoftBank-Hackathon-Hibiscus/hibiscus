@@ -7,7 +7,22 @@ const STORAGE_KEY = 'hibiscus.lang';
 const dict = {
   // 공통
   demoData: ['DEMO DATA', 'DEMO DATA'],
-  backToDemo: ['데모 홈', 'デモホーム'],
+  // 상단 바
+  navMain: ['주요 메뉴', 'メインメニュー'],
+  navHome: ['홈', 'ホーム'],
+  connectLink: ['실제 환경 연결', '実環境に接続'],
+  statusDemo: ['데모', 'デモ'],
+  statusDemoTitle: ['미리 만든 데모 데이터를 보고 있어요. 실제 서버에는 연결하지 않아요.', '用意したデモデータを表示しています。実サーバーには接続していません。'],
+  statusConnected: ['실서버 연결', '実サーバー接続'],
+  statusDown: ['연결 안 됨', '未接続'],
+  statusLogin: ['로그인 필요', 'ログインが必要'],
+  userMenuLabel: ['사용자 메뉴', 'ユーザーメニュー'],
+  menuOpen: ['메뉴 열기', 'メニューを開く'],
+  menuClose: ['메뉴 닫기', 'メニューを閉じる'],
+  menuNotVerified: ['토큰은 있지만 아직 확인되지 않았어요', 'トークンはありますがまだ確認できていません'],
+  menuReconnect: ['다시 연결', '再接続'],
+  menuLogout: ['이 브라우저에서 로그아웃', 'このブラウザからログアウト'],
+  menuLogoutNote: ['이 브라우저에 저장한 토큰만 지웁니다', 'このブラウザに保存したトークンだけを削除します'],
   techDetails: ['세부 기술 정보', '技術的な詳細'],
   hideDetails: ['접기', '閉じる'],
   copy: ['복사', 'コピー'],
