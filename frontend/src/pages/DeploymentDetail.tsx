@@ -467,7 +467,7 @@ function ExplainModal({ source, title, onClose, lang, setLang, hasKo, hasJa }: {
       }
       onClose={onClose}
       toolbar={
-        <div className="lang-switch" role="group" aria-label="language">
+        <div className="lang-switch" role="group" aria-label="language" data-active={lang}>
           <button type="button" className={lang === 'ko' ? 'lang-on' : ''} onClick={() => setLang('ko')} disabled={!hasKo}>KO</button>
           <button type="button" className={lang === 'ja' ? 'lang-on' : ''} onClick={() => setLang('ja')} disabled={!hasJa}>JA</button>
         </div>
@@ -506,6 +506,7 @@ function ApprovalCard({ view, source, onChanged }: { view: DeploymentView; sourc
       {awaiting && (
         <div className="row">
           <button type="button" className="btn btn-primary" disabled={busy} onClick={approve}>
+            {busy && <LoaderCircle size={14} className="spin" aria-hidden />}
             {busy ? t('approving') : t('approve')}
           </button>
           <span className="small muted">{t('selfApprovalNote')}</span>

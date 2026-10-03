@@ -1,10 +1,11 @@
 import { Flower2 } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { configToSearch, createDataSource, readConfig } from './api';
 import { TokenBar } from './components/TokenBar';
 import { DemoBadge } from './components/ui';
 import { useConnection, type ConnectionState } from './hooks/useConnection';
 import { LangProvider, useLang } from './lib/i18n';
+import { fadeTextSwap } from './lib/motion';
 import { APPLICATIONS_PATH, hrefFor, useHashRoute } from './lib/router';
 import { ApplicationDetail } from './pages/ApplicationDetail';
 import { ApplicationList } from './pages/ApplicationList';
@@ -35,6 +36,15 @@ function Shell() {
     document.documentElement.lang = lang;
   }, [lang]);
 
+  // 첫 렌더는 건너뛰고, 언어를 바꿀 때만 본문과 열려 있는 모달 본문을 부드럽게 바꾼다
+  const mainRef = useRef<HTMLElement>(null);
+  const langSeen = useRef(lang);
+  useEffect(() => {
+    if (langSeen.current === lang) return;
+    langSeen.current = lang;
+    fadeTextSwap([mainRef.current, document.querySelector('.modal-body')]);
+  }, [lang]);
+
   return (
     <div className="app">
       <nav className="topbar">
@@ -59,14 +69,14 @@ function Shell() {
           ) : (
             route.page !== 'none' && <a className="topbar-link" href={hrefFor('')}>{t('backToDemo')}</a>
           )}
-          <div className="lang-switch" role="group" aria-label="language">
+          <div className="lang-switch" role="group" aria-label="language" data-active={lang}>
             <button type="button" className={lang === 'ko' ? 'lang-on' : ''} onClick={() => setLang('ko')}>KO</button>
             <button type="button" className={lang === 'ja' ? 'lang-on' : ''} onClick={() => setLang('ja')}>JA</button>
           </div>
         </div>
         </div>
       </nav>
-      <main>
+      <main ref={mainRef}>
         {route.page === 'deployment' && <DeploymentDetail key={`${route.id}-${tokenVersion}`} id={route.id} source={source} />}
         {route.page === 'application' && <ApplicationDetail key={`${route.id}-${tokenVersion}`} id={route.id} source={source} />}
         {route.page === 'applications' && <ApplicationList key={`apps-${tokenVersion}`} source={source} />}

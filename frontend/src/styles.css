@@ -1781,3 +1781,124 @@ main {
     transform: scale(1.35);
   }
 }
+
+/* ---- 언어 전환: 흰 손잡이가 KO ↔ JA 로 미끄러진다 ---- */
+.lang-switch {
+  position: relative;
+}
+.lang-switch::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 2px;
+  width: calc(50% - 3px);
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: 0 1px 3px rgba(47, 62, 70, 0.15);
+  transition: transform 0.28s var(--ease-out);
+}
+.lang-switch[data-active='ja']::before {
+  transform: translateX(calc(100% + 2px));
+}
+.lang-switch button {
+  position: relative;
+  z-index: 1;
+  width: 40px;
+  padding: 2px 0;
+  text-align: center;
+  transition: color 0.2s var(--ease-out);
+}
+.lang-switch .lang-on {
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink);
+}
+
+/* ---- 접기(details): 높이와 투명도를 같이 풀고 접는다. 지원하지 않는 브라우저는 그냥 바로 열린다 ---- */
+:root {
+  interpolate-size: allow-keywords;
+}
+.collapsible::details-content {
+  block-size: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition:
+    block-size 0.3s var(--ease-out),
+    opacity 0.25s var(--ease-out),
+    content-visibility 0.3s allow-discrete;
+}
+.collapsible[open]::details-content {
+  block-size: auto;
+  opacity: 1;
+}
+.collapsible > summary {
+  transition: color 0.2s var(--ease-out);
+}
+.collapsible > summary::before {
+  transition: transform 0.25s var(--ease-out);
+}
+.more-body,
+.raw-body {
+  animation: rise-in 0.25s var(--ease-out) backwards;
+}
+
+/* ---- 팝업(정책 설명): 배경이 깔리고 창이 살짝 커지며 올라온다. 닫을 때는 반대로 ---- */
+.modal-backdrop {
+  animation: backdrop-in 0.22s var(--ease-out) both;
+}
+.modal {
+  animation: modal-in 0.3s var(--ease-out) both;
+}
+.modal-backdrop.is-closing {
+  animation: backdrop-out 0.2s ease-in both;
+}
+.modal-backdrop.is-closing .modal {
+  animation: modal-out 0.2s ease-in both;
+}
+@keyframes backdrop-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes backdrop-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.97);
+  }
+}
+@keyframes modal-out {
+  to {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+}
+
+/* ---- 버튼과 행: 색은 부드럽게 바뀌고, 누르면 살짝 눌린다 ---- */
+.btn,
+.icon-btn,
+.link-btn,
+.hash,
+.history-item,
+.topbar-link {
+  transition:
+    background-color 0.2s var(--ease-out),
+    border-color 0.2s var(--ease-out),
+    color 0.2s var(--ease-out),
+    transform 0.12s var(--ease-out);
+}
+.btn:active:not(:disabled),
+.icon-btn:active {
+  transform: scale(0.97);
+}
+.hash-copy {
+  transition: opacity 0.15s var(--ease-out);
+}
+.hash-copy .lucide-check {
+  animation: mark-pop 0.3s var(--ease-out);
+}
