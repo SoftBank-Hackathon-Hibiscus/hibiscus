@@ -1,4 +1,5 @@
 // approve / sign 명령. 종료 코드 0 서명 / 1 거절 / 2 오류
+import { rmSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { createApproval } from "./approval.js";
 import { CosignSigner, DryRunSigner } from "./cosign.js";
@@ -55,12 +56,14 @@ async function main(argv: string[]): Promise<number> {
   }
 
   if (command === "sign") {
+    // 인자 검사 전에 지움. 인자 오류로 끝나도 예전 결과가 남지 않게
+    const out = values.out ?? "sign_result.json";
+    rmSync(out, { force: true });
     const dryRun = values["dry-run"] === true;
     const noTlog = values["no-tlog"] === true || process.env.SIGNER_NO_TLOG === "1";
     const signer = dryRun
       ? new DryRunSigner()
       : new CosignSigner(required(values.key ?? process.env.SIGNER_COSIGN_KEY, "key"), "cosign", { noTlog });
-    const out = values.out ?? "sign_result.json";
     const outcome = await runSign({
       planPath: required(values.plan, "plan"),
       requester: required(values.requester, "requester"),
