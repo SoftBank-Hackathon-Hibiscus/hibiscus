@@ -115,9 +115,57 @@ export class DockerRuntime implements ContainerRuntime {
         available.push(container);
       } catch (error) {
         if (!this.isMissing(error)) throw error;
+        if (container.container === servingContainer) {
+          available.push(await this.recreateServing(container));
+        }
       }
     }
     return available;
+  }
+
+  private async recreateServing(
+    container: ManagedContainer,
+  ): Promise<ManagedContainer> {
+    if (!container.image.endsWith(`@${container.digest}`)) {
+      throw new Error(
+        `Serving container image does not match its digest: ${container.container}`,
+      );
+    }
+    await this.commands.run(this.config.dockerCommand, [
+      "pull",
+      container.image,
+    ]);
+    await this.commands.run(this.config.dockerCommand, [
+      "run",
+      "-d",
+      "--name",
+      container.container,
+      "--restart",
+      "unless-stopped",
+      "--label",
+      "hibiscus.managed=true",
+      "--label",
+      `hibiscus.run_id=${container.run_id}`,
+      "--label",
+      `hibiscus.digest=${container.digest}`,
+      "-p",
+      `127.0.0.1:${container.host_port}:${container.container_port}`,
+      container.image,
+    ]);
+    const hostPort = await this.hostPort(
+      container.container,
+      container.container_port,
+    );
+    if (hostPort !== container.host_port) {
+      throw new Error(
+        `Recovered container port changed from ${container.host_port} to ${hostPort}`,
+      );
+    }
+    return {
+      ...container,
+      url: `http://127.0.0.1:${hostPort}`,
+      role: "serving",
+    };
   }
 
   private async recover(

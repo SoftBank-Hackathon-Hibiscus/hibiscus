@@ -16,6 +16,8 @@ import type {
 
 class FakeRuntime implements ContainerRuntime {
   createCount = 0;
+  reconcileCount = 0;
+  reconcileError: Error | undefined;
   removed: string[] = [];
 
   createCandidate(
@@ -47,6 +49,8 @@ class FakeRuntime implements ContainerRuntime {
   }
 
   reconcile(containers: ManagedContainer[]): Promise<ManagedContainer[]> {
+    this.reconcileCount += 1;
+    if (this.reconcileError) return Promise.reject(this.reconcileError);
     return Promise.resolve(containers);
   }
 }
@@ -104,6 +108,7 @@ void test("executes each job once and restores candidate lifecycle state", async
     const activated = await executor.execute(actionJob(first, "activate"));
     assert.equal(activated.serving?.digest, first.digest);
     assert.equal((await executor.serving())?.digest, first.digest);
+    assert.equal(runtime.reconcileCount, 2);
 
     const second = candidateJob("run-2", "b", 1);
     await executor.execute(second);
@@ -131,6 +136,36 @@ void test("executes each job once and restores candidate lifecycle state", async
       protectedServing.error,
       "Serving container cannot be discarded",
     );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+void test("retries serving reconciliation without deleting saved state", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "hibiscus-agent-recovery-"));
+  try {
+    const runtime = new FakeRuntime();
+    const store = new StateStore(join(directory, "state.json"));
+    const executor = new JobExecutor(
+      "agent-1",
+      store,
+      runtime,
+      new FakeVerifier(),
+      new PassingHealth(),
+    );
+    const job = candidateJob("run-1", "a", 1);
+    await executor.execute(job);
+    await executor.execute(actionJob(job, "activate"));
+
+    runtime.reconcileError = new Error("Saved host port is unavailable");
+    await assert.rejects(
+      executor.serving(),
+      /Saved host port is unavailable/,
+    );
+    runtime.reconcileError = undefined;
+
+    assert.equal((await executor.serving())?.digest, job.digest);
+    assert.equal(runtime.reconcileCount, 2);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

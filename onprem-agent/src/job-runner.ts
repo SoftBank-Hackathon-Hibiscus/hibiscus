@@ -13,7 +13,11 @@ export class JobRunner {
   ) {}
 
   async start(): Promise<void> {
-    await this.executor.restore();
+    try {
+      await this.executor.restore();
+    } catch (error) {
+      console.error(`[agent-recovery] ${this.message(error)}`);
+    }
     await Promise.all([this.pollLoop(), this.heartbeatLoop()]);
   }
 
