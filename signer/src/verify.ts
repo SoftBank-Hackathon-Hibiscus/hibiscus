@@ -135,6 +135,11 @@ export interface AuditVerifyOptions {
   verifier?: ImageVerifier;
   /** 서명 줄이 없는 digest(거절 줄)도 이 저장소에서 서명을 찾음. 서명 줄을 거절로 바꿔치기한 것을 잡으려면 필요 */
   imageRepo?: string;
+  /**
+   * 켜면 audit_head 가 없는 서명(감사 로그 없이 한 서명)도 로그에 없는 서명으로 봄.
+   * 키를 훔쳐 signer 밖에서 cosign 으로 직접 서명한 것을 잡음. 감사 로그를 켜기 전 서명이 섞인 이미지는 걸리니 opt-in
+   */
+  strictImages?: boolean;
   /** 있으면 감사 로그 끝 고정값(anchors 파일)과도 맞춰 봄. 끝을 잘라냈거나 다시 쓴 것을 잡음 */
   anchors?: { path: string; verifier: BlobVerifier };
 }
@@ -214,7 +219,10 @@ export async function runAuditVerify(o: AuditVerifyOptions): Promise<AuditVerify
     }
     for (const sig of sigs) {
       const anchor = sig.audit_head;
-      if (anchor === undefined) continue; // 감사 로그를 안 켜고 한 서명
+      if (anchor === undefined) {
+        if (!o.strictImages) continue; // 감사 로그를 안 켜고 한 서명
+        return { code: 1, line: 0, reason: "unlogged_signature", detail: `감사 로그 없이 한 서명 (audit_head 없음, run_id=${sig.run_id ?? "?"}): ${imageRef}` };
+      }
       if (!logged.some((line) => matches(sig, line))) {
         const at = lineOfHash.get(anchor);
         return {

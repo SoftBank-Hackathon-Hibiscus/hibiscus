@@ -50,6 +50,7 @@ const USAGE = `사용법
   audit         감사 로그가 처음부터 끝까지 이어지는지 확인. 끊긴 첫 줄 번호를 알려줌
   --anchors     감사 로그 끝 고정값 파일. anchor 는 여기에 추가, audit 는 이 고정값과도 맞춰 봄 (끝 자르기·다시 쓰기). 없으면 SIGNER_AUDIT_ANCHORS
   --images      레지스트리 서명과 맞춰 봄: signed 줄마다 맞는 서명이 있는지, audit_head 가 붙은 서명이 전부 로그에 있는지
+  --strict-images  --images 와 같이: audit_head 없는 서명(감사 로그 없이 한 서명)도 로그에 없는 서명으로 봄. 키 도용 감지
                 (체인을 통째로 다시 계산하거나 signed 줄을 지우거나 거절로 바꾼 것도 잡음). 거절 줄 digest 는 --image-repo 저장소에서 찾음
 
 종료 코드: 0 서명함·확인함 / 1 서명 거절·확인 실패 / 2 실행 오류`;
@@ -87,6 +88,7 @@ async function main(argv: string[]): Promise<number> {
       pub: { type: "string", multiple: true },
       audit: { type: "string" },
       images: { type: "boolean", default: false },
+      "strict-images": { type: "boolean", default: false },
       "approval-ttl": { type: "string" },
       "pubkey-sha256": { type: "string", multiple: true },
       "self-verify": { type: "boolean", default: false },
@@ -275,7 +277,7 @@ async function main(argv: string[]): Promise<number> {
     const imageRepo = values["image-repo"] || process.env.IMAGE_REPO || undefined;
     const outcome = await runAuditVerify({
       auditPath: required(auditPath, "audit"),
-      ...(values.images === true ? { verifier: trustedVerifier() } : {}),
+      ...(values.images === true ? { verifier: trustedVerifier(), strictImages: values["strict-images"] === true } : {}),
       ...(imageRepo !== undefined ? { imageRepo } : {}),
       ...(anchorsPath !== undefined ? { anchors: { path: anchorsPath, verifier: trustedVerifier() } } : {}),
     });

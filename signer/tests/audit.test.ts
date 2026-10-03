@@ -250,6 +250,22 @@ describe("runAuditVerify", () => {
     expect(await runAuditVerify({ auditPath, verifier: signer })).toMatchObject({ code: 1, line: 4, reason: "unlogged_signature" });
   });
 
+  it("훔친 키로 signer 밖에서 audit_head 없이 서명: 기본은 넘기고 strictImages 면 unlogged_signature", async () => {
+    const { signer, auditPath } = await chain(tmp());
+    await signer.sign(signer.calls[0]!.imageRef, { run_id: "r-stolen", targets: "onprem+cloud_run" });
+    expect(await runAuditVerify({ auditPath, verifier: signer })).toMatchObject({ code: 0 });
+    expect(await runAuditVerify({ auditPath, verifier: signer, strictImages: true })).toMatchObject({
+      code: 1,
+      reason: "unlogged_signature",
+      detail: expect.stringMatching(/audit_head 없음, run_id=r-stolen/),
+    });
+  });
+
+  it("strictImages 여도 감사 로그대로 한 서명만 있으면 통과", async () => {
+    const { signer, auditPath } = await chain(tmp());
+    expect(await runAuditVerify({ auditPath, verifier: signer, strictImages: true })).toMatchObject({ code: 0 });
+  });
+
   it("파일이 없으면 실행 오류 AUDIT_INVALID", async () => {
     await expect(runAuditVerify({ auditPath: join(tmp(), "nope.jsonl") })).rejects.toMatchObject({ code: "AUDIT_INVALID" });
   });
