@@ -67,7 +67,8 @@ const USAGE = `사용법
   --approval    이 승인 기록(누가, 언제 승인)으로 서명했는지까지 확인
   --max-age     서명한 지 이 시간(분)이 지난 결과는 거부 (expired). 없으면 SIGNER_MAX_AGE_MIN
   --json        결과를 JSON 한 줄로 출력 (실행 오류도)
-  --latest      --audit 와 같이: 이 결과 뒤에 같은 저장소·겹치는 배포 위치로 더 새로 서명한 결과가 있거나 같은 이미지가 block 됐으면 거부
+  --latest      --audit 와 같이: 이 결과 뒤에 같은 저장소·겹치는 배포 위치로 더 새로 서명한 결과가 있거나 같은 이미지가 block 됐으면 거부.
+                앱 단위가 아니라 저장소 + 배포 위치 기준
                 (superseded, 예전 결과 재사용·몰래 롤백). 없으면 SIGNER_VERIFY_LATEST=1
 
   reconcile     실제 배포 상태(관측 파일, contracts/Observed.schema.json)가 서명된 그대로인지 확인. 이미지마다 감사 로그 기록,
@@ -85,6 +86,7 @@ const USAGE = `사용법
                 (체인을 통째로 다시 계산하거나 signed 줄을 지우거나 거절로 바꾼 것도 잡음). 거절 줄 digest 는 --image-repo 저장소에서 찾음
   --strict-images --images 와 같이: audit_head 없는 서명(감사 로그 없이 한 서명)도 로그에 없는 서명으로 봄. 키 도용 감지
   --sweep       --images 와 같이: 저장소 태그를 crane 으로 전부 훑어서 로그에 한 번도 안 나온 이미지의 서명도 봄. 없으면 SIGNER_AUDIT_SWEEP=1
+                훔친 키로 signer 밖에서 한 서명(audit_head 없음)까지 잡으려면 --strict-images 도 같이
   --sweep-max   저장소당 태그 한도 (기본 1000). 넘으면 일부만 보고 통과시키지 않고 멈춤 (SWEEP_TRUNCATED)
   --digests-file 태그 없는 이미지 digest 목록 (한 줄에 sha256:<hex> 또는 <저장소>@sha256:<hex>)
 
