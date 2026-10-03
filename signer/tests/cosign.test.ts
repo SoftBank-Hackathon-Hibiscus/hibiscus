@@ -1,7 +1,7 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { CosignSigner, CosignVerifier, isKmsKey } from "../src/cosign.js";
+import { CosignSigner, CosignVerifier, ensureCosignVersion, isKmsKey } from "../src/cosign.js";
 import { fakeCosign, REPO, tmp } from "./helpers.js";
 
 const DIGEST = `sha256:${"a".repeat(64)}`;
@@ -54,6 +54,21 @@ describe("CosignSigner", () => {
     const dir = tmp();
     const { bin } = fakeCosign(dir);
     await expect(new CosignSigner(join(dir, "nope.key"), bin).sign(`${REPO}@${DIGEST}`, {})).rejects.toMatchObject({ code: "KEY_MISSING" });
+  });
+});
+
+describe("cosign 버전 확인", () => {
+  it.each([["v2.4.1"], ["2.5.0"], ["devel"]])("cosign 버전이 %s 면 서명·확인 전에 멈춤", async (version) => {
+    const dir = tmp();
+    const key = join(dir, "cosign.key");
+    writeFileSync(key, "dummy");
+    const { bin, argsFile } = fakeCosign(dir, { version });
+    await expect(new CosignSigner(key, bin).sign(`${REPO}@${DIGEST}`, {})).rejects.toMatchObject({ code: version === "devel" ? "COSIGN_VERSION_UNKNOWN" : "COSIGN_VERSION" });
+    expect(existsSync(argsFile)).toBe(false);
+  });
+
+  it("v3 이상이면 통과하고 실행 파일마다 한 번만 확인", async () => {
+    expect(await ensureCosignVersion(fakeCosign(tmp(), { version: "v3.2.0" }).bin)).toBe("v3.2.0");
   });
 });
 

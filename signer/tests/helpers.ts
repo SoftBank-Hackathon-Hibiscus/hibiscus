@@ -56,7 +56,10 @@ export class RecordingSigner implements ImageSigner, ImageVerifier {
  * 받은 인자를 파일에 적고 끝나는 가짜 cosign.
  * expectArgs 를 주면 인자가 그것과 똑같을 때만 0, 아니면 1 (서명 주석이 안 맞는 상황)
  */
-export function fakeCosign(dir: string, o: { code?: number; expectArgs?: string[]; stderr?: string; stdout?: string } = {}): { bin: string; argsFile: string } {
+export function fakeCosign(
+  dir: string,
+  o: { code?: number; expectArgs?: string[]; stderr?: string; stdout?: string; version?: string } = {},
+): { bin: string; argsFile: string } {
   const argsFile = join(dir, "args.txt");
   const bin = join(dir, "cosign");
   let check = `exit ${o.code ?? 0}`;
@@ -68,7 +71,9 @@ export function fakeCosign(dir: string, o: { code?: number; expectArgs?: string[
   const stderr = (o.stderr ?? "boom: registry denied").replace(/'/g, "");
   const stdoutFile = join(dir, "stdout.txt");
   writeFileSync(stdoutFile, o.stdout !== undefined ? o.stdout + "\n" : "");
-  writeFileSync(bin, `#!/bin/sh\nprintf '%s\\n' "$@" > "${argsFile}"\ncat "${stdoutFile}"\necho '${stderr}' >&2\n${check}\n`);
+  // version --json 은 기록하지 않고 버전만 답함 (signer 가 cosign v3 이상인지 먼저 확인함)
+  const version = `if [ "$1" = "version" ]; then echo '{"gitVersion":"${o.version ?? "v3.1.3"}"}'; exit 0; fi`;
+  writeFileSync(bin, `#!/bin/sh\n${version}\nprintf '%s\\n' "$@" > "${argsFile}"\ncat "${stdoutFile}"\necho '${stderr}' >&2\n${check}\n`);
   chmodSync(bin, 0o755);
   return { bin, argsFile };
 }

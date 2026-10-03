@@ -1,6 +1,9 @@
-// cosign 로컬 키 서명·확인. -a 주석으로 sign_result 필드를 붙여서 cosign verify -a ... 로 그대로인지 확인 가능
+// cosign 로컬 키 서명·확인. -a 주석으로 sign_result 필드를 붙여서 cosign verify -a ... 로 그대로인지 확인 가능.
+// 배포 증명서(in-toto attestation)를 붙이고 cosign verify-attestation(+Rego 정책)으로 확인하는 것도 여기서
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import { SignerError } from "./io.js";
 
@@ -9,6 +12,8 @@ const execFileAsync = promisify(execFile);
 export interface ImageSigner {
   /** 서명하고 signature_ref 반환 */
   sign(imageRef: string, annotations: Record<string, string>): Promise<string>;
+  /** 서명된 배포 증명서(in-toto Statement)를 이미지에 붙임. 시험 실행 서명기는 없음 */
+  attest?(imageRef: string, predicateType: string, predicate: unknown): Promise<void>;
 }
 
 // 태그·digest 없는 저장소 주소
@@ -29,6 +34,42 @@ export function isKmsKey(key: string): boolean {
   return KMS_KEY_RE.test(key);
 }
 
+// v2 는 서명·확인 옵션(--use-signing-config 등)과 출력이 달라서 v3 부터만 씀
+export const MIN_COSIGN_MAJOR = 3;
+const checkedVersions = new Map<string, Promise<string>>();
+
+/** cosign 이 v3 이상인지 실행 파일마다 한 번만 확인. 버전 문자열 반환 */
+export function ensureCosignVersion(cosignBin: string): Promise<string> {
+  let pending = checkedVersions.get(cosignBin);
+  if (!pending) {
+    pending = readCosignVersion(cosignBin);
+    checkedVersions.set(cosignBin, pending);
+    // 실패는 기억하지 않음 (설치 후 다시 시도할 수 있게)
+    pending.catch(() => checkedVersions.delete(cosignBin));
+  }
+  return pending;
+}
+
+async function readCosignVersion(cosignBin: string): Promise<string> {
+  let stdout: string;
+  try {
+    ({ stdout } = await execFileAsync(cosignBin, ["version", "--json"], { env: process.env, timeout: 30_000 }));
+  } catch (e) {
+    if ((e as { code?: unknown }).code === "ENOENT") throw new SignerError("COSIGN_MISSING", `cosign 실행 파일이 없음: ${cosignBin}`);
+    throw new SignerError("COSIGN_VERSION_UNKNOWN", `cosign 버전을 확인하지 못함${lastStderrLine(e) ? `: ${lastStderrLine(e)}` : ""}`);
+  }
+  let version = "";
+  try {
+    version = String((JSON.parse(stdout) as { gitVersion?: unknown }).gitVersion ?? "");
+  } catch {
+    // 아래에서 처리
+  }
+  const major = Number(/^v?(\d+)\./.exec(version)?.[1]);
+  if (!Number.isFinite(major)) throw new SignerError("COSIGN_VERSION_UNKNOWN", `cosign 버전을 읽지 못함: ${stdout.trim().slice(0, 80)}`);
+  if (major < MIN_COSIGN_MAJOR) throw new SignerError("COSIGN_VERSION", `cosign v${MIN_COSIGN_MAJOR} 이상이 필요함 (지금 ${version})`);
+  return version;
+}
+
 export interface CosignOptions {
   /** Rekor(투명성 로그)에 안 올림. 이렇게 서명한 이미지는 verify 에도 --insecure-ignore-tlog=true 필요 */
   noTlog?: boolean;
@@ -43,9 +84,8 @@ export class CosignSigner implements ImageSigner {
 
   async sign(imageRef: string, annotations: Record<string, string>): Promise<string> {
     if (!isKmsKey(this.keyPath) && !existsSync(this.keyPath)) throw new SignerError("KEY_MISSING", `cosign 키 파일이 없음: ${this.keyPath}`);
-    const args = ["sign", "--yes", "--key", this.keyPath];
-    // v3 는 --use-signing-config=false 없이 --tlog-upload=false 만 주면 에러
-    if (this.options.noTlog) args.push("--use-signing-config=false", "--tlog-upload=false");
+    await ensureCosignVersion(this.cosignBin);
+    const args = ["sign", "--yes", "--key", this.keyPath, ...this.tlogArgs()];
     for (const [key, value] of Object.entries(annotations)) args.push("-a", `${key}=${value}`);
     // -- 뒤라서 이미지 자리에 옵션처럼 생긴 값이 와도 옵션으로 안 읽힘
     args.push("--", imageRef);
@@ -58,6 +98,28 @@ export class CosignSigner implements ImageSigner {
     }
     return `cosign:${imageRef}`;
   }
+
+  async attest(imageRef: string, predicateType: string, predicate: unknown): Promise<void> {
+    if (!isKmsKey(this.keyPath) && !existsSync(this.keyPath)) throw new SignerError("KEY_MISSING", `cosign 키 파일이 없음: ${this.keyPath}`);
+    await ensureCosignVersion(this.cosignBin);
+    const dir = mkdtempSync(join(tmpdir(), "signer-attest-"));
+    const predicatePath = join(dir, "predicate.json");
+    writeFileSync(predicatePath, JSON.stringify(predicate), "utf8");
+    const args = ["attest", "--yes", "--key", this.keyPath, ...this.tlogArgs(), "--type", predicateType, "--predicate", predicatePath, "--", imageRef];
+    try {
+      await execFileAsync(this.cosignBin, args, { env: process.env, timeout: 180_000 });
+    } catch (e) {
+      const stderr = lastStderrLine(e);
+      throw new SignerError("ATTEST_FAILED", `cosign 배포 증명서 붙이기 실패${stderr ? `: ${stderr}` : ""}`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  // v3 는 --use-signing-config=false 없이 --tlog-upload=false 만 주면 에러
+  private tlogArgs(): string[] {
+    return this.options.noTlog ? ["--use-signing-config=false", "--tlog-upload=false"] : [];
+  }
 }
 
 export interface ImageVerifier {
@@ -65,6 +127,11 @@ export interface ImageVerifier {
   verify(imageRef: string, annotations: Record<string, string>): Promise<void>;
   /** 이 키로 확인되는 서명 전부의 주석. 서명이 없으면 빈 배열 */
   signatures(imageRef: string): Promise<Array<Record<string, string>>>;
+  /**
+   * 이 키로 확인되는 배포 증명서(in-toto Statement) 전부. policyPath 를 주면 cosign 이 Rego 정책도 검사.
+   * 증명서가 없거나 서명이 안 맞으면 SIGNATURE_INVALID, 정책에 걸리면 POLICY_DENIED
+   */
+  attestations?(imageRef: string, predicateType: string, policyPath?: string): Promise<unknown[]>;
 }
 
 export class CosignVerifier implements ImageVerifier {
@@ -76,7 +143,7 @@ export class CosignVerifier implements ImageVerifier {
 
   async verify(imageRef: string, annotations: Record<string, string>): Promise<void> {
     try {
-      await this.run(imageRef, annotations);
+      await this.run(this.verifyArgs(annotations, imageRef));
     } catch (e) {
       // 단일 결과 검증에서는 서명이 없는 것도 검증 실패다.
       if (e instanceof SignerError && e.code === "SIGNATURE_NOT_FOUND") throw new SignerError("SIGNATURE_INVALID", e.message);
@@ -87,7 +154,7 @@ export class CosignVerifier implements ImageVerifier {
   async signatures(imageRef: string): Promise<Array<Record<string, string>>> {
     let stdout: string;
     try {
-      stdout = await this.run(imageRef, {});
+      stdout = await this.run(this.verifyArgs({}, imageRef));
     } catch (e) {
       // 서명 부재가 명시된 경우만 빈 목록이다. 검증·실행 오류로 감사 검사를 통과시키지 않는다.
       if (e instanceof SignerError && e.code === "SIGNATURE_NOT_FOUND") return [];
@@ -108,12 +175,46 @@ export class CosignVerifier implements ImageVerifier {
     }
   }
 
-  private async run(imageRef: string, annotations: Record<string, string>): Promise<string> {
-    if (!isKmsKey(this.pubKeyPath) && !existsSync(this.pubKeyPath)) throw new SignerError("KEY_MISSING", `cosign 공개키 파일이 없음: ${this.pubKeyPath}`);
-    const args = ["verify", "--key", this.pubKeyPath];
-    if (this.options.noTlog) args.push("--insecure-ignore-tlog=true");
+  async attestations(imageRef: string, predicateType: string, policyPath?: string): Promise<unknown[]> {
+    const args = ["verify-attestation", "--key", this.pubKeyPath, ...this.tlogArgs(), "--type", predicateType];
+    if (policyPath !== undefined) args.push("--policy", policyPath);
+    args.push("--", imageRef);
+    let stdout: string;
+    try {
+      stdout = await this.run(args);
+    } catch (e) {
+      if (e instanceof SignerError && e.code === "SIGNATURE_NOT_FOUND") throw new SignerError("SIGNATURE_INVALID", e.message);
+      throw e;
+    }
+    // stdout 은 줄마다 DSSE 봉투 JSON. payload(base64)를 풀면 in-toto Statement
+    try {
+      return stdout
+        .split("\n")
+        .filter((line) => line.trim().startsWith("{"))
+        .map((line) => {
+          const envelope = JSON.parse(line) as { payload?: unknown };
+          if (typeof envelope.payload !== "string") throw new Error("payload 없음");
+          return JSON.parse(Buffer.from(envelope.payload, "base64").toString("utf8")) as unknown;
+        });
+    } catch {
+      throw new SignerError("VERIFY_OUTPUT_INVALID", "cosign verify-attestation 출력이 DSSE 봉투 JSON 이 아님");
+    }
+  }
+
+  private verifyArgs(annotations: Record<string, string>, imageRef: string): string[] {
+    const args = ["verify", "--key", this.pubKeyPath, ...this.tlogArgs()];
     for (const [key, value] of Object.entries(annotations)) args.push("-a", `${key}=${value}`);
     args.push("--", imageRef);
+    return args;
+  }
+
+  private tlogArgs(): string[] {
+    return this.options.noTlog ? ["--insecure-ignore-tlog=true"] : [];
+  }
+
+  private async run(args: string[]): Promise<string> {
+    if (!isKmsKey(this.pubKeyPath) && !existsSync(this.pubKeyPath)) throw new SignerError("KEY_MISSING", `cosign 공개키 파일이 없음: ${this.pubKeyPath}`);
+    await ensureCosignVersion(this.cosignBin);
     try {
       const { stdout } = await execFileAsync(this.cosignBin, args, { env: process.env, timeout: 180_000, maxBuffer: 16 * 1024 * 1024 });
       return stdout;
@@ -125,6 +226,7 @@ export class CosignVerifier implements ImageVerifier {
       // 키·레지스트리를 못 쓴 건 설정 문제라 실행 오류(2). 나머지(서명 없음, 주석 불일치 등)만 검증 실패(1)
       if (KEY_ERROR_RE.test(stderr)) throw new SignerError("KEY_UNAVAILABLE", `cosign 공개키를 못 읽음: ${stderr}`);
       if (REGISTRY_ERROR_RE.test(stderr)) throw new SignerError("REGISTRY_UNAVAILABLE", `레지스트리에 접근하지 못함: ${stderr}`);
+      if (typeof err.code === "number" && POLICY_ERROR_RE.test(stderr)) throw new SignerError("POLICY_DENIED", `배포 증명서가 정책에 맞지 않음: ${stderr}`);
       if (typeof err.code === "number" && NO_SIGNATURE_RE.test(stderr)) throw new SignerError("SIGNATURE_NOT_FOUND", `cosign verify 실패: ${stderr}`);
       if (typeof err.code === "number" && SIGNATURE_ERROR_RE.test(stderr)) throw new SignerError("SIGNATURE_INVALID", `cosign verify 실패: ${stderr}`);
       throw new SignerError("VERIFY_FAILED", `cosign verify 실행 실패${stderr ? `: ${stderr}` : ""}`);
@@ -137,7 +239,9 @@ const KEY_ERROR_RE = /loading verifier from key opts|loading public key/;
 const REGISTRY_ERROR_RE = /dial tcp|connection refused|no such host|i\/o timeout|TLS handshake|UNAUTHORIZED|DENIED/;
 // 실제 cosign 은 "error during command execution: no signatures found" 처럼 앞에 접두어가 붙음
 const NO_SIGNATURE_RE = /(?:^|:\s*)no signatures found(?:\s|$)/i;
-const SIGNATURE_ERROR_RE = /no matching (?:signatures|attestations)|missing or incorrect annotation|not enough verified log entries|signature verification failed/i;
+const SIGNATURE_ERROR_RE = /no matching (?:signatures|attestations)|none of the attestations matched|missing or incorrect annotation|not enough verified log entries|signature verification failed/i;
+// verify-attestation --policy 에서 Rego 정책을 통과 못 함
+const POLICY_ERROR_RE = /validation errors? occurred/i;
 
 function lastStderrLine(e: unknown): string {
   return String((e as { stderr?: unknown }).stderr ?? "").trim().split("\n").pop() ?? "";
