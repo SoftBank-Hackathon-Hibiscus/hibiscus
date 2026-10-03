@@ -17,7 +17,7 @@ from typing import Optional
 from .errors import PremortemError
 from .process import CommandRunner
 
-EXCLUDED_DIRS = {".git", "__pycache__", "node_modules", ".venv", "venv", ".premortem", ".mypy_cache", ".pytest_cache"}
+EXCLUDED_DIRS = {".git", ".hibiscus", "__pycache__", "node_modules", ".venv", "venv", ".premortem", ".mypy_cache", ".pytest_cache"}
 EXCLUDED_FILES = (".env", ".env.*", "*.pem", "*.key", "id_rsa*", "id_ed25519*", "*.pyc", ".DS_Store")
 
 

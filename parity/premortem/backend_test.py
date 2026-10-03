@@ -12,17 +12,21 @@ from .redact import redact
 
 
 def validate_request(request):
-    required = {'format', 'run_id', 'app', 'source_revision', 'digest', 'build_manifest', 'record', 'noise'}
+    common = {'format', 'run_id', 'app', 'source_revision', 'digest', 'build_manifest'}
+    parity = request.get('format') == 'premortem-backend-test-v1' if isinstance(request, dict) else False
+    health = request.get('format') == 'premortem-backend-health-v1' if isinstance(request, dict) else False
+    required = common | ({'record', 'noise'} if parity else set())
     optional = {'port', 'health_path', 'health_timeout', 'after'}
-    if (not isinstance(request, dict) or not required <= set(request) or set(request) - required - optional
-            or request.get('format') != 'premortem-backend-test-v1'):
+    if (not isinstance(request, dict) or not (parity or health)
+            or not required <= set(request) or set(request) - required - optional):
         raise PremortemError('INPUT_INVALID', 'Backend 테스트 요청 형식이 잘못됨')
     validate_run_id(request['run_id'])
     if (not isinstance(request['source_revision'], str) or not re.fullmatch(r'[0-9a-f]{40}', request['source_revision'])
             or not isinstance(request['digest'], str) or not re.fullmatch(r'sha256:[0-9a-f]{64}', request['digest'])
             or not isinstance(request['app'], str) or not request['app'].strip()):
         raise PremortemError('INPUT_INVALID', '앱 이름·전체 커밋 SHA·index digest가 필요함')
-    for name in ('build_manifest', 'record', 'noise'):
+    paths = ('build_manifest', 'record', 'noise') if parity else ('build_manifest',)
+    for name in paths:
         if not isinstance(request[name], str) or not Path(request[name]).is_absolute():
             raise PremortemError('INPUT_INVALID', f'{name}은 실행 환경의 절대 경로여야 함')
     after = request.get('after', [])
@@ -39,6 +43,39 @@ def run_backend_test(request_path, out_dir, policy_root=None):
     output.mkdir(parents=True, exist_ok=True)
     policy = Path(policy_root or Path(__file__).resolve().parents[2] / 'policy').resolve()
     try:
+        if request['format'] == 'premortem-backend-health-v1':
+            from .health_test import test_build_health
+
+            normalized = test_build_health(
+                manifest_path=request['build_manifest'],
+                run_id=request['run_id'],
+                revision=request['source_revision'],
+                digest=request['digest'],
+                port=request.get('port', 8080),
+                health_path=request.get('health_path', '/healthz'),
+                health_timeout=request.get('health_timeout', 30),
+                out_dir=output,
+            )
+            normalized['app'] = request['app']
+            write_json_atomic(output / 'test_result.json', normalized)
+            result = {
+                'status': 'succeeded',
+                'exitCode': 0,
+                'artifacts': {
+                    'test_result': 'test_result.json',
+                    'build_manifest': 'parity/build_manifest.json',
+                },
+                'summary': {
+                    'stub': False,
+                    'test_passed': normalized['passed'],
+                    'health_only': True,
+                    **{key: request[key] for key in ('run_id', 'source_revision', 'digest')},
+                    'policy_decided': False,
+                    'deployment_executed': False,
+                },
+            }
+            write_json_atomic(output / 'stage_result.json', result)
+            return result
         execution = test_build(manifest_path=request['build_manifest'], record=request['record'],
             noise=request['noise'], app=request['app'], out_dir=output / 'parity', runner=SubprocessRunner(),
             run_id=request['run_id'], revision=request['source_revision'], digest=request['digest'],

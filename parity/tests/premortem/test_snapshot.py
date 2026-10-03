@@ -32,10 +32,14 @@ class SnapshotTest(unittest.TestCase):
         (self.src / ".env").write_text("TOKEN=abc\n", encoding="utf-8")
         (self.src / ".git").mkdir()
         (self.src / ".git" / "config").write_text("[core]\n", encoding="utf-8")
+        (self.src / ".hibiscus" / "parity").mkdir(parents=True)
+        (self.src / ".hibiscus" / "parity" / "session.jsonl").write_text("{}\n", encoding="utf-8")
         snap = snapshot.take_snapshot(self.src, Path(self.tmp.name) / "out")
         self.assertEqual([path for path, _ in snap.files], ["app.py", "pkg/util.py"])
         self.assertIn(".env", snap.excludes)
+        self.assertIn(".hibiscus/", snap.excludes)
         self.assertFalse((Path(self.tmp.name) / "out" / ".env").exists())
+        self.assertFalse((Path(self.tmp.name) / "out" / ".hibiscus").exists())
 
     @unittest.skipIf(os.name == "nt", "symlink 생성 권한이 필요한 환경")
     def test_a05_symlink_is_not_followed(self):

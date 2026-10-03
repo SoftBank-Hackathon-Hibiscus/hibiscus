@@ -216,6 +216,10 @@ class BuiltPipelineTest(unittest.TestCase):
             with self.subTest(changes=changes), self.assertRaises(PremortemError):
                 validate_request(dict(request, **changes))
 
+        health = {key: value for key, value in request.items() if key not in ('record', 'noise')}
+        health['format'] = 'premortem-backend-health-v1'
+        self.assertEqual(validate_request(health), health)
+
     def test_registry_bound_plan_cannot_omit_digest_or_change_revision(self):
         plan = self.root / 'plan.json'
         write_json_atomic(plan, {'run_id': 'run-1', 'requires': []})
