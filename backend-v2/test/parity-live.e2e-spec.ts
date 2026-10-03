@@ -17,7 +17,6 @@ describe.skipIf(!liveFile)('real parity through the Backend worker', () => {
       source: string;
       sourceRevision: string;
       imageRepo: string;
-      inputsFile: string;
       builder: string;
       python: string;
       output: string;
@@ -34,7 +33,6 @@ describe.skipIf(!liveFile)('real parity through the Backend worker', () => {
       SIGNER_MODE: 'dry',
       DEPLOY_MODE: 'off',
       PARITY_TEST_MODE: 'registry',
-      PARITY_INPUTS_FILE: input.inputsFile,
       PARITY_BUILDER: input.builder,
       PARITY_PYTHON_COMMAND: input.python,
       PARITY_PLATFORMS: 'linux/amd64',

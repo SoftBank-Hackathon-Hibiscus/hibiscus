@@ -30,6 +30,7 @@ describe('GitHub management and Webhook (e2e)', () => {
   let repoSequence = 200;
   const webhookSecret = randomBytes(32).toString('hex');
   const providerToken = 'ghu_private_provider_token';
+  const initialRevision = 'c'.repeat(40);
 
   beforeAll(async () => {
     directory = mkdtempSync(join(tmpdir(), 'hibiscus-github-e2e-'));
@@ -212,6 +213,24 @@ describe('GitHub management and Webhook (e2e)', () => {
       .send(applicationInput(999, 'missing'))
       .expect(404);
     expect(database.db.select().from(applications).all()).toHaveLength(0);
+
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          Response.json({ total_count: 1, repositories: [repository(999)] }),
+        )
+        .mockResolvedValueOnce(
+          Response.json({ name: 'main', commit: { sha: 'invalid' } }),
+        ),
+    );
+    await request(app.getHttpServer())
+      .post('/github/applications')
+      .set('Authorization', bearer())
+      .send(applicationInput(999))
+      .expect(502);
+    expect(database.db.select().from(applications).all()).toHaveLength(0);
   });
 
   it('creates from a repository and lets only its owner change the branch', async () => {
@@ -223,6 +242,22 @@ describe('GitHub management and Webhook (e2e)', () => {
     expect(created.application.sourcePath).toBe(
       `https://github.com/octo/repo-${created.github.repositoryId}.git`,
     );
+    expect(created.initial_deployment).toMatchObject({
+      applicationId: created.application.id,
+      version: 1,
+      trigger: 'registration',
+      sourceRevision: initialRevision,
+      sourceRevisionVerified: false,
+      digestSource: 'placeholder',
+      status: 'queued',
+    });
+    expect(
+      database.db
+        .select()
+        .from(deployments)
+        .where(eq(deployments.id, created.initial_deployment.id))
+        .get(),
+    ).toBeDefined();
     await request(app.getHttpServer())
       .patch(`/github/applications/${created.application.id}/branch`)
       .set('Authorization', `Bearer ${otherAccessToken}`)
@@ -236,7 +271,12 @@ describe('GitHub management and Webhook (e2e)', () => {
           repositories: [repository(created.github.repositoryId)],
         }),
       )
-      .mockResolvedValueOnce(Response.json({ name: 'feature/test' }));
+      .mockResolvedValueOnce(
+        Response.json({
+          name: 'feature/test',
+          commit: { sha: 'd'.repeat(40) },
+        }),
+      );
     vi.stubGlobal('fetch', mock);
     await request(app.getHttpServer())
       .patch(`/github/applications/${created.application.id}/branch`)
@@ -303,7 +343,7 @@ describe('GitHub management and Webhook (e2e)', () => {
         .from(deployments)
         .where(eq(deployments.applicationId, created.application.id))
         .all(),
-    ).toHaveLength(1);
+    ).toHaveLength(2);
     await deliver(
       JSON.stringify({
         ...push(created.github.repositoryId),
@@ -332,7 +372,55 @@ describe('GitHub management and Webhook (e2e)', () => {
         .from(deployments)
         .where(eq(deployments.applicationId, created.application.id))
         .all(),
-    ).toHaveLength(0);
+    ).toHaveLength(1);
+  });
+
+  it('rolls back application registration when initial deployment creation fails', async () => {
+    const id = ++repoSequence;
+    const applicationCount = database.db
+      .select()
+      .from(applications)
+      .all().length;
+    const linkCount = database.db
+      .select()
+      .from(githubApplicationLinks)
+      .all().length;
+    const deploymentCount = database.db.select().from(deployments).all().length;
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          Response.json({ total_count: 1, repositories: [repository(id)] }),
+        )
+        .mockResolvedValueOnce(
+          Response.json({
+            name: 'main',
+            commit: { sha: initialRevision },
+          }),
+        ),
+    );
+    vi.spyOn(app.get(DeploymentService), 'create').mockImplementationOnce(
+      () => {
+        throw new Error('intentional initial deployment failure');
+      },
+    );
+
+    await request(app.getHttpServer())
+      .post('/github/applications')
+      .set('Authorization', bearer())
+      .send(applicationInput(id))
+      .expect(500);
+
+    expect(database.db.select().from(applications).all()).toHaveLength(
+      applicationCount,
+    );
+    expect(
+      database.db.select().from(githubApplicationLinks).all(),
+    ).toHaveLength(linkCount);
+    expect(database.db.select().from(deployments).all()).toHaveLength(
+      deploymentCount,
+    );
   });
 
   it('rolls back the delivery marker on failure so the same delivery can be retried', async () => {
@@ -417,7 +505,12 @@ describe('GitHub management and Webhook (e2e)', () => {
         .mockResolvedValueOnce(
           Response.json({ total_count: 1, repositories: [repository(id)] }),
         )
-        .mockResolvedValueOnce(Response.json({ name: 'main' })),
+        .mockResolvedValueOnce(
+          Response.json({
+            name: 'main',
+            commit: { sha: initialRevision },
+          }),
+        ),
     );
     const response = await request(app.getHttpServer())
       .post('/github/applications')

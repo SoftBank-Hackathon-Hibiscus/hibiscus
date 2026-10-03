@@ -7,6 +7,8 @@ import {
   stageExecutions,
   deploymentArtifacts,
   deploymentAuditLogs,
+  applicationRoutes,
+  routingTargets,
   type DeploymentArtifact,
   type DeploymentAuditLog,
   type Deployment,
@@ -39,6 +41,19 @@ export class DeploymentRepository {
       .from(deployments)
       .where(eq(deployments.id, id))
       .get();
+  }
+
+  findActive(applicationId: string): Deployment | undefined {
+    return this.database.db
+      .select({ deployment: deployments })
+      .from(applicationRoutes)
+      .innerJoin(
+        routingTargets,
+        eq(applicationRoutes.targetId, routingTargets.id),
+      )
+      .innerJoin(deployments, eq(routingTargets.deploymentId, deployments.id))
+      .where(eq(applicationRoutes.applicationId, applicationId))
+      .get()?.deployment;
   }
 
   findPolicyResult(deploymentId: string): PolicyResult | undefined {

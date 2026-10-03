@@ -159,6 +159,13 @@ flowchart LR
 | `facts.storage[].kind` | string | 필수 | sqlite(파일 헤더로 판별) / local_upload(업로드 폴더) / local_file(그 밖의 파일) |
 | `facts.storage[].path` | string | 필수 | 컨테이너 안의 경로 |
 | `facts.storage[].storage` | string | 필수 | 저장 위치. container_layer = 재시작으로는 남지만 컨테이너를 새로 만들면 사라진다 |
+| `facts.parity_baseline` | object | 선택 | GitHub source revision에 저장된 parity 기준 파일 상태 |
+| `facts.parity_baseline.mode` | "replay" \| "health" | 필수 |  |
+| `facts.parity_baseline.changed` | boolean | 필수 |  |
+| `facts.parity_baseline.active_source_revision` | string | 선택 | 테스트한 소스의 커밋 SHA. 소문자 hex 7~40자 |
+| `facts.parity_baseline.active_hash` | string | 선택 |  |
+| `facts.parity_baseline.candidate_hash` | string | 선택 |  |
+| `facts.parity_baseline.replay_hash` | string | 선택 |  |
 | `facts.*` | any | 선택 | 그 밖의 키는 자유. 그대로 보존되지만 정책은 읽지 않는다 |
 
 ### 예시 (fixtures/03-pii-confident/test_result.json)

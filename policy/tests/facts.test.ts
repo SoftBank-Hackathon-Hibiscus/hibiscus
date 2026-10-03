@@ -12,8 +12,8 @@ const base = JSON.parse(readFileSync(join(ROOT, "fixtures", "01-allow", "test_re
 const withFacts = (facts: unknown) => ({ ...base, facts });
 
 describe("test_result.facts: 정책이 읽는 키만 타입 고정", () => {
-  it("정의된 키는 conditions, db, migration, storage, writes_local_file", () => {
-    expect([...KNOWN_FACTS_KEYS].sort()).toEqual(["conditions", "db", "migration", "storage", "writes_local_file"]);
+  it("정의된 facts 키 목록을 제공한다", () => {
+    expect([...KNOWN_FACTS_KEYS].sort()).toEqual(["conditions", "db", "migration", "parity_baseline", "storage", "writes_local_file"]);
   });
 
   const passAll = (name: string) => ({ name, total: 20, matched: 20, failed: false, mismatches: [] });

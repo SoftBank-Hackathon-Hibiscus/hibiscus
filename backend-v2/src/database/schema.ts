@@ -118,7 +118,9 @@ export const deployments = sqliteTable(
       .notNull()
       .references(() => applications.id, { onDelete: 'cascade' }),
     version: integer('version').notNull(),
-    trigger: text('trigger', { enum: ['manual', 'webhook'] }).notNull(),
+    trigger: text('trigger', {
+      enum: ['manual', 'webhook', 'registration'],
+    }).notNull(),
     sourceRevision: text('source_revision').notNull(),
     sourceRevisionVerified: integer('source_revision_verified', {
       mode: 'boolean',

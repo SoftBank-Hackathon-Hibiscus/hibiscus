@@ -153,6 +153,32 @@ export const StorageFactSchema = z
   .describe("컨테이너 안에 남은 상태 하나 (테스트 파트의 facts[] 원본에서 kind, path, storage 만)");
 export type StorageFact = z.infer<typeof StorageFactSchema>;
 
+const ParityHashSchema = z.string().regex(/^[0-9a-f]{64}$/);
+export const ParityBaselineFactSchema = z
+  .object({
+    mode: z.enum(["replay", "health"]),
+    changed: z.boolean(),
+    active_source_revision: SourceRevisionSchema.optional(),
+    active_hash: ParityHashSchema.optional(),
+    candidate_hash: ParityHashSchema.optional(),
+    replay_hash: ParityHashSchema.optional(),
+  })
+  .superRefine((baseline, ctx) => {
+    if (baseline.mode === "replay" && baseline.replay_hash === undefined) {
+      ctx.addIssue({ code: "custom", path: ["replay_hash"], message: "replay mode requires replay_hash" });
+    }
+    if (baseline.mode === "health" && baseline.replay_hash !== undefined) {
+      ctx.addIssue({ code: "custom", path: ["replay_hash"], message: "health mode cannot have replay_hash" });
+    }
+    const expectedChanged = baseline.active_source_revision !== undefined
+      && baseline.active_hash !== baseline.candidate_hash;
+    if (baseline.changed !== expectedChanged) {
+      ctx.addIssue({ code: "custom", path: ["changed"], message: "changed does not match active and candidate baseline hashes" });
+    }
+  })
+  .describe("GitHub source revision에 저장된 parity 기준 파일 상태");
+export type ParityBaselineFact = z.infer<typeof ParityBaselineFactSchema>;
+
 /**
  * 테스트 파트가 관찰한 사실 중 "정책이 읽는 키" 만 타입을 정한다.
  * 여기 없는 키는 자유롭게 넣을 수 있고 그대로 보존된다 (정책 엔진은 읽지 않는다).
@@ -168,6 +194,7 @@ export const FactsSchema = z
     migration: MigrationReportSchema.optional(),
     conditions: ConditionFactsSchema.optional(),
     storage: z.array(StorageFactSchema).optional().describe("컨테이너 안에 남은 상태 목록 (테스트 파트 facts[] 원본의 kind, path, storage). 정책 판단에는 conditions[].mismatches[].related_kind 를 쓰고, 이 목록은 related_* 의 근거(같은 path·kind·storage 항목이 있어야 한다)와 설명용"),
+    parity_baseline: ParityBaselineFactSchema.optional(),
   })
   .superRefine((facts, ctx) => {
     // R1c 는 replace 불일치의 related_kind 가 sqlite / local_upload / local_file 이면 차단하지 않고 R5 / R6 에 맡긴다.

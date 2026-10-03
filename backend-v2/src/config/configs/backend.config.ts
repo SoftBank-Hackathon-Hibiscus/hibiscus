@@ -31,13 +31,21 @@ export const environmentSchema = z
     SIGNER_MODE: z.enum(['dry', 'real']).default('dry'),
     DEPLOY_MODE: z.enum(['off', 'dry', 'real']).default('off'),
     PARITY_TEST_MODE: z.enum(['fixture', 'registry']).default('fixture'),
-    PARITY_INPUTS_FILE: z.string().default(''),
+    PARITY_BUILD_MANIFEST_DIRECTORY: z
+      .string()
+      .default('')
+      .transform((value) => (value ? resolve(value) : '')),
     PARITY_PYTHON_COMMAND: z.string().min(1).default('python3'),
     PARITY_BUILDER: z.string().default(''),
     PARITY_PLATFORMS: z
       .enum(['linux/amd64', 'linux/arm64', 'linux/amd64,linux/arm64'])
       .default('linux/amd64,linux/arm64'),
     PARITY_TIMEOUT_MS: z.coerce.number().int().min(1_000).default(1_200_000),
+    GITHUB_CHECKOUT_TIMEOUT_MS: z.coerce
+      .number()
+      .int()
+      .min(1_000)
+      .default(120_000),
     POLICY_TIMEOUT_MS: z.coerce.number().int().min(1_000).default(180_000),
     SIGNER_TIMEOUT_MS: z.coerce.number().int().min(1_000).default(180_000),
     AGENT_OFFLINE_AFTER_MS: z.coerce.number().int().min(1_000).default(30_000),
@@ -113,11 +121,12 @@ export const backendConfig = registerAs('backend', () => {
     signerMode: env.SIGNER_MODE,
     deployMode: env.DEPLOY_MODE,
     parityTestMode: env.PARITY_TEST_MODE,
-    parityInputsFile: env.PARITY_INPUTS_FILE,
+    parityBuildManifestDirectory: env.PARITY_BUILD_MANIFEST_DIRECTORY,
     parityPythonCommand: env.PARITY_PYTHON_COMMAND,
     parityBuilder: env.PARITY_BUILDER,
     parityPlatforms: env.PARITY_PLATFORMS,
     parityTimeoutMs: env.PARITY_TIMEOUT_MS,
+    githubCheckoutTimeoutMs: env.GITHUB_CHECKOUT_TIMEOUT_MS,
     policyTimeoutMs: env.POLICY_TIMEOUT_MS,
     signerTimeoutMs: env.SIGNER_TIMEOUT_MS,
     agentOfflineAfterMs: env.AGENT_OFFLINE_AFTER_MS,

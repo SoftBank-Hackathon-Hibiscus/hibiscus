@@ -1,33 +1,19 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { isAbsolute, join } from 'node:path';
+import { ModuleRef } from '@nestjs/core';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { z } from 'zod';
+import { ApplicationRepository } from '../../application/application.repository.js';
 import type { BackendConfig } from '../../config/configs/backend.config.js';
+import { GithubSourceCheckoutService } from '../../github/github-source-checkout.service.js';
 import {
   CommandRunner,
   type CommandSpec,
 } from '../../infrastructure/command-runner.js';
+import { ParityInputService } from '../parity-input.service.js';
+import { DeploymentRepository } from '../deployment.repository.js';
 import type { StageContext, StageOutcome } from '../types/deployment.type.js';
-
-const absoluteFile = z
-  .string()
-  .min(1)
-  .refine(isAbsolute, 'An absolute path is required');
-const inputSchema = z
-  .object({
-    record: absoluteFile,
-    noise: absoluteFile,
-    after: z.array(z.number().int().positive()).default([]),
-    health_path: z
-      .string()
-      .regex(/^\/\S*$/)
-      .default('/healthz'),
-    health_timeout: z.number().positive().default(30),
-    // Prebuilt runs use <directory>/<deployment.id>/build_manifest.json.
-    build_manifest_directory: absoluteFile.optional(),
-  })
-  .strict();
 const buildSchema = z.object({
   schema_version: z.literal('premortem.build.v1'),
   run_id: z.string(),
@@ -54,12 +40,25 @@ const stageSchema = z.object({
     .passthrough(),
 });
 
+interface ParityBaselineFact {
+  mode: 'replay' | 'health';
+  changed: boolean;
+  active_source_revision?: string;
+  active_hash?: string;
+  candidate_hash?: string;
+  replay_hash?: string;
+}
+
 /** Review implementation for connecting #21/#24 to the Backend test stage. */
 @Injectable()
 export class ParityTestStage {
   constructor(
     private readonly config: ConfigService<BackendConfig, true>,
     private readonly runner: CommandRunner,
+    private readonly moduleRef: ModuleRef,
+    private readonly inputs: ParityInputService,
+    private readonly deployments: DeploymentRepository,
+    private readonly applications: ApplicationRepository,
   ) {}
 
   async run({
@@ -73,21 +72,9 @@ export class ParityTestStage {
           'Registry parity requires a full 40-character source SHA',
         );
       }
-      const inputFile = this.config.get('backend.parityInputsFile', {
-        infer: true,
-      });
-      if (!isAbsolute(inputFile))
-        throw new Error('PARITY_INPUTS_FILE must be an absolute path');
-      const inputs = z
-        .record(z.string(), inputSchema)
-        .parse(JSON.parse(readFileSync(inputFile, 'utf8')));
-      const input = inputs[application.slug];
-      if (!input)
-        throw new Error('Parity inputs are missing for this application slug');
-      for (const file of [input.record, input.noise]) {
-        if (!existsSync(file))
-          throw new Error('Parity baseline file is missing');
-      }
+      const stageWork = join(paths.root, 'test-work');
+      rmSync(stageWork, { recursive: true, force: true });
+      mkdirSync(stageWork, { recursive: true });
       const repoRoot = this.config.get('backend.repoRoot', { infer: true });
       const python = this.config.get('backend.parityPythonCommand', {
         infer: true,
@@ -111,36 +98,70 @@ export class ParityTestStage {
         cwd: join(repoRoot, 'parity'),
         timeoutMs,
       };
+      const sourcePath = await this.sourcePath(
+        application.id,
+        application.sourcePath,
+        deployment.sourceRevision,
+        join(stageWork, 'source'),
+      );
+      const revision = await run({
+        command: 'git',
+        cwd: sourcePath,
+        args: ['rev-parse', '--verify', 'HEAD^{commit}'],
+        timeoutMs: 30_000,
+      });
+      if (revision.stdout.trim() !== deployment.sourceRevision) {
+        throw new Error('App checkout does not match the requested source SHA');
+      }
+      const candidateInput = this.inputs.fromSource(sourcePath);
+      const active = this.deployments.findActive(application.id);
+      const activeSourcePath = active
+        ? await this.activeSourcePath(
+            application.id,
+            application.sourcePath,
+            active.sourceRevision,
+            deployment.sourceRevision,
+            sourcePath,
+            join(stageWork, 'baseline-source'),
+          )
+        : undefined;
+      const activeInput = activeSourcePath
+        ? this.inputs.fromSource(activeSourcePath)
+        : undefined;
+      const replayInput = active ? activeInput : candidateInput;
+      const baseline: ParityBaselineFact = {
+        mode: replayInput ? 'replay' : 'health',
+        changed: Boolean(active && activeInput?.hash !== candidateInput?.hash),
+        ...(active ? { active_source_revision: active.sourceRevision } : {}),
+        ...(activeInput ? { active_hash: activeInput.hash } : {}),
+        ...(candidateInput ? { candidate_hash: candidateInput.hash } : {}),
+        ...(replayInput ? { replay_hash: replayInput.hash } : {}),
+      };
+      const applicationView = this.applications.getView(application.id);
+      if (!applicationView) throw new Error('Application not found');
       let manifestPath: string;
       if (deployment.digestSource === 'registry') {
-        if (!input.build_manifest_directory)
+        const manifestDirectory = this.config.get(
+          'backend.parityBuildManifestDirectory',
+          { infer: true },
+        );
+        if (!manifestDirectory)
           throw new Error(
-            'A prebuilt digest requires its build manifest directory',
+            'A prebuilt digest requires PARITY_BUILD_MANIFEST_DIRECTORY',
           );
         manifestPath = join(
-          input.build_manifest_directory,
+          manifestDirectory,
           deployment.id,
           'build_manifest.json',
         );
       } else {
-        const revision = await run({
-          command: 'git',
-          cwd: application.sourcePath,
-          args: ['rev-parse', '--verify', 'HEAD^{commit}'],
-          timeoutMs: 30_000,
-        });
-        if (revision.stdout.trim() !== deployment.sourceRevision) {
-          throw new Error(
-            'App checkout does not match the requested source SHA',
-          );
-        }
-        const buildDir = join(paths.root, 'build');
+        const buildDir = join(stageWork, 'build');
         const args = [
           '-m',
           'premortem',
           'build',
           '--app',
-          application.sourcePath,
+          sourcePath,
           '--image-repo',
           application.imageRepo,
           '--run-id',
@@ -172,20 +193,22 @@ export class ParityTestStage {
         throw new Error('Build manifest does not match this deployment');
       }
       const request = {
-        format: 'premortem-backend-test-v1',
+        format: replayInput
+          ? 'premortem-backend-test-v1'
+          : 'premortem-backend-health-v1',
         run_id: deployment.id,
         app: application.name,
         source_revision: deployment.sourceRevision,
         digest,
         build_manifest: manifestPath,
-        record: input.record,
-        noise: input.noise,
-        after: input.after,
         port: application.containerPort,
-        health_path: input.health_path,
-        health_timeout: input.health_timeout,
+        health_path: applicationView.healthCheck.path,
+        health_timeout: applicationView.healthCheck.timeoutSeconds,
+        ...(replayInput
+          ? { record: replayInput.record, noise: replayInput.noise }
+          : {}),
       };
-      const requestPath = join(paths.root, 'parity-request.json');
+      const requestPath = join(stageWork, 'parity-request.json');
       writeFileSync(requestPath, JSON.stringify(request, null, 2) + '\n', {
         flag: 'wx',
       });
@@ -205,6 +228,7 @@ export class ParityTestStage {
       const stage = stageSchema.parse(
         JSON.parse(readFileSync(join(paths.test, 'stage_result.json'), 'utf8')),
       );
+      this.attachBaselineFact(join(paths.test, 'test_result.json'), baseline);
       const test = testSchema.parse(
         JSON.parse(readFileSync(join(paths.test, 'test_result.json'), 'utf8')),
       );
@@ -226,7 +250,7 @@ export class ParityTestStage {
             join(paths.test, 'parity/build_manifest.json'),
           ),
         },
-        summary: stage.summary,
+        summary: { ...stage.summary, parity_baseline: baseline },
         deploymentPatch: {
           imageDigest: digest,
           digestSource: 'registry',
@@ -244,5 +268,59 @@ export class ParityTestStage {
             : 'Unable to run registry parity',
       };
     }
+  }
+
+  private attachBaselineFact(
+    testResultPath: string,
+    baseline: ParityBaselineFact,
+  ): void {
+    const result = JSON.parse(readFileSync(testResultPath, 'utf8')) as {
+      facts?: Record<string, unknown>;
+    };
+    result.facts = { ...result.facts, parity_baseline: baseline };
+    writeFileSync(
+      testResultPath,
+      `${JSON.stringify(result, null, 2)}\n`,
+      'utf8',
+    );
+  }
+
+  private async activeSourcePath(
+    applicationId: string,
+    configuredPath: string,
+    activeRevision: string,
+    candidateRevision: string,
+    candidatePath: string,
+    destination: string,
+  ): Promise<string> {
+    if (activeRevision === candidateRevision) return candidatePath;
+    if (!this.isGithubSource(configuredPath)) {
+      throw new Error(
+        'Active parity baseline history requires a GitHub source repository',
+      );
+    }
+    return this.moduleRef
+      .get(GithubSourceCheckoutService, { strict: false })
+      .checkout(applicationId, activeRevision, destination);
+  }
+
+  private async sourcePath(
+    applicationId: string,
+    configuredPath: string,
+    sourceRevision: string,
+    destination: string,
+  ): Promise<string> {
+    if (!this.isGithubSource(configuredPath)) {
+      return configuredPath;
+    }
+    return this.moduleRef
+      .get(GithubSourceCheckoutService, { strict: false })
+      .checkout(applicationId, sourceRevision, destination);
+  }
+
+  private isGithubSource(path: string): boolean {
+    return /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\.git$/.test(
+      path,
+    );
   }
 }
