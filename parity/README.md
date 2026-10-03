@@ -297,3 +297,5 @@ python -m parity summary examples/summary_matrix_result.json --matrix
 - 세부 기대·실제 응답은 기존 `summary` 명령에서 확인합니다. 저장될 때 잘린 응답을 복원하거나 관련 사실을 확정 원인으로 바꾸지는 않습니다.
 
 `summary --matrix`의 종료 코드 0은 보고서 표시 성공이며, 검사 통과나 배포 허가를 뜻하지 않습니다. 기존 `result.json`, handoff와 Policy 계약은 바꾸지 않습니다.
+
+[10/3 joint verification: results, VM handoff and data continuity](TEAM_VERIFICATION.md)
