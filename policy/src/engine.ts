@@ -365,6 +365,17 @@ export function decide(test: TestResult, pii: PiiReport, policy: Policy): Plan {
     if (rule.halt) break;
   }
 
+  const parityBaselineChanged = test.facts.parity_baseline?.changed === true;
+  if (parityBaselineChanged) {
+    const afterBlock = decision === "block";
+    if (!afterBlock) decision = escalate(decision, "needs_approval");
+    rules.push({
+      id: "platform.parity_baseline_changed",
+      result: afterBlock ? "matched_after_block" : "matched",
+      reason: "GitHub parity 기준 파일이 현재 운영 버전과 다름",
+    });
+  }
+
   if (decision === "block") {
     // 차단이면 배포 위치는 없다.
     targets = [];
@@ -379,7 +390,18 @@ export function decide(test: TestResult, pii: PiiReport, policy: Policy): Plan {
 
   // 해결 조건의 allowed_targets: 그 조건을 요구한 규칙들을 빼고 나머지 걸린 규칙만으로 다시 좁힌 결과
   // = "이 조건을 충족하면 배포 가능한 위치". decision 에는 영향이 없다.
-  const requiresList = requires.toList((requesters) => narrowWithout(policy.default.targets, matchedRules, requesters));
+  let requiresList = requires.toList((requesters) => narrowWithout(policy.default.targets, matchedRules, requesters));
+  if (parityBaselineChanged && decision !== "block") {
+    requiresList = [
+      ...(requiresList ?? []),
+      {
+        id: "approve_parity_baseline",
+        hint: "변경된 API 요청과 기대 응답 기준을 확인하고 승인",
+        rule_id: "platform.parity_baseline_changed",
+        allowed_targets: [...targets],
+      },
+    ].sort((left, right) => left.id.localeCompare(right.id));
+  }
 
   const body: Omit<Plan, "plan_hash"> = {
     run_id: test.run_id,
