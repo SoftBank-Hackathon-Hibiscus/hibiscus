@@ -10,6 +10,8 @@
     "verify": "tsx src/cli.ts verify",
     "audit:verify": "tsx src/cli.ts audit",
     "audit:anchor": "tsx src/cli.ts anchor",
+    "revoke": "tsx src/cli.ts revoke",
+    "reconcile": "tsx src/cli.ts reconcile",
     "fingerprint": "tsx src/cli.ts fingerprint",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",

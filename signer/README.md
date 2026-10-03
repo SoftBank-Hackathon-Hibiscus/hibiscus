@@ -13,7 +13,9 @@ plan.json ─→ [decision 확인] ─→ (needs_approval이면 approval.json �
 
 sign_result.json ─→ [npm run verify] ─→ 서명 주석과 하나라도 다르면 실패 (--attestation 이면 증명서 + Rego 정책까지)
 감사 로그        ─→ [npm run audit:anchor] ─→ 끝 고정값 (지금 체인 끝에 서명, 다른 곳에 보관)
-감사 로그        ─→ [npm run audit:verify] ─→ 끊긴 줄 번호 (--anchors 면 끝 자르기·다시 쓰기까지)
+감사 로그        ─→ [npm run audit:verify] ─→ 끊긴 줄 번호 (--anchors 면 끝 자르기·다시 쓰기까지, --images --sweep 이면 레지스트리 전체)
+문제 생긴 이미지 ─→ [npm run revoke] ─→ 철회 줄 (그 서명은 verify --audit 에서 revoked)
+실제 배포 상태   ─→ [npm run reconcile] ─→ 떠 있는 이미지·위치가 서명된 그대로인지
 ```
 
 | decision | 처리 |
@@ -66,18 +68,27 @@ npm run sign -- --plan plan.json --requester <요청자> --image-repo <저장소
 npm run sign -- ... --self-verify --attest --test-result test_result.json --pubkey-sha256 sha256:<지문>
 
 # 서명 결과 확인 (누구나 공개키로)
-npm run verify -- --result sign_result.json [--plan plan.json] [--approval approval.json] [--audit sign_audit.jsonl] \
-  [--image-repo <저장소>] [--attestation [--policy policy/deploy.rego] [--test-result test_result.json]] \
+npm run verify -- --result sign_result.json [--plan plan.json] [--approval approval.json] [--audit sign_audit.jsonl [--latest]] \
+  [--image-repo <저장소>] [--attestation [--policy policy/deploy.rego] [--policy-sha256 sha256:<지문>] [--test-result test_result.json]] \
   [--max-age 30] [--json] [--no-tlog]
 
-# 공개키 지문 (고정값으로 쓸 값)
+# 공개키 지문, 정책 파일 지문 (고정값으로 쓸 값)
 npm run fingerprint [-- --pub keys/cosign.pub]
+npm run fingerprint -- --policy policy/strict.rego
+
+# 서명 철회 (이미지 전체, 또는 --run-id 로 그 실행만)
+npm run revoke -- --audit sign_audit.jsonl --digest sha256:<digest> [--run-id <run_id>] --reason vulnerability --by <철회한 사람> [--note "CVE-…"] \
+  [--anchors sign_audit.anchors.jsonl --key ~/hibiscus-secrets/cosign.key]
+
+# 실제 배포 상태 대조 (관측 파일은 감사자가 만듦)
+npm run reconcile -- --observed observed.jsonl --audit sign_audit.jsonl [--anchors sign_audit.anchors.jsonl] [--json]
 
 # 감사 로그 끝 고정 (주기적으로, 결과 파일은 감사 로그와 다른 곳에도 보관)
 npm run audit:anchor -- --audit sign_audit.jsonl --anchors sign_audit.anchors.jsonl --key ~/hibiscus-secrets/cosign.key
 
 # 감사 로그 확인 (--anchors 면 끝 고정값과, --images 면 레지스트리 서명과 맞춰 봄)
-npm run audit:verify -- --audit sign_audit.jsonl [--anchors sign_audit.anchors.jsonl] [--images [--strict-images] [--image-repo <저장소>]] [--no-tlog]
+npm run audit:verify -- --audit sign_audit.jsonl [--anchors sign_audit.anchors.jsonl] \
+  [--images [--strict-images] [--sweep] [--digests-file digests.txt] [--image-repo <저장소>]] [--json] [--no-tlog]
 
 # 공격 시연 (로컬 레지스트리·임시 키, cosign·crane 필요)
 bash scripts/attack-demo.sh
@@ -97,13 +108,20 @@ bash scripts/attack-demo.sh
 | `--test-result` | | sign: 시험 결과를 증명서에 넣음. verify `--attestation`: 이 시험 결과로 서명했는지 확인 |
 | `--minimal-env` | `SIGNER_MINIMAL_ENV=1` | cosign 에 필요한 환경변수만 넘김 |
 | | `SIGNER_STRICT_KEY_PERMS=1` | 개인키 파일을 다른 사용자도 읽을 수 있으면 서명 안 함 (없으면 경고만) |
-| `--attestation` (verify) | | 배포 증명서도 확인. `--policy` 없으면 `policy/deploy.rego` |
+| `--attestation` (verify) | | 배포 증명서도 확인. `--policy` 없으면 `policy/deploy.rego` (`--policy`만 주고 `--attestation`이 없으면 `ARG_INVALID`) |
+| `--policy-sha256` (verify) | `SIGNER_POLICY_SHA256` | Rego 정책 파일 지문 고정 (여러 개 가능). 정책 파일이 이 목록에 없으면 멈춤 (`POLICY_PIN_MISMATCH`) |
 | `--approval` (verify) | | 이 승인 기록으로 서명했는지까지 확인 |
 | `--max-age` (verify) | `SIGNER_MAX_AGE_MIN` | 서명한 지 이 시간(분)이 지난 결과는 거부 (`expired`) |
-| `--json` (verify) | | 결과를 JSON 한 줄로 (실행 오류도) |
+| `--json` (verify, audit, reconcile) | | 결과를 JSON 한 줄로 (실행 오류도) |
+| `--latest` (verify) | `SIGNER_VERIFY_LATEST=1` | `--audit`와 같이. 뒤에 더 새로 서명한 결과가 있거나 같은 이미지가 block 됐으면 거부 (`superseded`) |
 | `--anchors` | `SIGNER_AUDIT_ANCHORS` | 감사 로그 끝 고정값 파일. anchor 는 여기에 추가, audit 는 이것과도 맞춰 봄. anchor 에서 없으면 `<감사 로그>.anchors.jsonl` |
 | `--images` (audit) | | 레지스트리 서명과 맞춰 봄 |
 | `--strict-images` (audit) | | `--images`와 같이. `audit_head` 없는 서명도 로그에 없는 서명으로 봄 (키 도용 감지) |
+| `--sweep` (audit) | `SIGNER_AUDIT_SWEEP=1` | `--images`와 같이. 저장소 태그를 crane 으로 전부 훑어서 로그에 없던 이미지의 서명도 봄 |
+| `--sweep-max` (audit) | | 저장소당 태그 한도 (기본 1000). 넘으면 멈춤 (`SWEEP_TRUNCATED`) |
+| `--digests-file` (audit) | | 태그 없는 이미지 digest 목록 (`sha256:<hex>` 또는 `<저장소>@sha256:<hex>`, 한 줄에 하나) |
+| `--observed` (reconcile) | | 실제 배포 상태 관측 파일 (`contracts/Observed.schema.json`) |
+| `--digest`, `--run-id`, `--reason`, `--by`, `--note` (revoke) | | 철회할 이미지·실행, 이유(`vulnerability`/`policy_changed`/`key_compromise`/`mistake`), 철회한 사람, 메모 |
 
 - 빈 환경변수는 없는 것으로 봄
 - 종료 코드: 0 서명함·확인함 / 1 서명 거절·확인 실패 / 2 실행 오류 (인자, 파일, 키, 레지스트리 접근 등)
@@ -123,6 +141,7 @@ bash scripts/attack-demo.sh
 | `plan_sha256` | plan.json 전체(키 정렬 JSON) 해시. rules 등 나머지까지 묶음 |
 | `signed_at` | 서명 시각, `encodeURIComponent`로 인코딩. sign_result의 signed_at만 고쳐서 `--max-age`를 피하지 못하게 |
 | `audit_head` | 감사 로그를 켰을 때만. 서명 직전 체인 끝 hash |
+| `image_repo` | 서명한 저장소, `encodeURIComponent`로 인코딩. 이미지와 서명을 다른 저장소로 복사해 쓰지 못하게 |
 
 - cosign `-a`는 값을 쉼표로 나눔 (`targets=onprem,cloud_run` → `unable to parse annotation: cloud_run`). 그래서 targets는 인코딩
 - 이미지 주소는 cosign 인자에서 `--` 뒤에 넘김 (옵션처럼 생긴 값이 와도 옵션으로 안 읽힘)
@@ -135,20 +154,24 @@ bash scripts/attack-demo.sh
 | 순서 | 확인 | 실패하면 |
 |---|---|---|
 | 1 | sign_result가 SignResult 형식 | 실행 오류 `SIGN_RESULT_INVALID` |
-| 2 | dry-run 결과가 아님 | `dry_run` |
-| 2-1 | `--max-age`면 서명한 지 그 시간 안 (미래 시각도 거부) | `expired` |
-| 3 | `cosign:<저장소>@<digest>` 형식, digest가 sign_result와 같음 | `ref_invalid` |
-| 4 | `--image-repo`와 같은 저장소 | `repo_mismatch` |
-| 5 | `--plan`과 run_id·digest·plan_hash·source_revision·targets·failover_allowed가 같음 | `plan_mismatch` |
-| 6 | `--approval`과 run_id·digest·plan_hash·requester·approver가 같음 (자동 승인 결과면 승인 기록을 주면 안 됨) | `approval_mismatch` |
-| 7 | `--audit` 체인이 이어지고 이 실행의 signed 줄이 있음 | `audit_mismatch` |
-| 8 | 위 주석 전부로 `cosign verify` | `signature_invalid` |
-| 9 | `--attestation`이면 배포 증명서 서명·내용이 sign_result와 같음 (`--test-result`면 시험 결과 해시도) | `attestation_invalid` |
-| 10 | `--attestation`이면 Rego 정책 통과 | `policy_denied` |
+| 2 | `--max-age`면 서명한 지 그 시간 안 (미래 시각도 거부) | `expired` |
+| 3 | dry-run 결과가 아님 | `dry_run` |
+| 4 | `cosign:<저장소>@<digest>` 형식, digest가 sign_result와 같음 | `ref_invalid` |
+| 5 | `--image-repo`와 같은 저장소 | `repo_mismatch` |
+| 6 | `--plan`과 run_id·digest·plan_hash·source_revision·targets·failover_allowed가 같음 | `plan_mismatch` |
+| 7 | `--approval`과 run_id·digest·plan_hash·requester·approver가 같음 (자동 승인 결과면 승인 기록을 주면 안 됨) | `approval_mismatch` |
+| 8 | `--audit` 체인이 이어지고, 이 실행의 signed 줄이 있고, 취소된 서명이 아니고, 기록한 주석과 sign_result가 같음 | `audit_mismatch` |
+| 9 | `--audit`이면 철회되지 않음 | `revoked` |
+| 10 | `--latest`면 뒤에 더 새 서명·같은 이미지의 block 결정이 없음 | `superseded` |
+| 11 | 위 주석 전부로 `cosign verify` (`--audit`이면 기록한 주석 그대로). 저장소만 다른 서명이 있으면 | `signature_invalid` / `repo_mismatch` |
+| 12 | `--attestation`이면 배포 증명서 서명·내용이 sign_result와 같음 (`--test-result`면 시험 결과 해시도) | `attestation_invalid` |
+| 13 | `--attestation`이면 Rego 정책 통과 | `policy_denied` |
 
 - 공개키를 못 읽거나(`KEY_UNAVAILABLE`) 레지스트리에 못 가면(`REGISTRY_UNAVAILABLE`) 검증 실패가 아니라 실행 오류(2)
+- 정책 파일이 없거나(`POLICY_MISSING`) 문법 오류로 못 불러오면(`POLICY_INVALID`) 정책 위반이 아니라 실행 오류(2). cosign 은 둘 다 정책 위반과 같은 문구로 끝나서 앞 줄들까지 봄
 - 알 수 없는 실행 실패(`VERIFY_FAILED`)나 잘못된 성공 출력(`VERIFY_OUTPUT_INVALID`)도 실행 오류(2)로 중단한다. 감사 검사에서 이를 빈 서명 목록으로 처리하지 않는다.
-- 한 이미지에 서명이 여러 개면 "주석이 전부 맞는 서명이 하나라도 있으면" 통과 (cosign 규칙). 같은 이미지의 예전 정상 결과도 통과할 수 있어서, 최신인지는 run_id 확인이나 `--plan`, `--max-age`로
+- 한 이미지에 서명이 여러 개면 "주석이 전부 맞는 서명이 하나라도 있으면" 통과 (cosign 규칙). 같은 이미지의 예전 정상 결과도 통과할 수 있어서, 최신인지는 `--audit --latest`, `--plan`, `--max-age`로
+- 키를 가진 사람이 정상 서명 주석을 복사해 targets 만 바꾼 쌍둥이 서명을 붙이면 `--audit` 없는 verify 는 통과함. `--audit`이면 감사 로그에 기록한 주석과 비교해서 걸림
 - `--json` 출력 (콘솔·backend가 그대로 읽는 용도)
   - 통과: `{"ok":true,"code":0,"run_id","digest","image","targets","failover_allowed","requester","approver","signed_at","checked":{...},"pubkeys":[...],"pubkey_pinned"}`
   - 실패: `{"ok":false,"code":1,"reason","detail"}` / 실행 오류: `{"ok":false,"code":2,"error","message"}`
@@ -156,11 +179,18 @@ bash scripts/attack-demo.sh
 ## 감사 로그 (해시 체인)
 
 ```json
-{"seq":2,"prev_hash":"<앞 줄 hash>","entry":{ ...kind: sign 한 줄... },"anchor":"<서명 직전 체인 끝>","hash":"<이 줄 hash>"}
+{"seq":2,"prev_hash":"<앞 줄 hash>","entry":{ ...kind: sign 한 줄... },"anchor":"<서명 직전 체인 끝>","annotations":{ ...서명에 붙인 주석 전체... },"hash":"<이 줄 hash>"}
 ```
 
 - 서명 결정(거절·서명 실패·서명)마다 한 줄. `entry`는 decisions.jsonl에 쓰는 줄과 같음
-- `hash = sha256(키 정렬 JSON {seq, prev_hash, entry, anchor})`, 첫 줄 `prev_hash`는 0 × 64
+- `hash = sha256(키 정렬 JSON {seq, prev_hash, entry, anchor, annotations, cancels})`, 첫 줄 `prev_hash`는 0 × 64. 없는 필드는 빠져서 예전 줄 hash 는 그대로
+- signed 줄의 `annotations` = 이미지 서명에 실제로 붙인 주석 전체
+  - 줄 내용·anchor 와 다르거나, 앞 줄부터 기록했는데 이 줄에만 없으면(지운 흔적) `annotations_invalid`
+  - `--images`·`verify --audit`·`reconcile`은 이 기록과 정확히 같은 서명만 인정 → 주석만 바꾼 쌍둥이 서명은 `twin_signature`
+- 서명은 됐는데 뒤 단계(자기 확인·증명서)가 실패하면, signed 줄을 먼저 남기고 그 줄을 `cancels`로 가리키는 거절 줄을 붙임
+  - 레지스트리에 남은 서명이 기록에 있어서 `--images`가 계속 `unlogged_signature`를 내지 않음
+  - 그 서명으로 sign_result 를 다시 만들어도 `verify --audit`에서 `audit_mismatch` (취소된 서명)
+  - `cancels`는 앞의 같은 실행 signed 줄을 한 번만, sign_failed 거절 줄에서만. 어기면 `cancel_invalid`
 - signed 줄의 `anchor` = 서명 직전 체인 끝 = 이미지 서명의 `audit_head` 주석
   - 한 줄 고치면 → `hash_mismatch`
   - 줄 삭제·순서 바꿈 → `seq_gap` / `prev_mismatch`
@@ -172,7 +202,15 @@ bash scripts/attack-demo.sh
   - 이미지마다 이 키로 확인되는 서명을 전부 받아서, signed 줄마다 내용·anchor가 맞는 서명이 있는지, `audit_head`가 붙은 서명이 전부 로그의 signed 줄과 맞는지 봄
   - `--strict-images`면 `audit_head` 없는 서명도 로그에 없는 서명(`unlogged_signature`)으로 봄. 키를 훔쳐 signer 밖에서 `cosign sign`으로 직접 서명한 것. 서명 자체는 진짜라 verify만으로는 못 막음
     - 감사 로그를 켜기 전에 서명한 이미지가 섞여 있으면 걸려서 opt-in
-  - cosign v3 `verify`는 같은 키로 붙인 증명서(attest)도 서명 목록에 같이 돌려줌 → `critical.type`이 서명이 아닌 것은 뺌
+  - cosign v3 `verify`는 같은 키로 붙인 증명서(attest)도 서명 목록에 같이 돌려줌 → `critical.type`이 서명이 아니고 주석이 없는 것만 뺌 (type 만 바꾼 서명 payload 로 숨지 못하게)
+  - 서명의 `image_repo`가 조회한 저장소와 다르면 다른 저장소에서 옮겨 온 서명 `foreign_signature`
+  - 문제를 찾아도 멈추지 않고 이미지를 끝까지 봄. 찾은 것 전부 `findings`에 (첫 건이 종료 이유)
+  - `--sweep`이면 저장소 태그를 crane 으로 전부 훑음 (cosign v3 는 서명 대상마다 `sha256-<digest>` 태그를 남김). 로그에 한 번도 안 나온 이미지에 한 서명까지 봄
+    - 복사한 로그로 서명(운영자가 `SIGNER_AUDIT_LOG`를 사본으로 바꿈) → `unlogged_signature` "N번째 줄 뒤에서 갈라짐"
+    - 훔친 키로 새 이미지에 직접 서명 → `--strict-images`와 같이 쓰면 `unlogged_signature`
+    - 태그 없는 이미지는 `--digests-file` (예: `gcloud artifacts docker images list <저장소> --format='value(version)'`)
+    - 조회 실패는 빈 목록으로 통과시키지 않고 실행 오류 (`REGISTRY_UNAVAILABLE`, `CRANE_MISSING`, `SWEEP_TRUNCATED`)
+    - 키 유출 조사: `--pub leaked.pub --images --sweep --json`으로 그 키로 한 서명을 뽑아 볼 수 있음
   - 키 교체 중(`--pub` 여러 개)엔 이미지가 한 키로만 서명돼 있어도 됨. 어느 키로도 확인되는 서명이 없을 때만 `signature_invalid`
   - signed 줄이 하나도 없으면 저장소를 몰라서 `--image-repo` 필요 (없으면 실행 오류)
 - 쓰기 전에 체인을 처음부터 끝까지 확인함. 중간 줄이라도 고쳐져 있으면 이어 쓰지 않고 서명도 안 함 (`AUDIT_INVALID`, 몇 번째 줄인지 나옴). 서명 뒤 감사 로그를 못 쓰면 sign_result도 안 남김
@@ -200,11 +238,13 @@ bash scripts/attack-demo.sh
 
 ### 감사 로그가 못 잡는 것
 
-- 마지막 고정 뒤에 붙은 줄의 자르기·파일 통째 삭제. `--images`는 남은 로그에 있는 digest만 조회하므로, 삭제한 signed 줄의 digest가 다른 줄에도 없으면 찾지 못함. 별도로 보관한 sign_result가 있으면 `verify --audit`으로 해당 서명 줄의 누락 확인 가능
+- 마지막 고정 뒤에 붙은 줄의 자르기·파일 통째 삭제. `--sweep` 없는 `--images`는 남은 로그에 있는 digest만 조회. 별도로 보관한 sign_result가 있으면 `verify --audit`으로 해당 서명 줄의 누락 확인 가능
 - 고정값 파일까지 같이 지우거나 잘라낸 경우 (그래서 다른 곳에 복사)
 - 마지막 서명 뒤에 붙은 거절 줄은 체인과 끝 고정으로만 보호 (서명 anchor 범위 밖)
 - 서명하는 동안 다른 실행이 붙인 줄은 그 서명의 anchor 범위 밖
-- 레지스트리를 다 훑지는 않음. 로그에 한 번도 안 나온 이미지에 한 서명은 `--strict-images`로도 못 찾음
+- `--sweep`은 알고 있는 저장소(signed 줄 저장소, `--image-repo`)만 훑음. 다른 저장소에 한 서명은 그 저장소를 `--image-repo`로 줘야 함
+- OCI referrers API 만 쓰는 레지스트리에서 태그 없는 이미지에 붙은 서명은 `--digests-file`로만 찾음
+- cosign 서명이 레지스트리에 올라간 직후 프로세스가 죽으면(backend 시간 초과 등) 기록 없는 서명이 남음 (`unlogged_signature`로 나옴)
 - 이미지를 레지스트리에서 지우면 그 signed 줄은 `signature_invalid`로 나옴 (변조와 구분 안 됨)
 - 같은 이미지를 다른 감사 로그로 서명한 것(예: 로컬 시험)도 `unlogged_signature`로 나옴
 - 감사 로그를 켜기 전에 한 서명, 이 변경 전에 한 서명(`source_revision` 주석 없음)은 다시 서명해야 맞춰 볼 수 있음
@@ -220,6 +260,8 @@ SIGNER_PUBKEY_SHA256=sha256:2f049a77... npm run verify -- --result sign_result.j
 ```
 
 - 지문은 공개키(SubjectPublicKeyInfo DER)의 sha256. `openssl pkey -pubin -in keys/cosign.pub -outform DER | shasum -a 256`과 같음
+- 공개키 파일에는 `PUBLIC KEY` PEM 블록 하나만 있어야 함 (`PUBKEY_INVALID`)
+  - 블록이 여러 개면 Node 는 `PUBLIC KEY` 블록으로 지문을 내고 cosign 은 첫 블록으로 서명을 확인해서, 앞에 공격자 `RSA PUBLIC KEY` 블록을 끼워 넣으면 지문 고정을 피할 수 있었음
 - `--self-verify`와 같이 쓰면 서명 직후 확인도 고정한 공개키로만 함. 개인키가 공개키와 안 맞으면 배포 때가 아니라 서명 순간에 잡힘
 - KMS 키 주소는 지문을 여기서 계산할 수 없어서 고정하면 멈춤 (`PUBKEY_PIN_UNSUPPORTED`)
 
@@ -279,8 +321,46 @@ cosign verify-attestation --key signer/keys/cosign.pub --type https://hibiscus.l
   --policy signer/policy/deploy.rego <저장소>@<digest>
 ```
 
+- 정책 파일도 지문을 고정할 수 있음 (`--policy-sha256` / `SIGNER_POLICY_SHA256`, 값은 `npm run fingerprint -- --policy <파일>`)
+  - main 보호가 없어서 레포 쓰기 권한자가 strict.rego 끝에 `tested { true }` 한 줄만 붙여도 시험 조건이 무력해짐 (Rego 는 같은 이름 규칙을 OR 로 합침)
+  - 확인한 바이트를 임시 파일로 써서 그 파일을 cosign 에 넘김 (확인한 뒤 바꿔치기해도 소용없음). `--json`에 `policy_sha256`, `policy_pinned`
+  - 고정값은 레포 밖(VM 환경변수 등)에 둘 것. signer 코드나 cosign 바이너리를 고치는 공격은 못 막음
 - `--attest`를 켜면 서명할 때 cosign을 한 번 더 부름 (Rekor 없이면 `--no-tlog`와 같이)
 - 같은 이미지에 증명서가 여러 개면 sign_result와 같은 것 하나만 있으면 통과. 정책은 cosign이 증명서마다 검사
+
+## 서명 철회 (`npm run revoke`)
+
+서명은 한 번 붙으면 계속 유효해서, 나중에 취약점이 나오거나 정책이 바뀐 이미지를 예전 sign_result 로 다시 배포할 수 있음. 감사 로그에 철회 줄을 남김
+
+```json
+{"kind":"revoke","time":"…","digest":"sha256:…","run_id":"r-003","reason":"vulnerability","by":"carol","note":"CVE-…"}
+```
+
+- `--run-id` 없으면 이미지 전체: 그 이미지의 서명 전부 `revoked`, 다시 서명 요청도 거부 (`DIGEST_REVOKED`, 되돌릴 수 없어서 새로 빌드)
+- `--run-id` 있으면 그 실행의 서명만 `revoked`, 같은 이미지를 새 실행으로 서명하는 건 됨
+- 철회 줄도 체인의 한 줄이라 지우면 체인·끝 고정에서 걸림. `--anchors --key`를 주면 철회 직후 바로 끝 고정
+- `verify --latest`: 이 결과 뒤에 같은 저장소·겹치는 배포 위치로 더 새로 서명한 결과(취소·철회 안 된 것)가 있거나 같은 이미지가 block 됐으면 `superseded` (예전 결과 재사용·몰래 롤백). 정상 롤백은 새 실행으로 다시 서명
+- 한계: 감사 로그를 보는 곳(`verify --audit`, `reconcile`)에서만 보임. 배포 쪽 cosign verify 는 철회를 모름
+
+## 실제 배포 상태 대조 (`npm run reconcile`)
+
+다른 검사는 레지스트리와 감사 로그만 맞춰 봐서, 배포 쪽이 sign_result 의 targets 를 고쳐 승인 안 된 곳(Cloud Run 등)에 띄워도 서명은 멀쩡함. 실제로 어디에 무엇이 떠 있는지 적은 관측 파일과 맞춰 봄
+
+```json
+{"kind":"observed","target":"cloud_run","image":"<저장소>@sha256:<hex>","observed_at":"…","source":"gcloud run revisions describe …"}
+```
+
+| 확인 | 실패하면 |
+|---|---|
+| 감사 로그에 그 이미지의 signed 줄이 있음 (취소된 것 제외) | `deploy_unlogged` |
+| 레지스트리에 그 줄과 정확히 같은 서명이 있음 (쌍둥이·signer 밖 서명은 인정 안 함) | `deploy_unsigned` |
+| 철회되지 않음 | `deploy_revoked` |
+| 서명한 배포 위치(기록한 targets)에 관측한 위치가 있음 | `target_not_signed` |
+
+- 관측값 만드는 법: Cloud Run 은 `gcloud run revisions describe <rev> --format='value(status.imageDigest)'`, 온프레는 `docker inspect --format '{{index .RepoDigests 0}}'`. 손으로 써도 됨
+- 운영자가 아닌 사람(감사자)이 관측 파일을 만들 때만 의미 있음. backend 의 deploy_result.json 은 안 읽음 (운영자가 고칠 수 있는 파일)
+- 형식이 틀린 관측 줄은 줄 번호와 같이 실행 오류 (`OBSERVED_INVALID`)
+- 한계: 관측 시점 사이에 잠깐 띄웠다 내린 배포는 못 봄. 주석 기록이 없는 예전 줄은 배포 위치를 몰라서 `target_not_signed`
 
 ## 배포 쪽 서명 확인
 
@@ -288,9 +368,9 @@ cosign verify-attestation --key signer/keys/cosign.pub --type https://hibiscus.l
 # 기존 방식 (backend-v2, onprem-agent): run_id·plan_hash만
 cosign verify --key signer/keys/cosign.pub -a run_id=<run_id> -a plan_hash=<plan_hash> <저장소>@<digest>
 
-# sign_result 전체까지: npm run verify 를 부르거나 주석을 더 붙임
+# sign_result 전체까지: npm run verify 를 부르거나 주석을 더 붙임 (image_repo 는 encodeURIComponent 한 저장소)
 cosign verify --key signer/keys/cosign.pub -a run_id=... -a plan_hash=... \
-  -a targets=onprem+cloud_run -a failover_allowed=false -a approver=<승인자> <저장소>@<digest>
+  -a targets=onprem+cloud_run -a failover_allowed=false -a approver=<승인자> -a image_repo=<인코딩한 저장소> <저장소>@<digest>
 ```
 
 - `--no-tlog`로 서명한 이미지는 `--insecure-ignore-tlog=true`를 붙여야 통과 (안 붙이면 실패)
@@ -308,6 +388,7 @@ cosign verify --key signer/keys/cosign.pub -a run_id=... -a plan_hash=... \
 | `contracts/AuditLine.schema.json` | 감사 로그 한 줄 (signer 안에서만) |
 | `contracts/DeployAttestation.schema.json` | 배포 증명서 predicate (signer 안에서만) |
 | `contracts/AuditAnchor.schema.json` | 감사 로그 끝 고정값 한 줄 (signer 안에서만) |
+| `contracts/Observed.schema.json` | reconcile 관측 파일 한 줄 (signer 안에서만) |
 
 - `npm run contracts`로 `src/schema.ts`에서 생성 (손으로 고치지 않음)
 - SignResult, SignLog는 루트 `contracts/`에도 같은 파일이 있음. 바꾸면 같은 PR에서 루트에도 복사 (테스트가 확인)
@@ -345,14 +426,17 @@ bash scripts/attack-demo.sh            # DEMO_PORT=5055, DEMO_KEEP=1 이면 작�
 | block 결정 서명 요청, 승인자를 요청자 본인(대소문자만 바꿈)으로 | sign 거절 (`policy_block`, `self_approval`) |
 | 다른 사용자도 읽을 수 있는 개인키 | sign 실행 오류 (`KEY_PERMISSIONS`) |
 | 서명 뒤 targets에 cloud_run, approver, signed_at, plan 규칙 결과 바꾸기 | verify `signature_invalid` |
-| 다른 이미지 digest, dry-run 결과 | verify `ref_invalid`, `dry_run` |
+| 다른 이미지 digest, 이미지·서명을 다른 저장소로 복사, dry-run 결과 | verify `ref_invalid`, `repo_mismatch`, `dry_run` |
 | 공격자 키로 서명 / 레포 공개키 바꿔치기 | verify `signature_invalid` / `PUBKEY_MISMATCH` |
 | 팀 키를 훔쳐 signer 밖에서 직접 서명 | audit `--strict-images` `unlogged_signature` |
-| 시험 실패 이미지 / 시험 결과 파일 바꿔치기 | verify `policy_denied` (strict.rego) / `attestation_invalid` |
-| 감사 로그 한 줄 수정 / 끝 자르기 / 서명 줄 빼기 | audit `hash_mismatch` / `anchor_truncated` / verify `audit_mismatch` |
+| 복사한 로그로 서명, 훔친 키로 새 이미지 서명 | audit `--sweep` (두 건 다 `findings`) |
+| 시험 실패 이미지 / 시험 결과 파일 바꿔치기 / 정책 파일에 한 줄 붙이기 | verify `policy_denied` (strict.rego) / `attestation_invalid` / `POLICY_PIN_MISMATCH` |
+| 감사 로그 한 줄 수정 / 끝 자르기 / 서명 줄 빼기 / 빼고 체인 다시 계산 | audit `hash_mismatch` / `anchor_truncated` / verify `audit_mismatch` / audit `--images` `unlogged_signature` |
+| v2 뒤에 v1 결과로 배포 / 철회한 v2 배포 / 철회 줄 지우기 / 철회 이미지 다시 서명 | verify `superseded` / `revoked` / audit `anchor_truncated` / sign `DIGEST_REVOKED` |
+| targets 를 고쳐 Cloud Run 에 배포, 철회한 이미지·로그에 없는 이미지가 떠 있음 | reconcile `target_not_signed` / `deploy_revoked` / `deploy_unlogged` |
 
 - 정상 흐름(서명, 증명서, 끝 고정, 전체 확인, 키 교체 중 확인)은 통과해야 함. 기대와 다르면 종료 코드 1
-- 끝 자르기는 체인만 보면 통과하는 것(약점)도 같이 보여줌
+- 체인만 보면 통과하는 것, 정책 파일 한 줄 고치기처럼 지문 고정 없이는 통과하는 것(약점)도 같이 보여줌
 
 ## 테스트
 
