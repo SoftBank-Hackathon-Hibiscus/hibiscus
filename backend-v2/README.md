@@ -230,14 +230,22 @@ GitHub App 사용자 토큰과 GitHub refresh token은 AES-256-GCM으로 암호�
 
 GitHub Application을 등록하면 선택한 브랜치의 최신 Commit SHA로 최초 Deployment도 함께 생성합니다. 응답의 `initial_deployment`에서 생성된 Deployment를 확인할 수 있습니다. 최초 Deployment는 `registration` trigger와 `queued` 상태로 시작하며 Worker가 기존 Pipeline을 실행합니다. `auto_deploy`는 등록 이후의 push 자동 배포 여부만 제어합니다.
 
-`PARITY_TEST_MODE=registry`에서는 등록 전에 해당 slug의 `PARITY_INPUTS_FILE` 항목과 record/noise 파일을 확인합니다. 준비되지 않은 앱은 Application과 Deployment를 저장하지 않고 422를 반환합니다.
+`PARITY_TEST_MODE=registry`에서는 각 GitHub revision의 `.hibiscus/parity/session.jsonl`과 `.hibiscus/parity/noise.json`을 찾습니다. 별도의 앱별 입력 파일은 사용하지 않습니다.
+
+- 최초 배포에 두 파일이 있으면 해당 기준으로 Replay합니다.
+- 최초 배포에 두 파일이 없으면 후보 이미지의 Health Check만 실행합니다.
+- 이후 배포는 현재 Route가 사용하는 Deployment의 Git revision에서 기준 파일을 읽습니다.
+- 후보 revision의 기준 파일 hash가 다르면 정책 결과를 `needs_approval`로 올립니다.
+- 기준 파일 hash는 `test_result`를 통해 `plan_hash`에 포함됩니다. 따라서 승인 후 파일이나 이미지가 바뀌면 기존 승인을 사용할 수 없습니다.
+- 기준 파일은 둘 다 있거나 둘 다 없어야 합니다. 각 파일은 일반 파일이어야 하며 크기 제한은 `session.jsonl` 1 MiB, `noise.json` 256 KiB입니다.
+- `.hibiscus`는 이미지 빌드 context에서 제외합니다. 테스트 기록은 실행 이미지에 복사하지 않습니다.
 
 Registry Parity 실행에서 Deployment에 실제 Registry Digest가 아직 없으면 Backend가 다음 작업을 수행합니다.
 
 1. 저장된 GitHub 연결과 암호화된 사용자 token으로 요청된 40자리 Commit SHA만 임시 폴더에 checkout합니다.
 2. 기존 Parity build가 해당 checkout을 Docker 이미지로 build하고 `image_repo`에 push합니다.
 3. Registry가 반환한 Digest와 Source Revision의 연결을 검사합니다.
-4. Parity 검사가 성공하면 `imageDigest`, `digestSource=registry`, `sourceRevisionVerified=true`를 저장합니다.
+4. Parity Replay 또는 최초 배포 Health Check가 완료되면 `imageDigest`, `digestSource=registry`, `sourceRevisionVerified=true`를 저장합니다.
 5. Pipeline이 끝나면 checkout과 임시 인증 파일을 제거합니다.
 
 GitHub token은 Git URL, Git 명령 인자, 산출물에 넣지 않습니다. mode `0600`의 임시 파일과 `GIT_ASKPASS`로 fetch에만 전달하고 즉시 제거합니다. Checkout 제한 시간은 `GITHUB_CHECKOUT_TIMEOUT_MS`이며 기본값은 120초입니다. Backend 실행 환경에는 `git`, Docker Buildx, Registry push 권한이 필요합니다. GitHub App에는 Repository Contents 읽기 권한이 필요합니다. 프론트엔드 선택 화면은 별도입니다.

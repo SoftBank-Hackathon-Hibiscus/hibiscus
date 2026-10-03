@@ -33,7 +33,6 @@ Node 24에서 `npm ci`, `npm run build`, `npm run lint`를 확인합니다. Node
 ```sh
 STAGE_MODE=cli
 PARITY_TEST_MODE=registry
-PARITY_INPUTS_FILE=/workspace/parity-inputs.json
 PARITY_PYTHON_COMMAND=/workspace/venv/bin/python
 PARITY_BUILDER=hib-builder
 PARITY_PLATFORMS=linux/amd64,linux/arm64
@@ -42,22 +41,20 @@ SIGNER_MODE=dry
 DEPLOY_MODE=off
 ```
 
-`PARITY_INPUTS_FILE`은 운영자가 관리하는 파일이며 앱 slug로 기록을 찾습니다.
-기록 파일 경로를 앱 DB에 저장할지는 태현님과 연결할 때 정할 부분입니다.
+패리티 기준 파일은 애플리케이션 GitHub 저장소에 커밋합니다.
 
-```json
-{
-  "guestbook": {
-    "record": "/workspace/records/guestbook/session.jsonl",
-    "noise": "/workspace/records/guestbook/noise.json",
-    "after": [10],
-    "health_path": "/healthz",
-    "health_timeout": 30
-  }
-}
+```text
+.hibiscus/
+└── parity/
+    ├── session.jsonl
+    └── noise.json
 ```
 
-미리 빌드한 digest를 입력하는 경우에는 앱 항목에 `build_manifest_directory`를 추가합니다.
+Backend는 후보 revision과 현재 Route가 사용하는 revision을 정확한 Commit SHA로 checkout합니다.
+현재 운영 revision의 파일로 후보 이미지를 Replay합니다. 후보 파일 hash가 다르면 기존 승인 단계에서
+`needs_approval`로 대기합니다. 최초 배포에 파일이 없으면 설정된 Health Check만 실행합니다.
+
+미리 빌드한 digest를 입력하는 경우에는 `PARITY_BUILD_MANIFEST_DIRECTORY`를 설정합니다.
 `<directory>/<deployment.id>/build_manifest.json`과 그 옆 `source/`를 준비해야 하며,
 기록의 run ID·SHA·digest가 현재 deployment와 같아야 합니다. 다른 실행의 빌드를 재사용하지 않습니다.
 
