@@ -79,16 +79,12 @@ function AppCard({ view }: { view: ApplicationView }) {
         <ChevronRight size={16} className="row-icon app-card-arrow" aria-hidden />
       </span>
       <span className="mono app-card-host">{a.publicHost ?? a.slug}</span>
-      <span className="app-card-repo small muted">
-        {a.repo ? (
-          <>
-            {a.repo}
-            {a.defaultBranch && <span className="tag">{a.defaultBranch}</span>}
-          </>
-        ) : (
-          t('noRepo')
-        )}
-      </span>
+      {a.repo && (
+        <span className="app-card-repo small muted">
+          {a.repo}
+          {a.defaultBranch && <span className="tag">{a.defaultBranch}</span>}
+        </span>
+      )}
       <span className="app-card-foot">
         {agents > 0 ? <Pill tone="muted">{t('agentsCount', { n: agents })}</Pill> : <Pill tone="muted">{t('noAgentShort')}</Pill>}
         {a.requiresApproval && <Pill tone="muted">{t('requiresApprovalShort')}</Pill>}

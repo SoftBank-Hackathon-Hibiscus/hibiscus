@@ -44,7 +44,7 @@ function Shell() {
         {route.page === 'application' && <ApplicationDetail key={`${route.id}-${tokenVersion}`} id={route.id} source={source} />}
         {route.page === 'applications' && <ApplicationList key={`apps-${tokenVersion}`} source={source} />}
         {route.page === 'register' && <RegisterApplication key={`register-${tokenVersion}`} source={source} />}
-        {route.page === 'home' && <Home key={`home-${tokenVersion}`} source={source} isReal={isReal} connection={connection.state} />}
+        {route.page === 'home' && <Home isReal={isReal} connection={connection.state} />}
         {route.page === 'demos' && <Demos />}
         {route.page === 'connect' && <Connect source={source} connection={connection.state} onTokenChange={onTokenChange} onRecheck={connection.recheck} />}
       </main>
