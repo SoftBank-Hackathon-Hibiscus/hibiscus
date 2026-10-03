@@ -74,6 +74,15 @@ def _cmd_test_build(args) -> int:
     return EXIT_OK if result['passed'] else EXIT_FAILED
 
 
+def _cmd_policy_preview(args) -> int:
+    from .policy_preview import preview_policy
+
+    result = preview_policy(args.test_dir, args.out_dir, args.policy_root)
+    if args.json:
+        _print_json(result)
+    else:
+        print(f"정책: {result['decision']} ({result['plan_path']})")
+    return result['exit_code']
 
 
 
@@ -276,6 +285,13 @@ def build_parser() -> argparse.ArgumentParser:
     test_build.add_argument('--after')
     test_build.add_argument('--json', action='store_true')
     test_build.set_defaults(handler=_cmd_test_build)
+
+    preview = sub.add_parser('policy-preview', help='parity 원본을 정책 변환기와 결정기에 전달 (서명·배포 없음)')
+    preview.add_argument('--test-dir', required=True)
+    preview.add_argument('--out-dir', required=True)
+    preview.add_argument('--policy-root')
+    preview.add_argument('--json', action='store_true')
+    preview.set_defaults(handler=_cmd_policy_preview)
 
     return parser
 
