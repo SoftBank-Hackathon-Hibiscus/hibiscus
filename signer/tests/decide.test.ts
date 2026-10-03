@@ -33,9 +33,14 @@ describe("decideSign", () => {
       expect(decideSign(p, planSha256, "alice", approval)).toEqual({ ok: true, approver: "bob" });
     });
 
-    it("본인 승인 기록은 인정하지 않음", () => {
-      const approval = { ...createApproval(loaded, "alice", "bob", NOW), approver: "alice" };
+    it.each([["alice"], ["Alice"], ["ALICE"]])("본인 승인 기록은 인정하지 않음 (approver %s, 대소문자 무관)", (approver) => {
+      const approval = { ...createApproval(loaded, "alice", "bob", NOW), approver };
       expect(decideSign(p, planSha256, "alice", approval)).toMatchObject({ ok: false, reason: "self_approval" });
+    });
+
+    it("승인 기록을 만들 때도 대소문자만 다른 본인은 거절, approver 에 Auto 도 못 씀", () => {
+      expect(() => createApproval(loaded, "alice", "Alice", NOW)).toThrow(expect.objectContaining({ code: "SELF_APPROVAL" }));
+      expect(() => createApproval(loaded, "alice", "AUTO", NOW)).toThrow(expect.objectContaining({ code: "APPROVAL_INVALID" }));
     });
 
     it("승인 기록의 요청자와 지금 요청자가 다르면 서명 안 함", () => {

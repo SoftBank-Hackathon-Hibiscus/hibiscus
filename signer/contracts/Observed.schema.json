@@ -1,0 +1,40 @@
+{
+  "$id": "Observed.schema.json",
+  "title": "Observed",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "kind": {
+      "type": "string",
+      "const": "observed"
+    },
+    "target": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,31}$",
+      "description": "배포 위치 (onprem, cloud_run 등)"
+    },
+    "image": {
+      "type": "string",
+      "pattern": "^[^@\\s]+@sha256:[0-9a-f]{64}$",
+      "description": "실제로 떠 있는 이미지 <저장소>@sha256:<hex>"
+    },
+    "observed_at": {
+      "type": "string",
+      "description": "ISO 8601 시각"
+    },
+    "source": {
+      "type": "string",
+      "maxLength": 200,
+      "description": "어디서 봤는지 (gcloud run revisions describe, docker inspect 등)"
+    }
+  },
+  "required": [
+    "kind",
+    "target",
+    "image",
+    "observed_at",
+    "source"
+  ],
+  "additionalProperties": false,
+  "description": "실제 배포 상태 관측 한 줄. 운영자가 아닌 사람(감사자)이 만들어야 의미 있음. signer reconcile 입력"
+}

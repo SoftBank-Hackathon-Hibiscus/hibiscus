@@ -1,0 +1,33 @@
+{
+  "language": "ja",
+  "analysis_sha256": "f693cdf2d8fd1664e52750acf660609ddcc97cbd896f14db981f3ad03db1d429",
+  "findings": [
+    {
+      "id": "finding:1",
+      "title": "セッションをプロセスのメモリにのみ保存",
+      "observed": "restartとreplaceのどちらでも、中断後のGET /meは期待した200 aliceではなく401 login requiredを返しました（index 11、17）。中断しないnone条件では20/20が一致しました。",
+      "hypothesis": "ログインセッションはモジュールのグローバル辞書SESSIONSにのみ保存され、/loginで追加されます。プロセスが再起動すると辞書が空になるため、既存のsid Cookieで/meを呼んでも名前を取得できないという説明がコードと整合します。ストレージの寿命ではなくプロセスメモリの問題であり、このコードには永続的なセッション保存先が見当たりません。",
+      "next_action": "セッションをプロセス外の永続ストレージ、または署名付きトークンに移す方法を検討し、再起動やコンテナ入れ替え後にも利用できる構成を決めてください。",
+      "verification": "ログイン後にrestartとreplaceをそれぞれ実行し、同じsid CookieでGET /meが200 {\"name\":\"alice\"}を返すことを確認してください。",
+      "limit": "セッションの維持のみを扱います。投稿DBの初期化やアップロードファイルの消失は解決できません。"
+    },
+    {
+      "id": "finding:2",
+      "title": "起動のたびにpostsテーブルを削除",
+      "observed": "restart後もGET /postsにはcarolの投稿1件しか残らず、既存のaliceとbobの投稿は消えていました。新規投稿のidは期待した3ではなく1となり、GET /posts/2は404でした（restart:12、13、14、20）。",
+      "hypothesis": "mainは起動時にinit_dbを呼び、init_dbはDROP TABLE IF EXISTS postsで始まるSCHEMAを実行します。再起動ではコンテナの書き込みレイヤーは消えないため、data.dbファイルが残っていても起動処理がテーブルを作り直してデータを削除したと考えるのが最も直接的です。replaceの同じ症状にはストレージの寿命の問題（finding:3）も重なるため、両者を切り分けられません。",
+      "next_action": "起動時のスキーマ初期化を、既存データを削除しない処理に変えることを検討してください。例えば、テーブルがない場合にのみ作成する方法です。",
+      "verification": "restart条件で投稿を保存してから再起動し、GET /postsが既存のid 1、2と期待する一覧を維持するか確認してください。続けてPOST /postsがid 3を返すことも確認してください。",
+      "limit": "再起動時の症状のみを解決します。replaceではコンテナレイヤー上のdata.dbが消えるため、別途保存先の変更が必要です。"
+    },
+    {
+      "id": "finding:3",
+      "title": "DBとアップロードをコンテナ内に保存",
+      "observed": "replace後のGET /uploadsは、期待した[\"cat.png\",\"notes.txt\"]ではなく[\"notes.txt\"]を返しました（replace:16）。一方、restartではアップロード一覧が一致しました。docker diffには、/app/data/data.dbと/app/uploads配下のファイル2個がコンテナレイヤーに書き込まれた記録があります。",
+      "hypothesis": "DBとアップロードファイルがコンテナの書き込みレイヤーにある場合、コンテナを削除して作り直すと一緒に消える可能性があります。restartでアップロードが維持されたのは、同じコンテナのレイヤーが残るためと考えられます。replace後にnotes.txtだけが残った理由はこの資料だけでは説明できず、不確かなため別途調査が必要です。replaceでのDBの不一致にはfinding:2のDROP TABLEも重なるため、レイヤー消失だけが原因とは断定できません。",
+      "next_action": "/app/dataと/app/uploadsを、コンテナを入れ替えても維持されるボリュームなどの外部ストレージに置くことを検討してください。あわせて、replaceでnotes.txtだけが残った経緯を調べてください。",
+      "verification": "replace条件でファイル2個をアップロードしてコンテナを入れ替え、GET /uploadsがcat.pngとnotes.txtの両方を返すことを確認してください。新しいコンテナからDBファイルが見えることも確認してください。",
+      "limit": "ストレージの寿命のみを扱います。finding:2の起動時のDROP TABLEを直さないと、永続ボリュームでもpostsが初期化される可能性があります。"
+    }
+  ]
+}

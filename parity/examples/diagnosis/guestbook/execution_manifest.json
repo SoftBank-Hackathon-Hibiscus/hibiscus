@@ -1,0 +1,27 @@
+{
+  "format": "premortem-test-build-v1",
+  "run_id": "rehearsal-07d13af8ec-guestbook",
+  "app": "guestbook",
+  "source_revision": "86251f2f63aeb213aed4a48bf7c9066b427b8d52",
+  "digest": "sha256:2424ca26e6da2d09d9f15a7b4087773b5848e31fb25ac430605cb3a08b83a2ac",
+  "local_image_id": "sha256:a2c3c7624d267a74e795cf03b13d9cf7ac0f4522bad1eaeabdae6f3612df5723",
+  "status": "completed",
+  "passed": false,
+  "parity_exit_code": 1,
+  "artifacts": {
+    "build_manifest.json": "167bf0ffd9dd2396ab58b70def8fd6a596e3a8a283d50fc22b6e461ae4e26652",
+    "parity_handoff.json": "ed3c84d74fd1cd6e01b96196be951e42925815b3436dd47c9282cc4efcfa08f7",
+    "result.diagnostics.json": "b1e5226b1c33f0082a43fdd1f2c5d4bb94fec7a57acba047cb2b713b31adba27",
+    "result.json": "6acc54cf8921678a03fac30af707f02cd22723fcdc315133bb911003263c5a45",
+    "verified.diagnostics.json": "16cf023a13796ac1a56e6988345fdce3152843af2b0eb3ead97c888cf5081beb"
+  },
+  "settings": {
+    "port": 8080,
+    "health_path": "/healthz",
+    "health_timeout": 30,
+    "after": [
+      10
+    ]
+  },
+  "cleanup_failures": []
+}

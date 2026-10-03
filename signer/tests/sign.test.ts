@@ -4,7 +4,7 @@ import { Ajv2020 } from "ajv/dist/2020.js";
 import { describe, expect, it } from "vitest";
 import { createApproval } from "../src/approval.js";
 import { CONTRACTS, toJsonSchema } from "../src/contracts.js";
-import { writeJson } from "../src/io.js";
+import { canonicalize, sha256Hex, writeJson } from "../src/io.js";
 import { DEFAULT_PLAN_SCHEMA, loadPlan } from "../src/plan.js";
 import { runSign } from "../src/sign.js";
 import { copyPlan, NOW, plan, readJsonFile, readLog, RecordingSigner, REPO, tmp } from "./helpers.js";
@@ -51,7 +51,11 @@ describe("runSign", () => {
           failover_allowed: "false",
           requester: "alice",
           approver: "auto",
+          approval_sha256: "none",
+          signed_at: encodeURIComponent(NOW.toISOString()),
           plan_sha256: loadPlan(plan("allow-onprem")).planSha256,
+          // 저장소도 묶음 (: / 인코딩)
+          image_repo: encodeURIComponent(REPO),
         },
       },
     ]);
@@ -93,7 +97,12 @@ describe("runSign", () => {
 
     expect(outcome.code).toBe(0);
     expect(readJsonFile(paths(dir).outPath)).toMatchObject({ requester: "alice", approver: "bob" });
-    expect(signer.calls[0]?.annotations).toMatchObject({ requester: "alice", approver: "bob" });
+    expect(signer.calls[0]?.annotations).toMatchObject({
+      requester: "alice",
+      approver: "bob",
+      // 승인 기록(키 정렬 JSON)의 해시까지 서명에 묶음
+      approval_sha256: sha256Hex(canonicalize(readJsonFile(approvalPath))),
+    });
   });
 
   it("needs_approval: 승인 뒤 targets 를 바꾸면 서명 안 함", async () => {
@@ -131,6 +140,24 @@ describe("runSign", () => {
     expect(outcome).toMatchObject({ code: 1, reason: "approval_missing" });
   });
 
+  it("서명 직후 자기 확인: 통과하면 서명, 확인에 쓴 주석은 서명 주석 그대로", async () => {
+    const dir = tmp();
+    const signer = new RecordingSigner();
+    const outcome = await runSign({ planPath: plan("allow"), requester: "alice", imageRepo: REPO, signer, selfVerifier: signer, now: () => NOW, ...paths(dir) });
+    expect(outcome.code).toBe(0);
+    expect(signer.verifyCalls).toEqual([{ imageRef: signer.calls[0]!.imageRef, annotations: signer.calls[0]!.annotations }]);
+  });
+
+  it("서명 직후 자기 확인이 실패하면(다른 키로 서명 등) code 2, sign_result 없음, refused(sign_failed)", async () => {
+    const dir = tmp();
+    const signer = new RecordingSigner();
+    const wrongKey = new RecordingSigner(); // 서명을 하나도 모르는 확인기 = 다른 공개키
+    const outcome = await runSign({ planPath: plan("allow"), requester: "alice", imageRepo: REPO, signer, selfVerifier: wrongKey, now: () => NOW, ...paths(dir) });
+    expect(outcome).toMatchObject({ code: 2, reason: "sign_failed", detail: expect.stringMatching(/서명 직후 확인 실패/) });
+    expect(existsSync(paths(dir).outPath)).toBe(false);
+    expect(readLog(paths(dir).logPath)[0]).toMatchObject({ result: "refused", reason: "sign_failed" });
+  });
+
   it("cosign 이 실패하면 code 2, sign_result.json 없음, refused(sign_failed) 기록", async () => {
     const dir = tmp();
     const outcome = await runSign({ planPath: plan("allow"), requester: "alice", imageRepo: REPO, signer: new RecordingSigner(true), now: () => NOW, ...paths(dir) });
@@ -161,6 +188,14 @@ describe("runSign", () => {
       runSign({ planPath: plan("allow"), requester: "alice", imageRepo: REPO, signer, planSchemaPath: join(dir, "missing.schema.json"), ...paths(dir) }),
     ).rejects.toMatchObject({ code: "SCHEMA_UNAVAILABLE" });
     expect(signer.calls).toHaveLength(0);
+  });
+
+  it.each([["a%2Cb"], ["x".repeat(65)], ["bob(1)"], [""]])("요청자 id 형식이 틀리면(%s) 서명 전에 REQUESTER_INVALID, 서명·기록 모두 안 함", async (requester) => {
+    const dir = tmp();
+    const signer = new RecordingSigner();
+    await expect(runSign({ planPath: plan("allow"), requester, imageRepo: REPO, signer, now: () => NOW, ...paths(dir) })).rejects.toMatchObject({ code: "REQUESTER_INVALID" });
+    expect(signer.calls).toHaveLength(0);
+    expect(existsSync(paths(dir).logPath)).toBe(false);
   });
 
   it("이미지 저장소에 태그가 붙어 있으면 오류", async () => {

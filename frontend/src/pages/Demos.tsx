@@ -1,4 +1,5 @@
 import type { CSSProperties } from 'react';
+import { RecordedDiagnosis } from '../components/RecordedDiagnosis';
 import { Notice, PageTitle, Pill } from '../components/ui';
 import type { Tone } from '../lib/deployState';
 import { useLang, type DictKey } from '../lib/i18n';
@@ -55,6 +56,10 @@ export function Demos() {
           </a>
         ))}
       </div>
+      <section className="card stack">
+        <h2 className="card-title">{t('diagnosisRecordedTitle')}</h2>
+        <RecordedDiagnosis />
+      </section>
       <p className="small">
         <a href={realHref(HOME_PATH)}>{t('backToService')}</a>
       </p>

@@ -1,6 +1,6 @@
 // block 거절, allow 바로 서명(approver auto), needs_approval 은 다른 사람 승인 기록이 지금 plan 과 맞을 때만.
 // 승인 유효시간을 주면 오래된 승인도 거절. targets 는 다시 판단하지 않고 plan 값 그대로
-import { AUTO_APPROVER, type Approval, type Plan, type RefuseReason } from "./schema.js";
+import { AUTO_APPROVER, samePerson, type Approval, type Plan, type RefuseReason } from "./schema.js";
 
 export type SignDecision =
   | { ok: true; approver: string }
@@ -32,7 +32,7 @@ export function decideSign(plan: Plan, planSha256: string, requester: string, ap
     return refuse("approval_mismatch", "승인한 plan 이나 이미지와 지금 plan 이 다름 (승인 뒤 바뀜)");
   }
   if (approval.requester !== requester) return refuse("requester_mismatch", `승인 기록의 요청자(${approval.requester})와 지금 요청자(${requester})가 다름`);
-  if (approval.approver === approval.requester) return refuse("self_approval", "요청자 본인 승인은 인정하지 않음");
+  if (samePerson(approval.approver, approval.requester)) return refuse("self_approval", "요청자 본인 승인은 인정하지 않음 (대소문자만 다른 아이디도 같은 사람)");
   if (o.approvalTtlMs !== undefined) {
     const approvedAt = Date.parse(approval.approved_at);
     const age = (o.now ?? new Date()).getTime() - approvedAt;

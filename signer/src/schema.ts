@@ -23,6 +23,8 @@ export const PersonSchema = z
   .regex(/^[A-Za-z0-9._-]{1,64}$/, "사람 id 는 영문·숫자·._- 만, 1~64자여야 합니다")
   .describe("GitHub 아이디 등 사람 id");
 export const AUTO_APPROVER = "auto";
+/** 같은 사람인지. GitHub 아이디는 대소문자를 구분하지 않아서 alice 와 Alice 를 같은 사람으로 봄 */
+export const samePerson = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase();
 const TimeSchema = z.string().describe("ISO 8601 시각");
 
 export const DecisionSchema = z.enum(["allow", "block", "needs_approval"]);
@@ -46,7 +48,7 @@ export const ApprovalSchema = z
     plan_hash: PlanHashSchema,
     plan_sha256: Sha256HexSchema.describe("승인할 때 본 plan.json 전체(키 정렬 JSON)의 sha256. 승인 뒤 targets 등이 바뀌면 달라짐"),
     requester: PersonSchema.describe("배포를 요청한 사람"),
-    approver: PersonSchema.refine((v) => v !== AUTO_APPROVER, "approver 에 auto 는 쓸 수 없습니다").describe("승인한 사람. requester 와 달라야 함"),
+    approver: PersonSchema.refine((v) => !samePerson(v, AUTO_APPROVER), "approver 에 auto 는 쓸 수 없습니다 (대소문자 무관)").describe("승인한 사람. requester 와 달라야 함"),
     approved_at: TimeSchema,
   })
   .describe("needs_approval plan 에 대한 사람 승인 기록");
@@ -100,13 +102,61 @@ export const SignLogSchema = z
   .describe("decisions.jsonl 의 kind: sign 한 줄");
 export type SignLog = z.infer<typeof SignLogSchema>;
 
+export const SignErrorSchema = z
+  .strictObject({
+    kind: z.literal("sign_error").describe("결정 전에 난 서명 실패"),
+    time: TimeSchema,
+    code: z.string().regex(/^[A-Z][A-Z0-9_]{0,39}$/).describe("SignerError 코드 (PLAN_INVALID, REQUESTER_INVALID 등)"),
+    message: z.string().max(500),
+    run_id: RunIdSchema.optional().describe("plan 을 읽은 뒤에 난 오류면 그 실행 id"),
+    requester: z.string().max(100).optional().describe("요청자로 들어온 값 그대로 (형식이 틀렸을 수 있음)"),
+  })
+  .describe("plan·승인 기록 형식 오류처럼 서명 결정 전에 멈춘 시도. 감사 로그에만 남김 (decisions.jsonl 계약은 그대로)");
+export type SignError = z.infer<typeof SignErrorSchema>;
+
+export const RevokeReasonSchema = z.enum(["vulnerability", "policy_changed", "key_compromise", "mistake"]);
+
+export const RevokeSchema = z
+  .strictObject({
+    kind: z.literal("revoke").describe("서명 철회"),
+    time: TimeSchema,
+    digest: DigestSchema,
+    run_id: RunIdSchema.optional().describe("있으면 그 실행의 서명만, 없으면 이 이미지의 서명 전부 (이후 서명도 거부)"),
+    reason: RevokeReasonSchema,
+    by: PersonSchema.describe("철회한 사람"),
+    note: z.string().max(200).regex(/^[^\u0000-\u001f\u007f-\u009f]*$/, "note 에 제어 문자는 쓸 수 없음").optional(),
+  })
+  .describe("이미 한 서명을 더는 배포에 쓰지 않게 막는 기록. 감사 로그에만 남김 (decisions.jsonl 계약은 그대로)");
+export type Revoke = z.infer<typeof RevokeSchema>;
+
+export const ObservedSchema = z
+  .strictObject({
+    kind: z.literal("observed"),
+    target: z.string().regex(/^[a-z][a-z0-9_]{0,31}$/).describe("배포 위치 (onprem, cloud_run 등)"),
+    image: z.string().regex(/^[^@\s]+@sha256:[0-9a-f]{64}$/).describe("실제로 떠 있는 이미지 <저장소>@sha256:<hex>"),
+    observed_at: TimeSchema,
+    source: z.string().max(200).describe("어디서 봤는지 (gcloud run revisions describe, docker inspect 등)"),
+  })
+  .describe("실제 배포 상태 관측 한 줄. 운영자가 아닌 사람(감사자)이 만들어야 의미 있음. signer reconcile 입력");
+export type Observed = z.infer<typeof ObservedSchema>;
+
+// cosign -a 값으로 쓸 수 있는 문자. cosign 은 쉼표로 값을 나누고 = 가 두 번이면 거절해서, encodeURIComponent 결과와 구분자 + 만 허용
+export const ANNOTATION_VALUE_RE = /^[A-Za-z0-9._~%!'()*+-]*$/;
+export const ANNOTATION_KEY_RE = /^[a-z][a-z0-9_]{0,39}$/;
+
 export const AuditLineSchema = z
   .strictObject({
     seq: z.int().min(1).describe("줄 번호. 1 부터 빈 번호 없이"),
     prev_hash: Sha256HexSchema.describe("앞 줄 hash. 첫 줄은 0 이 64개"),
-    entry: SignLogSchema,
+    entry: z.discriminatedUnion("kind", [SignLogSchema, SignErrorSchema, RevokeSchema]),
     anchor: Sha256HexSchema.optional().describe("signed 줄에만. 서명 직전 체인 끝 hash (이미지 서명 주석 audit_head 와 같은 값)"),
-    hash: Sha256HexSchema.describe("이 줄 hash. sha256(키 정렬 JSON {seq, prev_hash, entry, anchor})"),
+    annotations: z
+      .record(z.string().regex(ANNOTATION_KEY_RE), z.string().regex(ANNOTATION_VALUE_RE))
+      .optional()
+      .describe("signed 줄에만. 이미지 서명에 실제로 붙인 주석 전체. 주석만 바꾼 쌍둥이 서명과 구분하는 데 씀"),
+    cancels: Sha256HexSchema.optional().describe("서명 뒤 단계(자기 확인·증명서)가 실패한 refused 줄에만. 취소하는 signed 줄의 hash"),
+    hash: Sha256HexSchema.describe("이 줄 hash. sha256(키 정렬 JSON {seq, prev_hash, entry, anchor, annotations, cancels})"),
   })
   .describe("서명 감사 로그(해시 체인) 한 줄. signer 안에서만 씀");
 export type AuditLine = z.infer<typeof AuditLineSchema>;
+export type AuditEntry = AuditLine["entry"];

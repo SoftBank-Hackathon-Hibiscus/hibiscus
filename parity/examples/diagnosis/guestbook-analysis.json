@@ -1,0 +1,137 @@
+{
+  "format": "hibiscus-diagnosis-record-v1",
+  "run_id": "rehearsal-07d13af8ec-guestbook",
+  "created_at": "2026-10-03T03:31:50Z",
+  "provider": "anthropic_messages",
+  "model": "claude-sonnet-5-5",
+  "status": "succeeded",
+  "output": {
+    "findings": [
+      {
+        "id": "finding:1",
+        "title": "세션이 프로세스 메모리에만 있음",
+        "observed": "restart와 replace 모두 중단 후 GET /me가 200 alice 대신 401 login required를 반환했습니다(index 11, 17). 중단 없는 none 조건은 20/20으로 일치했습니다.",
+        "hypothesis": "로그인 세션이 모듈 전역 딕셔너리 SESSIONS에만 저장되고 /login에서 여기에 추가됩니다. 프로세스가 다시 시작하면 이 딕셔너리가 비므로 기존 sid 쿠키로 /me를 조회해도 이름을 찾지 못한다고 보는 것이 코드와 맞습니다. 저장소 수명 문제가 아니라 프로세스 메모리 문제이며, 이 코드에 영속 세션 저장소는 보이지 않습니다.",
+        "mismatch_ids": [
+          "restart:11",
+          "restart:17",
+          "replace:11",
+          "replace:17"
+        ],
+        "fact_ids": [],
+        "source_locations": [
+          {
+            "path": "app.py",
+            "line_start": 58,
+            "line_end": 58
+          },
+          {
+            "path": "app.py",
+            "line_start": 123,
+            "line_end": 127
+          },
+          {
+            "path": "app.py",
+            "line_start": 165,
+            "line_end": 166
+          }
+        ],
+        "scope": "code",
+        "next_action": "세션을 프로세스 밖의 영속 저장소나 서명된 토큰으로 옮기는 방안을 검토하고, 그 저장소 자체가 재시작과 교체에서 유지되는지 정하세요.",
+        "verification": "로그인 후 restart와 replace를 각각 수행하고, 같은 sid 쿠키로 GET /me가 200 {\"name\":\"alice\"}를 반환하는지 확인하세요.",
+        "limit": "세션 유지만 다룹니다. 게시글 DB 초기화와 업로드 파일 소실은 해결하지 못합니다."
+      },
+      {
+        "id": "finding:2",
+        "title": "시작할 때마다 posts 테이블 삭제",
+        "observed": "restart 후에도 GET /posts에 carol 글 하나만 남았고 기존 alice, bob 글은 없었습니다. 새 글은 기대한 id 3이 아니라 id 1로 생성됐고, GET /posts/2는 404였습니다(restart:12, 13, 14, 20).",
+        "hypothesis": "main이 시작할 때 init_db를 호출하고, init_db는 DROP TABLE IF EXISTS posts로 시작하는 SCHEMA를 실행합니다. 재시작은 컨테이너 쓰기 레이어를 지우지 않으므로 data.db 파일이 남아 있어도 시작 로직이 테이블을 다시 만들어 데이터를 지웠다고 보는 것이 가장 직접적입니다. replace의 같은 증상은 이 원인에 저장소 수명 문제(finding:3)가 겹쳐 있어 둘을 구분할 수 없습니다.",
+        "mismatch_ids": [
+          "restart:12",
+          "restart:13",
+          "restart:14",
+          "restart:20",
+          "replace:12",
+          "replace:13",
+          "replace:14",
+          "replace:20"
+        ],
+        "fact_ids": [
+          "fact:1"
+        ],
+        "source_locations": [
+          {
+            "path": "app.py",
+            "line_start": 47,
+            "line_end": 55
+          },
+          {
+            "path": "app.py",
+            "line_start": 71,
+            "line_end": 74
+          },
+          {
+            "path": "app.py",
+            "line_start": 218,
+            "line_end": 218
+          }
+        ],
+        "scope": "code",
+        "next_action": "시작 시 스키마 초기화를 기존 데이터를 지우지 않는 방식으로 바꾸는 방안을 검토하세요. 예를 들어 테이블이 없을 때만 생성하도록 하는 방식입니다.",
+        "verification": "restart 조건에서 posts를 저장한 뒤 재시작하고, GET /posts가 기존 id 1, 2와 기대 목록을 유지하는지 확인하세요. 이어서 POST /posts가 id 3을 반환하는지도 확인하세요.",
+        "limit": "재시작 증상만 해결합니다. replace에서 data.db가 컨테이너 레이어에 있어 사라지는 문제는 별도 저장소 변경이 필요합니다."
+      },
+      {
+        "id": "finding:3",
+        "title": "DB와 업로드가 컨테이너 레이어에 있음",
+        "observed": "replace 후 GET /uploads가 [\"cat.png\",\"notes.txt\"] 대신 [\"notes.txt\"]를 반환했습니다(replace:16). 반면 restart 조건에서는 업로드 목록이 일치했습니다. docker diff는 /app/data/data.db와 /app/uploads 아래 파일 2개가 컨테이너 레이어에 기록됐다고 보여줍니다.",
+        "hypothesis": "DB와 업로드 파일이 컨테이너 쓰기 레이어에 있다면 컨테이너를 제거하고 새로 만들 때 함께 사라질 수 있습니다. restart에서 업로드가 유지된 것은 같은 컨테이너의 레이어가 남았기 때문으로 보입니다. replace 후 notes.txt만 남은 이유는 이 자료만으로 설명되지 않아 불확실하며, 별도 조사가 필요합니다. replace의 DB 불일치는 finding:2의 DROP TABLE과 겹치므로 레이어 소실만이 원인이라고 단정할 수 없습니다.",
+        "mismatch_ids": [
+          "replace:12",
+          "replace:13",
+          "replace:14",
+          "replace:16",
+          "replace:20"
+        ],
+        "fact_ids": [
+          "fact:1",
+          "fact:2"
+        ],
+        "source_locations": [
+          {
+            "path": "app.py",
+            "line_start": 38,
+            "line_end": 41
+          },
+          {
+            "path": "app.py",
+            "line_start": 207,
+            "line_end": 208
+          },
+          {
+            "path": "app.py",
+            "line_start": 219,
+            "line_end": 219
+          }
+        ],
+        "scope": "code_and_infrastructure",
+        "next_action": "/app/data와 /app/uploads를 컨테이너 교체 후에도 유지되는 볼륨 등 외부 저장소로 지정하는 방안을 검토하세요. 또 replace에서 notes.txt만 남은 경위를 조사하세요.",
+        "verification": "replace 조건에서 파일 두 개를 업로드하고 컨테이너를 교체한 뒤, GET /uploads가 cat.png와 notes.txt를 모두 반환하는지 확인하세요. DB 파일이 새 컨테이너에서도 보이는지도 확인하세요.",
+        "limit": "스토리지 수명만 다룹니다. finding:2의 시작 시 DROP TABLE을 고치지 않으면 영속 볼륨에서도 posts가 초기화될 수 있습니다."
+      }
+    ],
+    "unexplained_mismatch_ids": []
+  },
+  "duration_ms": 34886,
+  "usage": {
+    "input_tokens": 7753,
+    "output_tokens": 4521,
+    "cost": null,
+    "currency": null
+  },
+  "error_code": null,
+  "request_id": "req_011CfebcNosBeSYSTBX2tEvN",
+  "input_sha256": "c2ea19ca618a6c7b6b8922d32751513aed7365749bb99f804877f5d5d9b7af44",
+  "prompt_sha256": "25e743d1113cc8a155b7402d49280fcd265885d214df5e1e4b1840bc43da0938",
+  "causal_review": "not_automatically_verified"
+}

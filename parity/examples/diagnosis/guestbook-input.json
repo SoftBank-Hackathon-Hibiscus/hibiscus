@@ -1,0 +1,179 @@
+{
+  "format": "hibiscus-diagnosis-input-v1",
+  "run_id": "rehearsal-07d13af8ec-guestbook",
+  "source_revision": "86251f2f63aeb213aed4a48bf7c9066b427b8d52",
+  "source_tree_sha256": "f72cdf694263523944679401a601a530156fe9626231fea25f96b38209e2eac3",
+  "result_sha256": "6acc54cf8921678a03fac30af707f02cd22723fcdc315133bb911003263c5a45",
+  "image_digest": "sha256:2424ca26e6da2d09d9f15a7b4087773b5848e31fb25ac430605cb3a08b83a2ac",
+  "recorded_at": "2026-10-02T07:09:14.233684+00:00",
+  "conditions": [
+    {
+      "condition": "none",
+      "total": 20,
+      "matched": 20
+    },
+    {
+      "condition": "restart",
+      "total": 20,
+      "matched": 14
+    },
+    {
+      "condition": "replace",
+      "total": 20,
+      "matched": 13
+    }
+  ],
+  "mismatches": [
+    {
+      "actual": "401 {\"error\":\"login required\"}",
+      "condition": "restart",
+      "expected": "200 {\"name\":\"alice\"}",
+      "id": "restart:11",
+      "index": 11,
+      "related_fact": null,
+      "request": "GET /me"
+    },
+    {
+      "actual": "201 {\"id\":1,\"author\":\"carol\",\"message\":\"재방문했어요\",\"created_at\":\"2026-10-02T07:09:21.951+00:00\"}",
+      "condition": "restart",
+      "expected": "201 {\"id\":3,\"author\":\"carol\",\"message\":\"재방문했어요\",\"created_at\":\"2026-10-02T04:21:49.574+00:00\"}",
+      "id": "restart:12",
+      "index": 12,
+      "related_fact": "/app/data/data.db",
+      "request": "POST /posts"
+    },
+    {
+      "actual": "200 [{\"id\":1,\"author\":\"carol\",\"message\":\"재방문했어요\",\"created_at\":\"2026-10-02T07:09:21.951+00:00\"}]",
+      "condition": "restart",
+      "expected": "200 [{\"id\":1,\"author\":\"alice\",\"message\":\"첫 방문 기념!\",\"created_at\":\"2026-10-02T04:21:49.483+00:00\"},{\"id\":2,\"author\":\"bob\",\"message\":\"hello guestbook\",\"created_at\":\"2026-10-02T04:21:49.516+00:00\"},{\"id\"…",
+      "id": "restart:13",
+      "index": 13,
+      "related_fact": "/app/data/data.db",
+      "request": "GET /posts"
+    },
+    {
+      "actual": "404 {\"error\":\"post not found\"}",
+      "condition": "restart",
+      "expected": "200 {\"id\":2,\"author\":\"bob\",\"message\":\"hello guestbook\",\"created_at\":\"2026-10-02T04:21:49.516+00:00\"}",
+      "id": "restart:14",
+      "index": 14,
+      "related_fact": "/app/data/data.db",
+      "request": "GET /posts/2"
+    },
+    {
+      "actual": "401 {\"error\":\"login required\"}",
+      "condition": "restart",
+      "expected": "200 {\"name\":\"alice\"}",
+      "id": "restart:17",
+      "index": 17,
+      "related_fact": null,
+      "request": "GET /me"
+    },
+    {
+      "actual": "200 [{\"id\":1,\"author\":\"carol\",\"message\":\"재방문했어요\",\"created_at\":\"2026-10-02T07:09:21.951+00:00\"}]",
+      "condition": "restart",
+      "expected": "200 [{\"id\":1,\"author\":\"alice\",\"message\":\"첫 방문 기념!\",\"created_at\":\"2026-10-02T04:21:49.483+00:00\"},{\"id\":2,\"author\":\"bob\",\"message\":\"hello guestbook\",\"created_at\":\"2026-10-02T04:21:49.516+00:00\"},{\"id\"…",
+      "id": "restart:20",
+      "index": 20,
+      "related_fact": "/app/data/data.db",
+      "request": "GET /posts"
+    },
+    {
+      "actual": "401 {\"error\":\"login required\"}",
+      "condition": "replace",
+      "expected": "200 {\"name\":\"alice\"}",
+      "id": "replace:11",
+      "index": 11,
+      "related_fact": null,
+      "request": "GET /me"
+    },
+    {
+      "actual": "201 {\"id\":1,\"author\":\"carol\",\"message\":\"재방문했어요\",\"created_at\":\"2026-10-02T07:09:25.691+00:00\"}",
+      "condition": "replace",
+      "expected": "201 {\"id\":3,\"author\":\"carol\",\"message\":\"재방문했어요\",\"created_at\":\"2026-10-02T04:21:49.574+00:00\"}",
+      "id": "replace:12",
+      "index": 12,
+      "related_fact": "/app/data/data.db",
+      "request": "POST /posts"
+    },
+    {
+      "actual": "200 [{\"id\":1,\"author\":\"carol\",\"message\":\"재방문했어요\",\"created_at\":\"2026-10-02T07:09:25.691+00:00\"}]",
+      "condition": "replace",
+      "expected": "200 [{\"id\":1,\"author\":\"alice\",\"message\":\"첫 방문 기념!\",\"created_at\":\"2026-10-02T04:21:49.483+00:00\"},{\"id\":2,\"author\":\"bob\",\"message\":\"hello guestbook\",\"created_at\":\"2026-10-02T04:21:49.516+00:00\"},{\"id\"…",
+      "id": "replace:13",
+      "index": 13,
+      "related_fact": "/app/data/data.db",
+      "request": "GET /posts"
+    },
+    {
+      "actual": "404 {\"error\":\"post not found\"}",
+      "condition": "replace",
+      "expected": "200 {\"id\":2,\"author\":\"bob\",\"message\":\"hello guestbook\",\"created_at\":\"2026-10-02T04:21:49.516+00:00\"}",
+      "id": "replace:14",
+      "index": 14,
+      "related_fact": "/app/data/data.db",
+      "request": "GET /posts/2"
+    },
+    {
+      "actual": "200 [\"notes.txt\"]",
+      "condition": "replace",
+      "expected": "200 [\"cat.png\",\"notes.txt\"]",
+      "id": "replace:16",
+      "index": 16,
+      "related_fact": "/app/uploads",
+      "request": "GET /uploads"
+    },
+    {
+      "actual": "401 {\"error\":\"login required\"}",
+      "condition": "replace",
+      "expected": "200 {\"name\":\"alice\"}",
+      "id": "replace:17",
+      "index": 17,
+      "related_fact": null,
+      "request": "GET /me"
+    },
+    {
+      "actual": "200 [{\"id\":1,\"author\":\"carol\",\"message\":\"재방문했어요\",\"created_at\":\"2026-10-02T07:09:25.691+00:00\"}]",
+      "condition": "replace",
+      "expected": "200 [{\"id\":1,\"author\":\"alice\",\"message\":\"첫 방문 기념!\",\"created_at\":\"2026-10-02T04:21:49.483+00:00\"},{\"id\":2,\"author\":\"bob\",\"message\":\"hello guestbook\",\"created_at\":\"2026-10-02T04:21:49.516+00:00\"},{\"id\"…",
+      "id": "replace:20",
+      "index": 20,
+      "related_fact": "/app/data/data.db",
+      "request": "GET /posts"
+    }
+  ],
+  "facts": [
+    {
+      "id": "fact:1",
+      "evidence": "docker diff A /app/data/data.db; header 'SQLite format 3'",
+      "kind": "sqlite",
+      "path": "/app/data/data.db",
+      "storage": "container_layer"
+    },
+    {
+      "id": "fact:2",
+      "evidence": "docker diff: 2 file(s) written under /app/uploads",
+      "kind": "local_upload",
+      "path": "/app/uploads",
+      "storage": "container_layer"
+    }
+  ],
+  "sources": [
+    {
+      "path": "app.py",
+      "sha256": "794078fd236e6bec74926891ead45d7b637cc6a5bda51697d0eda781077c3166",
+      "line_start": 1,
+      "content": "                                 \n\n                                                      \n                                                 \n\n                              \n                                       \n                                  \n                                      \n                                                \n                                                               \n\n     \n                                                \n                                              \n                                               \n                                \n                                       \n                                             \n                                      \n                                                                \n                                         \n                                             \n   \nimport json\nimport mimetypes\nimport os\nimport re\nimport secrets\nimport signal\nimport sqlite3\nimport ssl\nfrom contextlib import closing\nfrom datetime import datetime, timezone\nfrom http.cookies import SimpleCookie\nfrom http.server import BaseHTTPRequestHandler, ThreadingHTTPServer\n\nDATA_DIR = os.environ.get(\"DATA_DIR\", \"/app/data\")\nUPLOAD_DIR = os.environ.get(\"UPLOAD_DIR\", \"/app/uploads\")\nPORT = int(os.environ.get(\"PORT\", \"8080\"))\nDB_PATH = os.path.join(DATA_DIR, \"data.db\")\n                                                             \nTLS_CERT = os.environ.get(\"TLS_CERT\")\nTLS_KEY = os.environ.get(\"TLS_KEY\")\n\n                                                                     \nSCHEMA = \"\"\"\nDROP TABLE IF EXISTS posts;\nCREATE TABLE posts (\n    id         INTEGER PRIMARY KEY,\n    author     TEXT NOT NULL,\n    message    TEXT NOT NULL,\n    created_at TEXT NOT NULL\n);\n\"\"\"\n\n                                        \nSESSIONS = {}\n\nFILENAME_RE = re.compile(r\"^[A-Za-z0-9._-]{1,100}$\")\nPOST_ID_RE = re.compile(r\"^/posts/(\\d+)$\")\nUPLOAD_RE = re.compile(r\"^/uploads/([^/]+)$\")\n\n\ndef connect():\n    conn = sqlite3.connect(DB_PATH)\n    conn.row_factory = sqlite3.Row\n    return conn\n\n\ndef init_db():\n    os.makedirs(DATA_DIR, exist_ok=True)\n    with closing(connect()) as conn:\n        conn.executescript(SCHEMA)\n\n\ndef now_iso():\n    return datetime.now(timezone.utc).isoformat(timespec=\"milliseconds\")\n\n\nclass Handler(BaseHTTPRequestHandler):\n    server_version = \"guestbook/1\"\n    protocol_version = \"HTTP/1.1\"\n\n                                                                        \n    def send_body(self, status, body, content_type, extra_headers=()):\n        self.send_response(status)\n        self.send_header(\"Content-Type\", content_type)\n        self.send_header(\"Content-Length\", str(len(body)))\n        for name, value in extra_headers:\n            self.send_header(name, value)\n        self.end_headers()\n        self.wfile.write(body)\n\n    def send_json(self, status, obj, extra_headers=()):\n        body = json.dumps(obj, ensure_ascii=False).encode(\"utf-8\")\n        self.send_body(status, body, \"application/json; charset=utf-8\", extra_headers)\n\n    def read_body(self):\n        length = int(self.headers.get(\"Content-Length\") or 0)\n        return self.rfile.read(length) if length > 0 else b\"\"\n\n    def read_json(self):\n        try:\n            data = json.loads(self.read_body() or b\"{}\")\n        except ValueError:\n            return None\n        return data if isinstance(data, dict) else None\n\n    def session_id(self):\n        cookie = [REDACTED]\"Cookie\") or \"\")\n        morsel = cookie.get(\"sid\")\n        return morsel.value if morsel else None\n\n    def route(self):\n        return self.path.split(\"?\", 1)[0]\n\n                                                                            \n    def do_GET(self):\n        path = self.route()\n        if path == \"/healthz\":\n            return self.send_json(200, {\"status\": \"ok\"})\n        if path == \"/me\":\n            name = SESSIONS.get(self.session_id())\n            if name is None:\n                return self.send_json(401, {\"error\": \"login required\"})\n            return self.send_json(200, {\"name\": name})\n        if path == \"/posts\":\n            with closing(connect()) as conn:\n                rows = conn.execute(\n                    \"SELECT id, author, message, created_at FROM posts ORDER BY id\"\n                ).fetchall()\n            return self.send_json(200, [dict(r) for r in rows])\n        m = POST_ID_RE.match(path)\n        if m:\n            with closing(connect()) as conn:\n                row = conn.execute(\n                    \"SELECT id, author, message, created_at FROM posts WHERE id = ?\",\n                    (int(m.group(1)),),\n                ).fetchone()\n            if row is None:\n                return self.send_json(404, {\"error\": \"post not found\"})\n            return self.send_json(200, dict(row))\n        if path == \"/uploads\":\n            return self.send_json(200, sorted(os.listdir(UPLOAD_DIR)))\n        m = UPLOAD_RE.match(path)\n        if m:\n            name = m.group(1)\n            file_path = os.path.join(UPLOAD_DIR, name)\n            if not FILENAME_RE.match(name) or not os.path.isfile(file_path):\n                return self.send_json(404, {\"error\": \"file not found\"})\n            with open(file_path, \"rb\") as f:\n                data = f.read()\n            ctype = mimetypes.guess_type(name)[0] or \"application/octet-stream\"\n            return self.send_body(200, data, ctype)\n        return self.send_json(404, {\"error\": \"not found\"})\n\n                                                                            \n    def do_POST(self):\n        path = self.route()\n        if path == \"/login\":\n            data = self.read_json()\n            name = (data or {}).get(\"name\")\n            if not isinstance(name, str) or not name:\n                return self.send_json(400, {\"error\": \"name required\"})\n            sid = secrets.token_hex(16)\n            SESSIONS[sid] = name\n            return self.send_json(\n                200, {\"name\": name},\n                [(\"Set-Cookie\", f\"sid={sid}; Path=/; HttpOnly\")],\n            )\n        if path == \"/logout\":\n            self.read_body()\n            SESSIONS.pop(self.session_id(), None)\n            return self.send_json(\n                200, {\"ok\": True},\n                [(\"Set-Cookie\", \"sid=; Path=/; Max-Age=0\")],\n            )\n        if path == \"/posts\":\n            data = self.read_json() or {}\n            author, message = data.get(\"author\"), data.get(\"message\")\n            if not isinstance(author, str) or not isinstance(message, str) or not author or not message:\n                return self.send_json(400, {\"error\": \"author and message required\"})\n            created_at = now_iso()\n            with closing(connect()) as conn:\n                with conn:\n                    cur = conn.execute(\n                        \"INSERT INTO posts (author, message, created_at) VALUES (?, ?, ?)\",\n                        (author, message, created_at),\n                    )\n                post_id = cur.lastrowid\n            return self.send_json(\n                201, {\"id\": post_id, \"author\": author, \"message\": message, \"created_at\": created_at}\n            )\n        self.read_body()\n        return self.send_json(404, {\"error\": \"not found\"})\n\n                                                                            \n    def do_PUT(self):\n        m = UPLOAD_RE.match(self.route())\n        body = self.read_body()\n        if not m:\n            return self.send_json(404, {\"error\": \"not found\"})\n        name = m.group(1)\n        if not FILENAME_RE.match(name):\n            return self.send_json(400, {\"error\": \"invalid file name\"})\n                                     \n        with open(os.path.join(UPLOAD_DIR, name), \"wb\") as f:\n            f.write(body)\n        return self.send_json(201, {\"name\": name, \"size\": len(body)})\n\n\ndef _graceful_exit(signum, frame):\n                                                                           \n    raise SystemExit(0)\n\n\ndef main():\n    init_db()\n    os.makedirs(UPLOAD_DIR, exist_ok=True)\n    signal.signal(signal.SIGTERM, _graceful_exit)\n    server = ThreadingHTTPServer((\"0.0.0.0\", PORT), Handler)\n    scheme = \"http\"\n    if TLS_CERT and TLS_KEY:\n        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)\n        context.load_cert_chain(TLS_CERT, TLS_KEY)\n        server.socket = context.wrap_socket(server.socket, server_side=True)\n        scheme = \"https\"\n    print(f\"guestbook listening on {scheme}://:{PORT} (db={DB_PATH}, uploads={UPLOAD_DIR})\", flush=True)\n    try:\n        server.serve_forever()\n    finally:\n        server.server_close()\n\n\nif __name__ == \"__main__\":\n    main()\n"
+    }
+  ],
+  "notes_hidden": true,
+  "policy_hints_included": false,
+  "condition_semantics": {
+    "none": "Same requests without lifecycle interruption.",
+    "restart": "Restart the same container after the specified request indices.",
+    "replace": "Remove the container and create a fresh container from the same image after the specified request indices."
+  },
+  "interrupt_after": [
+    10
+  ]
+}

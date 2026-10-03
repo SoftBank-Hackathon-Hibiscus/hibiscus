@@ -11,7 +11,9 @@ _DROP = {"$schema", "title", "description", "pattern", "minItems", "maxItems", "
 
 def api_subset(schema: Any) -> Any:
     if isinstance(schema, dict):
-        return {key: api_subset(value) for key, value in schema.items() if key not in _DROP}
+        return {key: ({name: api_subset(child) for name, child in value.items()}
+                      if key == "properties" else api_subset(value))
+                for key, value in schema.items() if key not in _DROP}
     if isinstance(schema, list):
         return [api_subset(item) for item in schema]
     return schema
