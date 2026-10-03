@@ -4,6 +4,7 @@ import { ApiError, type DataSource } from '../api/client';
 import type { GithubBranchesPage, GithubConnection, GithubInstallation, GithubRepository } from '../api/types';
 import { GITHUB_PAGE_SIZE } from '../api/real';
 import { ErrorNotice, describeError } from '../components/ErrorNotice';
+import { EnvironmentEditor } from '../components/EnvironmentEditor';
 import { Collapsible, Crumbs, Empty, Notice, PageTitle, Pill } from '../components/ui';
 import { EMPTY_REGISTRATION, friendlyBackendError, registeredPath, repoShortName, slugify, toGithubApplicationInput, validateRegistration, type RegistrationDraft, type RegistrationErrors } from '../lib/forms';
 import { useLang } from '../lib/i18n';
@@ -233,6 +234,16 @@ export function RegisterApplication({ source }: { source: DataSource }) {
                     <option value="block-test-failed">{t('testTemplateBlock')}</option>
                   </select>
                 </Field>
+                <div className="form-field">
+                  <span className="field-label">{t('environmentTitle')}</span>
+                  <p className="form-hint">{t('environmentRegisterHint')}</p>
+                  <EnvironmentEditor value={draft.environment} onChange={(environment) => setDraft((d) => ({ ...d, environment }))} />
+                </div>
+                <div className="form-field">
+                  <span className="field-label">{t('testEnvironmentTitle')}</span>
+                  <p className="form-hint">{t('testEnvironmentRegisterHint')}</p>
+                  <EnvironmentEditor value={draft.testEnvironment} onChange={(testEnvironment) => setDraft((d) => ({ ...d, testEnvironment }))} />
+                </div>
               </div>
             </Collapsible>
           </div>

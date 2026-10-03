@@ -19,6 +19,8 @@ import type {
   RouteSnapshot,
   RoutingTargetView,
   UpdateHealthCheckInput,
+  UpdateApplicationEnvironmentInput,
+  UpdateApplicationEnvironmentResponse,
 } from './types';
 
 export class ApiError extends Error {
@@ -49,6 +51,10 @@ export interface DataSource {
   listApplications(): Promise<ApplicationView[]>;
   getApplication(applicationId: string): Promise<ApplicationView>;
   updateHealthCheck(applicationId: string, input: UpdateHealthCheckInput): Promise<HealthCheckConfig>;
+  /** 모든 환경변수를 교체한다. 응답에는 이름만 포함된다. */
+  updateApplicationEnvironment(applicationId: string, input: UpdateApplicationEnvironmentInput): Promise<UpdateApplicationEnvironmentResponse>;
+  /** 검증 전용 환경변수를 교체하고 새 배포를 시작한다. */
+  updateApplicationTestEnvironment(applicationId: string, input: UpdateApplicationEnvironmentInput): Promise<UpdateApplicationEnvironmentResponse>;
   listDeployments(applicationId: string): Promise<Deployment[]>;
   getDeployment(deploymentId: string): Promise<DeploymentView>;
   approveDeployment(deploymentId: string): Promise<Deployment>;

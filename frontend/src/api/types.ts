@@ -133,7 +133,25 @@ export interface AgentSshEnrollment {
 export interface ApplicationView {
   application: Application;
   healthCheck: HealthCheckConfig;
+  /** 값은 Backend가 반환하지 않는다. 등록된 변수 이름만 포함한다. */
+  environment?: string[];
+  /** Parity health/replay 전용 변수 이름. 값은 반환하지 않는다. */
+  testEnvironment?: string[];
   agents: ApplicationAgentSummary[];
+}
+
+export interface ApplicationEnvironmentVariableInput {
+  name: string;
+  value: string;
+}
+
+export interface UpdateApplicationEnvironmentInput {
+  environment: ApplicationEnvironmentVariableInput[];
+}
+
+export interface UpdateApplicationEnvironmentResponse {
+  environment: string[];
+  deployment: Deployment;
 }
 
 export interface Deployment {
@@ -348,6 +366,8 @@ export interface GithubApplicationInput {
   repository_id: number;
   branch: string;
   auto_deploy?: boolean;
+  environment?: ApplicationEnvironmentVariableInput[];
+  test_environment?: ApplicationEnvironmentVariableInput[];
 }
 
 /** github_application_links 행 */

@@ -2,21 +2,22 @@ import { ArrowRight, Check, ChevronRight, Clock, Cloud, LoaderCircle, Minus, Plu
 import { useEffect, useRef, useState } from 'react';
 import { ApiError, type DataSource } from '../api/client';
 import { MockDataSource } from '../api/mock';
-import type { AgentStatusResponse, ApplicationAgentSummary, ApplicationView, Deployment, DeploymentStatus, PolicyResult, RouteSnapshot, RoutingTargetHealth, RoutingTargetView, TargetKind } from '../api/types';
+import type { AgentStatusResponse, ApplicationAgentSummary, ApplicationEnvironmentVariableInput, ApplicationView, Deployment, DeploymentStatus, PolicyResult, RouteSnapshot, RoutingTargetHealth, RoutingTargetView, TargetKind } from '../api/types';
 import { ErrorNotice, describeError } from '../components/ErrorNotice';
 import { HealthCheckModal } from '../components/HealthCheckModal';
+import { EnvironmentEditor } from '../components/EnvironmentEditor';
 import { NewDeploymentModal } from '../components/NewDeploymentModal';
-import { isGithubSource } from '../lib/forms';
+import { isGithubSource, validateEnvironment } from '../lib/forms';
 import { PageError } from '../components/PageError';
 import { Loader } from '../components/Loader';
-import { Crumbs, Empty, Hash, PageTitle, Pill, type Tone } from '../components/ui';
+import { Crumbs, Empty, Hash, Notice, PageTitle, Pill, type Tone } from '../components/ui';
 import { useMinVisible } from '../hooks/useMinVisible';
 import { usePolling } from '../hooks/usePolling';
 import { detectRouteChange, markOf, type RouteChange, type RouteMark } from '../lib/failover';
 import { fmtTime, relTime, targetLabel } from '../lib/format';
 import { useLang, type DictKey } from '../lib/i18n';
 import { loaderHoldMs } from '../lib/motion';
-import { APPLICATIONS_PATH, deploymentPath, hrefFor, realHref } from '../lib/router';
+import { APPLICATIONS_PATH, deploymentPath, hrefFor, navigate, realHref } from '../lib/router';
 
 const POLL_MS = 5000;
 
@@ -202,6 +203,11 @@ export function ApplicationDetail({ id, source }: { id: string; source: DataSour
         <AgentsCard rows={snap.agents} deployments={snap.deployments} activeDeploymentId={route?.target.deploymentId ?? null} />
       </div>
 
+      <div className="grid-2">
+        <EnvironmentCard applicationId={a.id} names={snap.app.environment ?? []} source={source} kind="runtime" />
+        <EnvironmentCard applicationId={a.id} names={snap.app.testEnvironment ?? []} source={source} kind="test" />
+      </div>
+
       <section className="card">
         <div className="card-head">
           <h2 className="card-title">{t('deployHistory')}</h2>
@@ -224,6 +230,63 @@ export function ApplicationDetail({ id, source }: { id: string; source: DataSour
         </section>
       )}
     </div>
+  );
+}
+
+function EnvironmentCard({ applicationId, names, source, kind }: { applicationId: string; names: string[]; source: DataSource; kind: 'runtime' | 'test' }) {
+  const { t } = useLang();
+  const [editing, setEditing] = useState(false);
+  const [rows, setRows] = useState<ApplicationEnvironmentVariableInput[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+
+  const save = async () => {
+    if (validateEnvironment(rows) !== null) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const input = { environment: rows.map(({ name, value }) => ({ name: name.trim(), value })) };
+      const result = kind === 'runtime'
+        ? await source.updateApplicationEnvironment(applicationId, input)
+        : await source.updateApplicationTestEnvironment(applicationId, input);
+      navigate(deploymentPath(result.deployment.id));
+    } catch (cause) {
+      setError(cause);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section className="card">
+      <div className="card-head">
+        <div>
+          <h2 className="card-title">{t(kind === 'runtime' ? 'environmentTitle' : 'testEnvironmentTitle')}</h2>
+          <p className="small muted">{t(kind === 'runtime' ? 'environmentDetailHint' : 'testEnvironmentDetailHint')}</p>
+        </div>
+        {!editing ? (
+          <button type="button" className="btn btn-small" onClick={() => { setEditing(true); setError(null); }}>
+            {t('environmentEdit')}
+          </button>
+        ) : null}
+      </div>
+      {names.length > 0 ? (
+        <div className="environment-names" aria-label={t('environmentConfigured')}>
+          {names.map((name) => <span className="tag mono" key={name}>{name}</span>)}
+        </div>
+      ) : <Empty>{t('environmentNone')}</Empty>}
+      {editing ? (
+        <div className="environment-replace">
+          <Notice tone="warning">{t(kind === 'runtime' ? 'environmentReplaceWarning' : 'testEnvironmentReplaceWarning')}</Notice>
+          <EnvironmentEditor value={rows} onChange={setRows} disabled={saving} />
+          {error ? <ErrorNotice error={error} /> : null}
+          <div className="row">
+            <button type="button" className="btn btn-primary" disabled={saving || validateEnvironment(rows) !== null} onClick={save}>{saving ? t('environmentSaving') : t('environmentSave')}</button>
+            <button type="button" className="btn" disabled={saving} onClick={() => { setEditing(false); setRows([]); setError(null); }}>{t('cancel')}</button>
+          </div>
+        </div>
+      ) : null}
+    </section>
   );
 }
 
