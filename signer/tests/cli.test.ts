@@ -31,6 +31,70 @@ describe("cli sign", () => {
   });
 });
 
+describe("cli 인자 파싱 오류", () => {
+  it.each([
+    ["모르는 옵션", ["--self-verfy"]],
+    ["위치 인자", ["extra"]],
+    ["- 로 시작하는 값", ["--requester", "-alice"]],
+  ])("%s 로 끝나도 예전 sign_result.json 을 지우고 ARG_INVALID (2)", (_name, args) => {
+    const dir = tmp();
+    const out = join(dir, "sign_result.json");
+    writeFileSync(out, '{"stale":true}');
+    const r = cli(["sign", "--plan", plan("allow"), "--dry-run", "--out", out, ...args]);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/ARG_INVALID/);
+    expect(existsSync(out)).toBe(false);
+  });
+});
+
+describe("cli 같이 써야 하는 옵션", () => {
+  it("verify --policy 를 --attestation 없이 주면 정책 검사를 건너뛰지 않고 ARG_INVALID (2), --json 이면 JSON", () => {
+    const r = cli(["verify", "--result", join(tmp(), "none.json"), "--policy", "policy/strict.rego", "--json"]);
+    expect(r.code).toBe(2);
+    expect(JSON.parse(r.stdout)).toMatchObject({ ok: false, code: 2, error: "ARG_INVALID" });
+  });
+
+  it("audit --strict-images 를 --images 없이 주면 ARG_INVALID (2)", () => {
+    const audit = join(tmp(), "a.jsonl");
+    writeFileSync(audit, "");
+    const r = cli(["audit", "--audit", audit, "--strict-images"]);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/ARG_INVALID/);
+  });
+});
+
+describe("cli verify --json 은 실행 오류도 JSON", () => {
+  /** version 과 verify 모두 성공하는 가짜 cosign 을 PATH 앞에 둠 */
+  function okCosign(): string {
+    const dir = tmp();
+    writeFileSync(join(dir, "cosign"), `#!/bin/sh\nif [ "$1" = "version" ]; then echo '{"gitVersion":"v3.1.3"}'; exit 0; fi\necho '[]'\nexit 0\n`);
+    chmodSync(join(dir, "cosign"), 0o755);
+    return dir;
+  }
+  const RESULT = {
+    run_id: "r-1", digest: `sha256:${"a".repeat(64)}`, plan_hash: "b".repeat(64), targets: ["onprem"], failover_allowed: false,
+    requester: "alice", approver: "auto", signature_ref: `cosign:localhost:5001/hib/app@sha256:${"a".repeat(64)}`, signed_at: "2026-10-01T03:00:00.000Z",
+  };
+
+  it("다른 키로 통과했는데 두 번째 공개키 파일이 없으면 JSON 오류 한 줄 (stdout 이 비지 않음)", () => {
+    const dir = tmp();
+    const result = join(dir, "sr.json");
+    writeFileSync(result, JSON.stringify(RESULT));
+    const r = cli(["verify", "--result", result, "--pub", "keys/cosign.pub", "--pub", join(dir, "nwe.pub"), "--json"], { PATH: `${okCosign()}:${process.env.PATH}` });
+    expect(r.code).toBe(2);
+    expect(JSON.parse(r.stdout)).toMatchObject({ ok: false, code: 2, error: "KEY_MISSING" });
+  });
+
+  it("signed_at 에 짝 없는 서로게이트가 있어도 JSON (ANNOTATION_INVALID)", () => {
+    const dir = tmp();
+    const result = join(dir, "sr.json");
+    writeFileSync(result, JSON.stringify(RESULT).replace("2026-10-01T03:00:00.000Z", "\\ud800"));
+    const r = cli(["verify", "--result", result, "--json"], { PATH: `${okCosign()}:${process.env.PATH}` });
+    expect(r.code).toBe(2);
+    expect(JSON.parse(r.stdout)).toMatchObject({ ok: false, code: 2, error: "ANNOTATION_INVALID" });
+  });
+});
+
 describe("cli sign --approval-ttl", () => {
   it.each([["abc"], ["0"], ["-5"]])("%s 처럼 0 보다 큰 숫자가 아니면 실행 오류(2)", (ttl) => {
     const r = cli(["sign", "--plan", plan("allow"), "--requester", "alice", "--image-repo", "localhost:5001/hib/app", "--dry-run", `--approval-ttl=${ttl}`, "--out", join(tmp(), "r.json"), "--log", join(tmp(), "d.jsonl")]);

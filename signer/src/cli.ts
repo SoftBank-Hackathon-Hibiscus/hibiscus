@@ -69,40 +69,49 @@ function minutes(value: string | undefined, name: string): number | undefined {
   return n * 60_000;
 }
 
+const OPTIONS = {
+  plan: { type: "string" },
+  requester: { type: "string" },
+  approver: { type: "string" },
+  approval: { type: "string" },
+  "image-repo": { type: "string" },
+  key: { type: "string" },
+  "dry-run": { type: "boolean", default: false },
+  "no-tlog": { type: "boolean", default: false },
+  out: { type: "string" },
+  log: { type: "string" },
+  "plan-schema": { type: "string" },
+  result: { type: "string" },
+  pub: { type: "string", multiple: true },
+  audit: { type: "string" },
+  images: { type: "boolean", default: false },
+  "strict-images": { type: "boolean", default: false },
+  "approval-ttl": { type: "string" },
+  "pubkey-sha256": { type: "string", multiple: true },
+  "self-verify": { type: "boolean", default: false },
+  attest: { type: "boolean", default: false },
+  attestation: { type: "boolean", default: false },
+  policy: { type: "string" },
+  "max-age": { type: "string" },
+  "minimal-env": { type: "boolean", default: false },
+  "test-result": { type: "string" },
+  anchors: { type: "string" },
+  json: { type: "boolean", default: false },
+} as const;
+
 async function main(argv: string[]): Promise<number> {
   const [command, ...rest] = argv;
-  const { values } = parseArgs({
-    args: rest,
-    options: {
-      plan: { type: "string" },
-      requester: { type: "string" },
-      approver: { type: "string" },
-      approval: { type: "string" },
-      "image-repo": { type: "string" },
-      key: { type: "string" },
-      "dry-run": { type: "boolean", default: false },
-      "no-tlog": { type: "boolean", default: false },
-      out: { type: "string" },
-      log: { type: "string" },
-      "plan-schema": { type: "string" },
-      result: { type: "string" },
-      pub: { type: "string", multiple: true },
-      audit: { type: "string" },
-      images: { type: "boolean", default: false },
-      "strict-images": { type: "boolean", default: false },
-      "approval-ttl": { type: "string" },
-      "pubkey-sha256": { type: "string", multiple: true },
-      "self-verify": { type: "boolean", default: false },
-      attest: { type: "boolean", default: false },
-      attestation: { type: "boolean", default: false },
-      policy: { type: "string" },
-      "max-age": { type: "string" },
-      "minimal-env": { type: "boolean", default: false },
-      "test-result": { type: "string" },
-      anchors: { type: "string" },
-      json: { type: "boolean", default: false },
-    },
-  });
+  let values: ReturnType<typeof parseArgs<{ args: string[]; options: typeof OPTIONS }>>["values"];
+  try {
+    ({ values } = parseArgs({ args: rest, options: OPTIONS }));
+  } catch (e) {
+    // 모르는 옵션·값 빠짐·위치 인자로 끝나도 sign 이면 예전 sign_result 를 지움 (아래 required() 오류와 같게)
+    if (command === "sign") {
+      const loose = parseArgs({ args: rest, options: OPTIONS, strict: false, allowPositionals: true }).values.out;
+      rmSync(typeof loose === "string" && loose !== "" ? loose : "sign_result.json", { force: true });
+    }
+    throw new SignerError("ARG_INVALID", `${e instanceof Error ? e.message : String(e)}\n\n${USAGE}`);
+  }
   const planSchema = values["plan-schema"] ?? DEFAULT_PLAN_SCHEMA;
   const noTlog = values["no-tlog"] === true || process.env.SIGNER_NO_TLOG === "1";
   // cosign 에 필요한 환경변수만 넘김 (켤 때만, VM 에서 레지스트리 인증이 되는지 먼저 확인하고 켤 것)
@@ -192,8 +201,10 @@ async function main(argv: string[]): Promise<number> {
     const policyPath = values.policy || DEFAULT_POLICY;
     let maxAgeMs: number | undefined;
     let outcome: Awaited<ReturnType<typeof runVerify>>;
+    let keys: ReturnType<typeof fingerprints>;
     try {
       if (values["test-result"] !== undefined && values.attestation !== true) throw new SignerError("ARG_INVALID", "--test-result 는 --attestation 과 같이 써야 함 (시험 결과는 증명서에 들어 있음)");
+      if (values.policy !== undefined && values.attestation !== true) throw new SignerError("ARG_INVALID", "--policy 는 --attestation 과 같이 써야 함 (정책은 배포 증명서에 적용, 없으면 정책 검사를 안 함)");
       maxAgeMs = minutes(values["max-age"] || process.env.SIGNER_MAX_AGE_MIN, "max-age");
       outcome = await runVerify({
         resultPath: required(values.result, "result"),
@@ -208,15 +219,16 @@ async function main(argv: string[]): Promise<number> {
         planSchemaPath: planSchema,
         ...(auditPath !== undefined ? { auditPath } : {}),
       });
+      keys = fingerprints();
     } catch (e) {
-      // --json 이면 실행 오류도 JSON 한 줄로 (콘솔·backend 가 그대로 읽게)
-      if (json && e instanceof SignerError) {
-        console.log(JSON.stringify({ ok: false, code: 2, error: e.code, message: e.message }));
+      // --json 이면 실행 오류도 JSON 한 줄로 (콘솔·backend 가 그대로 읽게). 예상 못 한 오류도 INTERNAL 로
+      if (json) {
+        const error = e instanceof SignerError ? e.code : "INTERNAL";
+        console.log(JSON.stringify({ ok: false, code: 2, error, message: e instanceof Error ? e.message : String(e) }));
         return 2;
       }
       throw e;
     }
-    const keys = fingerprints();
     if (json) {
       console.log(
         JSON.stringify(
@@ -275,6 +287,7 @@ async function main(argv: string[]): Promise<number> {
   }
 
   if (command === "audit") {
+    if (values["strict-images"] === true && values.images !== true) throw new SignerError("ARG_INVALID", "--strict-images 는 --images 와 같이 써야 함 (레지스트리 서명을 볼 때만 의미 있음)");
     const imageRepo = values["image-repo"] || process.env.IMAGE_REPO || undefined;
     const outcome = await runAuditVerify({
       auditPath: required(auditPath, "audit"),
