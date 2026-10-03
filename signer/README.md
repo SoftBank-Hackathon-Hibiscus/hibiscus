@@ -22,6 +22,8 @@ sign_result.json ─→ [npm run verify] ─→ 서명 주석과 하나라도 �
 - targets, failover_allowed는 plan 값 그대로 (서명 쪽에서 다시 판단 안 함)
 - 승인 기록은 run_id, digest, plan_hash, plan 파일 해시에 묶임 → 승인 뒤 plan이나 이미지가 바뀌면 서명 안 함
 - 승인 유효시간을 주면 오래된 승인도 서명 안 함 (`approval_expired`)
+  - 지금 backend는 서명 직전에 승인 기록(approval.json)을 만들어서 만료가 거의 안 남. 당장은 `npm run approve` 뒤 시간이 지나서 `sign`하는 수동 CLI 흐름용
+  - backend가 승인 버튼을 누른 시각으로 승인 기록을 만들면 그때부터 실제로 의미 있음
 - Plan 스키마 검사를 못 하면 서명 안 함
 - 거절이면 sign_result.json을 남기지 않음 (예전 결과가 있어도 지움, 인자 오류로 끝나도 지움)
 - 서명에 sign_result의 targets·approver 등을 전부 주석으로 붙임 → 서명 뒤 sign_result를 고치면 verify 실패
@@ -153,6 +155,7 @@ cosign verify --key signer/keys/cosign.pub -a run_id=... -a plan_hash=... \
 - `--no-tlog`로 서명한 이미지는 `--insecure-ignore-tlog=true`를 붙여야 통과 (안 붙이면 실패)
 - signature_ref가 `dry-run:`으로 시작하면 실제 서명이 아니라서 배포하면 안 됨 (`npm run verify`도 거부)
 - 배포 쪽이 `run_id`·`plan_hash`만 보면 서명 뒤 targets 바꿔치기는 못 잡음 → 위처럼 주석을 더 붙이거나 `npm run verify` 사용
+  - backend-v2 `signature.verifier.ts`, onprem-agent `image-verifier.ts`는 아직 run_id·plan_hash만 확인함. 새 주석 확인은 배포 파트와 방식(`-a` 추가 / `npm run verify` 호출)을 맞춘 뒤 후속 PR로
 
 ## 형식
 
