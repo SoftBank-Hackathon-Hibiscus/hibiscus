@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 
 /**
- * 로딩 표시가 한 번 보이면 최소 ms 동안은 유지한다.
- * mock 응답은 120ms 라 그대로 두면 로더가 깜빡이고 사라진다. real API 에는 ms=0 으로 써서 응답을 지연시키지 않는다.
+ * 로딩 표시가 한 번 보이면 최소 ms 동안은 유지한다 (꽃 로더 한 사이클이 끝까지 보이게).
+ * 응답이 ms 보다 오래 걸리면 응답 즉시 끝나고, ms=0 이면(reduced-motion) 대기 없이 바로 끝난다.
+ * 호출하는 쪽이 "데이터 없음" 조건을 함께 넘기므로 폴링·새로고침에는 적용되지 않는다.
  */
 export function useMinVisible(active: boolean, ms: number): boolean {
   const [holding, setHolding] = useState(active);

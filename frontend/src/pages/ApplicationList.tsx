@@ -8,6 +8,7 @@ import { useMinVisible } from '../hooks/useMinVisible';
 import { usePolling } from '../hooks/usePolling';
 import { relTime } from '../lib/format';
 import { useLang } from '../lib/i18n';
+import { loaderHoldMs } from '../lib/motion';
 import { REGISTER_PATH, applicationPath, hrefFor } from '../lib/router';
 
 const POLL_MS = 15000;
@@ -20,8 +21,9 @@ export function ApplicationList({ source }: { source: DataSource }) {
   const { t, lang } = useLang();
   const poll = usePolling<ApplicationView[]>(() => source.listApplications(), POLL_MS, [source]);
   const apps = poll.data;
-  // mock 에서만 로더를 최소 0.9초 유지. real 은 응답 즉시
-  const showLoader = useMinVisible(poll.loading && !apps && poll.error === null, source.kind === 'mock' ? 900 : 0);
+  // 최초 로딩(데이터 없음)에만 로더를 꽃 한 사이클(0.9초) 유지. 15초 폴링은 데이터가 있어 이 분기에 오지 않고, 응답이 더 오래 걸리면 즉시 그린다
+  // 오류가 오면 꽃 사이클을 기다리지 않고 바로 오류 화면으로 (대기는 성공 응답에만)
+  const showLoader = useMinVisible(poll.loading && !apps && poll.error === null, poll.error === null ? loaderHoldMs() : 0);
 
   return (
     <div className="page">

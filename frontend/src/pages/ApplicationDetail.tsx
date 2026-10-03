@@ -13,6 +13,7 @@ import { usePolling } from '../hooks/usePolling';
 import { detectRouteChange, markOf, type RouteChange, type RouteMark } from '../lib/failover';
 import { fmtTime, relTime, targetLabel } from '../lib/format';
 import { useLang, type DictKey } from '../lib/i18n';
+import { loaderHoldMs } from '../lib/motion';
 import { APPLICATIONS_PATH, deploymentPath, hrefFor, realHref } from '../lib/router';
 
 const POLL_MS = 5000;
@@ -117,8 +118,9 @@ export function ApplicationDetail({ id, source }: { id: string; source: DataSour
   }, [poll.data]);
 
   const snap = poll.data;
-  // mock 응답은 120ms 라 로더를 최소 0.9초 유지한다. real 은 지연 없이 응답 즉시 그린다
-  const showLoader = useMinVisible(poll.loading && !snap, source.kind === 'mock' ? 900 : 0);
+  // 최초 로딩(데이터 없음)에만 로더를 꽃 한 사이클(0.9초) 유지. 폴링·새로고침은 데이터가 있어 이 분기에 오지 않고, 응답이 더 오래 걸리면 즉시 그린다
+  // 오류가 오면 꽃 사이클을 기다리지 않고 바로 오류 화면으로 (대기는 성공 응답에만)
+  const showLoader = useMinVisible(poll.loading && !snap, poll.error === null ? loaderHoldMs() : 0);
   if (showLoader) return <Loader label={t('loading')} />;
   if (!snap) return <PageError error={poll.error ?? new Error('no data')} />;
 
