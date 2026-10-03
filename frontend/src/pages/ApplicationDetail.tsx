@@ -262,8 +262,11 @@ function TrafficCard({ snap, degraded, lang }: { snap: Snapshot; degraded: boole
     <section className={`card traffic ${degraded ? 'traffic-degraded' : ''}`}>
       <div className="card-head">
         <h2 className="card-title">{t('currentTraffic')}</h2>
-        <span className="small muted">
-          {t('switchCount')} {route ? route.revision : '-'}
+        <span className="card-aside">
+          <span className="small muted">
+            {t('switchCount')} {route ? route.revision : '-'}
+          </span>
+          <span className="hint">{t('routeRevisionHint')}</span>
         </span>
       </div>
       {!route ? (

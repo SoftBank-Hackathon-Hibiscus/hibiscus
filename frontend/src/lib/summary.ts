@@ -341,8 +341,9 @@ function buildProof(view: DeploymentView, input: ProofInput): ProofLink[] {
             : pick('테스트부터 서명까지 하나의 실행으로 이어졌어요.', 'テストから署名まで1つの実行としてつながっています。');
 
   // 같은 코드 (source ↔ image)
-  // 현재 main 은 GitHub push 요청이면 재생 테스트 없이도 true 를 기록한다 (#33 미병합).
-  // 테스트가 stub 이었다면 커밋↔이미지 연결을 실제로 확인한 것이 아니므로 "확인 전"으로 둔다.
+  // 최신 main(#33·#29)에서는 verified 가 registry parity 성공으로만 true 가 되고, 그 경우 테스트 summary 는 stub=false 다.
+  // 아래 분기는 #33·#29 이전에 만들어진 기존 행(verified=true + stub 테스트)을 위한 방어다. 새 배포는 이 분기에 오지 않는다.
+  // stub 테스트는 커밋↔이미지 연결을 실제로 확인한 것이 아니므로 "확인 전"으로 둔다.
   const testStub = (latestStages(view.stages).test?.summary as { stub?: unknown } | null)?.stub === true;
   const sourceState: ProofLink['state'] = d.sourceRevisionVerified ? (testStub ? 'pending' : 'ok') : 'unverified';
   const sourceLink: ProofLink = {
@@ -353,7 +354,7 @@ function buildProof(view: DeploymentView, input: ProofInput): ProofLink[] {
       sourceState === 'ok'
         ? pick('이 커밋에서 만든 이미지인지 확인했어요.', 'このコミットから作ったイメージであることを確認しました。')
         : sourceState === 'pending'
-          ? pick('요청은 GitHub가 확인했지만, 이 실행은 실제 재생 테스트를 하지 않아 커밋과 이미지의 연결은 아직 확인할 수 없어요.', 'リクエストは GitHub が確認しましたが、この実行は実際の再生テストを行っていないため、コミットとイメージのつながりはまだ確認できません。')
+          ? pick('이 실행은 실제 재생 테스트를 하지 않아 커밋과 이미지의 연결은 아직 확인할 수 없어요.', 'この実行は実際の再生テストを行っていないため、コミットとイメージのつながりはまだ確認できません。')
           : pick('커밋과 이미지의 연결은 아직 확인하지 않았어요. 빌드 검증을 거치면 확인돼요.', 'コミットとイメージのつながりはまだ確認していません。ビルド検証を経ると確認されます。'),
     legs: [
       { label: t('commit'), value: d.sourceRevision },

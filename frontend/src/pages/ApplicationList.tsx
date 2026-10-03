@@ -85,7 +85,7 @@ export function ApplicationList({ source }: { source: DataSource }) {
                     {route ? (
                       <>
                         <Pill tone="success">{targetLabel(route.target.kind)}</Pill>
-                        <span className="small muted">
+                        <span className="small muted" title={t('routeRevisionHint')}>
                           {t('switchCount')} {route.revision}
                         </span>
                       </>

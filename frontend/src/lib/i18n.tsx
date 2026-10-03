@@ -170,7 +170,8 @@ const dict = {
   noSign: ['서명 결과가 없어요.', '署名結果がありません。'],
   // 배포 패널
   routeTarget: ['트래픽이 가는 곳', 'トラフィックの行き先'],
-  switchCount: ['전환 횟수', '切替回数'],
+  switchCount: ['경로 버전', '経路バージョン'],
+  routeRevisionHint: ['경로가 바뀔 때마다 1씩 올라가요', '経路が変わるたびに1ずつ増えます'],
   standbyReady: ['대기: failover 허용', '待機: failover 許可'],
   standbyOff: ['대기: failover 차단', '待機: failover ブロック'],
   checksTitle: ['새 버전 검사', '新バージョンの検査'],
