@@ -1,10 +1,15 @@
 // 등록·배포 입력 검증. backend-v2 DTO(origin/main) 와 같은 규칙을 화면에서 먼저 적용한다.
 //  - CreateApplicationDto / GithubApplicationDto (application.dto.ts, github.dto.ts)
-import type { GithubApplicationInput } from '../api/types';
+//  - CreateDeploymentDto (deployment.dto.ts)
+import type { CreateDeploymentInput, GithubApplicationInput } from '../api/types';
 import type { DictKey } from './i18n';
 
 /** CreateApplicationDto.slug: /^[a-z0-9]+(?:-[a-z0-9]+)*$/ , MaxLength(64) */
 export const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+/** CreateDeploymentDto.source_revision: /^[0-9a-f]{7,40}$/ */
+export const SOURCE_REVISION_RE = /^[0-9a-f]{7,40}$/;
+/** CreateDeploymentDto.image_digest: /^sha256:[0-9a-f]{64}$/ */
+export const IMAGE_DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 
 export const NAME_MAX = 64;
 export const SLUG_MAX = 64;
@@ -110,6 +115,31 @@ export function toGithubApplicationInput(d: RegistrationDraft): GithubApplicatio
   };
   const policyPath = d.policyPath.trim();
   if (policyPath) input.policy_path = policyPath;
+  return input;
+}
+
+// ---------------------------------------------------------------- 새 배포
+
+export interface DeploymentDraft {
+  sourceRevision: string;
+  imageDigest: string;
+}
+
+export type DeploymentErrors = Partial<Record<keyof DeploymentDraft, DictKey>>;
+
+export function validateDeployment(d: DeploymentDraft): DeploymentErrors {
+  const errors: DeploymentErrors = {};
+  if (!SOURCE_REVISION_RE.test(d.sourceRevision.trim())) errors.sourceRevision = 'errSourceRevision';
+  const digest = d.imageDigest.trim();
+  if (digest && !IMAGE_DIGEST_RE.test(digest)) errors.imageDigest = 'errImageDigest';
+  return errors;
+}
+
+/** CreateDeploymentDto 키만. image_digest 는 비어 있으면 보내지 않는다 (backend 가 placeholder digest 를 만든다). */
+export function toCreateDeploymentInput(d: DeploymentDraft): CreateDeploymentInput {
+  const input: CreateDeploymentInput = { source_revision: d.sourceRevision.trim() };
+  const digest = d.imageDigest.trim();
+  if (digest) input.image_digest = digest;
   return input;
 }
 

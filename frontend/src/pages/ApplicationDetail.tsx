@@ -1,9 +1,10 @@
-import { ArrowRight, Check, ChevronRight, Clock, Cloud, LoaderCircle, Minus, Server, ShieldX, Shuffle, X, type LucideIcon } from 'lucide-react';
+import { ArrowRight, Check, ChevronRight, Clock, Cloud, LoaderCircle, Minus, Plus, Server, ShieldX, Shuffle, X, type LucideIcon } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { ApiError, type DataSource } from '../api/client';
 import { MockDataSource } from '../api/mock';
 import type { AgentStatusResponse, ApplicationAgentSummary, ApplicationView, Deployment, DeploymentStatus, PolicyResult, RouteSnapshot, RoutingTargetHealth, RoutingTargetView, TargetKind } from '../api/types';
 import { ErrorNotice, describeError } from '../components/ErrorNotice';
+import { NewDeploymentModal } from '../components/NewDeploymentModal';
 import { Crumbs, Empty, Hash, PageTitle, Pill, type Tone } from '../components/ui';
 import { usePolling } from '../hooks/usePolling';
 import { detectRouteChange, markOf, type RouteChange, type RouteMark } from '../lib/failover';
@@ -102,6 +103,7 @@ export function ApplicationDetail({ id, source }: { id: string; source: DataSour
 
   // route 변화 감지는 lib/failover.ts 의 순수 함수. 첫 관측·같은 revision·route 사라짐은 변화로 치지 않는다.
   const [events, setEvents] = useState<SeenChange[]>([]);
+  const [deployOpen, setDeployOpen] = useState(false);
   const previousRoute = useRef<RouteMark | null>(null);
   useEffect(() => {
     if (!poll.data) return;
@@ -145,9 +147,13 @@ export function ApplicationDetail({ id, source }: { id: string; source: DataSour
               {h.enabled ? t('healthEvery', { interval: h.intervalSeconds }) : t('healthOff')}
               {poll.lastUpdated ? `, ${relTime(new Date(poll.lastUpdated).toISOString())}` : ''}
             </span>
+            <button type="button" className="btn btn-primary btn-small" onClick={() => setDeployOpen(true)}>
+              <Plus size={14} aria-hidden /> {t('newDeployment')}
+            </button>
           </div>
         }
       />
+      {deployOpen && <NewDeploymentModal source={source} applicationId={a.id} onClose={() => setDeployOpen(false)} />}
       {(mockCaption || (source instanceof MockDataSource && source.actions().length > 0)) && (
         <div className="mock-row">
           {mockCaption && (

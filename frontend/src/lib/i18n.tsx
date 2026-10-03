@@ -374,6 +374,21 @@ const dict = {
   beGithubUnavailable: ['GitHub 에서 응답을 받지 못했습니다. 잠시 뒤 다시 시도하세요.', 'GitHub から応答がありません。しばらくしてからやり直してください。'],
   beAppNotFound: ['애플리케이션을 찾을 수 없습니다.', 'アプリケーションが見つかりません。'],
 
+  // 새 배포
+  newDeployment: ['새 배포', '新しいデプロイ'],
+  newDeploymentSub: ['커밋 하나를 골라 테스트 → 정책 → 서명 → 배포 파이프라인을 시작합니다.', 'コミットを1つ選び、テスト → ポリシー → 署名 → デプロイのパイプラインを開始します。'],
+  deployRealWarning: ['실제 백엔드에서 테스트·정책·서명·배포가 실행됩니다. 팀이 함께 쓰는 환경에 영향을 줄 수 있습니다.', '実際のバックエンドでテスト・ポリシー・署名・デプロイが実行されます。チームで共有する環境に影響する可能性があります。'],
+  deployMockNote: ['DEMO: 이 브라우저 안에만 대기 중 배포가 만들어집니다. 파이프라인은 자동으로 진행되지 않습니다.', 'DEMO: このブラウザ内にのみ待機中のデプロイが作られます。パイプラインは自動では進みません。'],
+  sourceRevisionLabel: ['커밋 (source_revision)', 'コミット（source_revision）'],
+  sourceRevisionHint: ['7–40자리 16진수 커밋 해시', '7〜40桁の16進コミットハッシュ'],
+  imageDigestLabel: ['이미지 digest (선택)', 'イメージ digest（任意）'],
+  imageDigestHint: ['sha256:… 64자리. 비우면 백엔드가 placeholder digest 를 만듭니다.', 'sha256:… 64桁。空ならバックエンドが placeholder digest を作ります。'],
+  errSourceRevision: ['커밋 해시는 7–40자리 소문자 16진수여야 합니다', 'コミットハッシュは7〜40桁の小文字16進数です'],
+  errImageDigest: ['digest 는 sha256: 뒤에 64자리 16진수여야 합니다', 'digest は sha256: の後に64桁の16進数です'],
+  startDeployment: ['배포 시작', 'デプロイ開始'],
+  starting: ['시작 중', '開始中'],
+  deploymentFailed: ['배포를 시작하지 못했습니다', 'デプロイを開始できませんでした'],
+
 } as const;
 
 export type DictKey = keyof typeof dict;

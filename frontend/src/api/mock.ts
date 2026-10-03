@@ -2,6 +2,7 @@ import { ApiError, type DataSource } from './client';
 import type {
   AgentStatusResponse,
   ApplicationView,
+  CreateDeploymentInput,
   CurrentUser,
   Deployment,
   DeploymentView,
@@ -35,6 +36,17 @@ interface CreatedApplication {
   view: ApplicationView;
   github: GithubApplicationLink;
   deployments: DeploymentView[];
+}
+
+/** backend 처럼 digest 가 없으면 placeholder (sha256 형태의 64자리 16진수) 를 만든다. 암호학적 해시는 아니다 */
+function placeholderDigest(seed: string): string {
+  let hex = '';
+  let h = 2166136261;
+  for (let i = 0; hex.length < 64; i++) {
+    h = Math.imul(h ^ seed.charCodeAt(i % seed.length), 16777619) >>> 0;
+    hex += h.toString(16).padStart(8, '0');
+  }
+  return `sha256:${hex.slice(0, 64)}`;
 }
 
 function randomId(): string {
@@ -264,5 +276,39 @@ export class MockDataSource implements DataSource {
     };
     this.created.push({ view, github, deployments: [] });
     return this.delay({ ...view, github });
+  }
+
+  // ---------------------------------------------------------------- 새 배포 (in-memory, 자동 진행 없음)
+
+  /** DeploymentService.create 처럼 queued 배포 하나를 만든다. mock 에서는 worker 가 없으므로 그대로 머문다. */
+  async createDeployment(applicationId: string, input: CreateDeploymentInput): Promise<Deployment> {
+    const now = this.tick();
+    const views = this.isScenarioApp(applicationId) ? this.scenario.deployments : this.createdApp(applicationId)?.deployments;
+    if (!views) return this.fail(404, 'Application not found');
+    const id = randomId();
+    const timestamp = new Date(now).toISOString();
+    const deployment: Deployment = {
+      id,
+      applicationId,
+      version: views.reduce((max, v) => Math.max(max, v.deployment.version), 0) + 1,
+      trigger: 'manual',
+      sourceRevision: input.source_revision,
+      sourceRevisionVerified: false,
+      imageDigest: input.image_digest ?? placeholderDigest(`placeholder:${id}`),
+      digestSource: input.image_digest ? 'registry' : 'placeholder',
+      requester: MOCK_USER.id,
+      approver: null,
+      decision: null,
+      status: 'queued',
+      currentStage: null,
+      error: null,
+      workDir: '',
+      executionMode: 'cli',
+      deploymentPerformed: false,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    views.push({ deployment, stages: [], policyResult: null, artifacts: [], auditLogs: [] });
+    return this.delay(deployment);
   }
 }

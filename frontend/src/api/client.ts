@@ -1,6 +1,7 @@
 import type {
   AgentStatusResponse,
   ApplicationView,
+  CreateDeploymentInput,
   CurrentUser,
   Deployment,
   DeploymentView,
@@ -60,4 +61,10 @@ export interface DataSource {
   listGithubBranches(installationId: number, repositoryId: number, page?: number): Promise<GithubBranchesPage>;
   /** POST /github/applications. real 에서는 실제 애플리케이션이 만들어진다 */
   createGithubApplication(input: GithubApplicationInput): Promise<GithubApplicationCreated>;
+
+  /**
+   * POST /applications/:id/deployments. 새 배포는 queued 로 만들어지고 backend worker 가
+   * 테스트 → 정책 → 서명 → 배포를 실제로 돌린다 (real 에서는 팀 공용 환경에 영향)
+   */
+  createDeployment(applicationId: string, input: CreateDeploymentInput): Promise<Deployment>;
 }

@@ -4,6 +4,7 @@ import { readToken } from './token';
 import type {
   AgentStatusResponse,
   ApplicationView,
+  CreateDeploymentInput,
   CurrentUser,
   Deployment,
   DeploymentView,
@@ -130,5 +131,9 @@ export class RealDataSource implements DataSource {
   createGithubApplication(input: GithubApplicationInput) {
     // backend 는 whitelist + forbidNonWhitelisted 라 DTO 에 없는 키를 보내면 400. input 은 DTO 키만 담는다 (lib/forms.ts).
     return this.post<GithubApplicationCreated>('/github/applications', input);
+  }
+
+  createDeployment(applicationId: string, input: CreateDeploymentInput) {
+    return this.post<Deployment>(`/applications/${encodeURIComponent(applicationId)}/deployments`, input);
   }
 }

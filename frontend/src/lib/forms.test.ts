@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { EMPTY_REGISTRATION, friendlyBackendError, repoShortName, slugify, toGithubApplicationInput, validateRegistration, type RegistrationDraft } from './forms';
+import { EMPTY_REGISTRATION, friendlyBackendError, repoShortName, slugify, toCreateDeploymentInput, toGithubApplicationInput, validateDeployment, validateRegistration, type RegistrationDraft } from './forms';
 
 const valid: RegistrationDraft = {
   ...EMPTY_REGISTRATION,
@@ -76,6 +76,25 @@ describe('toGithubApplicationInput', () => {
   it('policy_path 는 값이 있을 때만 포함한다', () => {
     expect(toGithubApplicationInput({ ...valid, policyPath: ' policy/policy.yaml ' }).policy_path).toBe('policy/policy.yaml');
     expect(toGithubApplicationInput({ ...valid, policyPath: '   ' }).policy_path).toBeUndefined();
+  });
+});
+
+describe('validateDeployment (CreateDeploymentDto 규칙)', () => {
+  it('source_revision 은 7–40자리 소문자 16진수', () => {
+    expect(validateDeployment({ sourceRevision: 'abcdef1', imageDigest: '' })).toEqual({});
+    expect(validateDeployment({ sourceRevision: ' 1f6947dce692de48ef4580b1a3f5366adf66f5ae ', imageDigest: '' })).toEqual({});
+    for (const bad of ['', 'abcdef', 'ABCDEF1', 'g'.repeat(8), 'a'.repeat(41)]) {
+      expect(validateDeployment({ sourceRevision: bad, imageDigest: '' }).sourceRevision).toBe('errSourceRevision');
+    }
+  });
+  it('image_digest 는 비어 있거나 sha256:+64자리', () => {
+    expect(validateDeployment({ sourceRevision: 'abcdef1', imageDigest: `sha256:${'a'.repeat(64)}` })).toEqual({});
+    expect(validateDeployment({ sourceRevision: 'abcdef1', imageDigest: 'sha256:abc' }).imageDigest).toBe('errImageDigest');
+    expect(validateDeployment({ sourceRevision: 'abcdef1', imageDigest: 'a'.repeat(64) }).imageDigest).toBe('errImageDigest');
+  });
+  it('요청 본문은 DTO 키만, 빈 digest 는 생략', () => {
+    expect(toCreateDeploymentInput({ sourceRevision: ' abcdef1 ', imageDigest: '  ' })).toEqual({ source_revision: 'abcdef1' });
+    expect(toCreateDeploymentInput({ sourceRevision: 'abcdef1', imageDigest: `sha256:${'b'.repeat(64)}` })).toEqual({ source_revision: 'abcdef1', image_digest: `sha256:${'b'.repeat(64)}` });
   });
 });
 

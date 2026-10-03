@@ -313,3 +313,11 @@ export interface GithubApplicationLink {
 
 /** POST /github/applications 응답: ApplicationView + github 링크 */
 export type GithubApplicationCreated = ApplicationView & { github: GithubApplicationLink };
+
+/** POST /applications/:id/deployments 요청 본문 = CreateDeploymentDto (deployment.dto.ts) */
+export interface CreateDeploymentInput {
+  /** /^[0-9a-f]{7,40}$/ */
+  source_revision: string;
+  /** /^sha256:[0-9a-f]{64}$/ . 없으면 backend 가 placeholder digest 를 만든다 */
+  image_digest?: string;
+}
