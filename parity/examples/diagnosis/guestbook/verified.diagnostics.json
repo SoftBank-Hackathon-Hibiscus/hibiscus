@@ -1,0 +1,34 @@
+{
+  "format": "parity-execution-v1",
+  "status": "completed",
+  "phase": "complete",
+  "container": "premortem-rehearsal-07d13af8ec-guestbook-parity-24f7a17c-1",
+  "target": "http://127.0.0.1:56509",
+  "local_image_id": "sha256:a2c3c7624d267a74e795cf03b13d9cf7ac0f4522bad1eaeabdae6f3612df5723",
+  "registry_digest": "sha256:2424ca26e6da2d09d9f15a7b4087773b5848e31fb25ac430605cb3a08b83a2ac",
+  "target_binding_verified": true,
+  "source_revision": "86251f2f63aeb213aed4a48bf7c9066b427b8d52",
+  "baseline_sha256": {
+    "record": "54bf7486712b02db86b487f1ec55e1bb00bba904bfe898f1d4baa96e9d3d4d3c",
+    "noise": "633ab6aff00be5312011df4e910e141d957936c3c912098bd8925a123e8e34fa"
+  },
+  "baseline_unchanged": true,
+  "facts_collected": true,
+  "conditions": [
+    {
+      "condition": "none",
+      "executed": 20
+    },
+    {
+      "condition": "restart",
+      "executed": 20
+    },
+    {
+      "condition": "replace",
+      "executed": 20
+    }
+  ],
+  "error": null,
+  "run_id": "rehearsal-07d13af8ec-guestbook",
+  "result_sha256": "6acc54cf8921678a03fac30af707f02cd22723fcdc315133bb911003263c5a45"
+}

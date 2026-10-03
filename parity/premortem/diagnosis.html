@@ -1,0 +1,1075 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Hibiscus · 실패 원인 분석</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f6f2;
+        --paper: #fff;
+        --ink: #253b35;
+        --muted: #63736c;
+        --line: #dfe5dd;
+        --green: #28674c;
+        --soft: #e8f0e6;
+        --red: #974635;
+        --redsoft: #f7e9e2;
+        --mono: ui-monospace, Consolas, monospace;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font:
+          16px/1.65 "Pretendard Variable",
+          Pretendard,
+          "Noto Sans KR",
+          "Malgun Gothic",
+          system-ui,
+          sans-serif;
+        word-break: keep-all;
+        overflow-wrap: anywhere;
+      }
+      button {
+        font: inherit;
+        cursor: pointer;
+      }
+      button:focus-visible,
+      summary:focus-visible,
+      a:focus-visible {
+        outline: 3px solid #397e58;
+        outline-offset: 5px;
+      }
+      a {
+        color: var(--green);
+      }
+      p,
+      h1,
+      h2,
+      h3 {
+        margin: 0;
+      }
+      button {
+        color: inherit;
+      }
+      nav {
+        border-bottom: 1px solid var(--line);
+        background: #fff9;
+      }
+      nav > div {
+        max-width: 1220px;
+        margin: auto;
+        padding: 17px 28px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 15px;
+      }
+      .brand {
+        font-weight: 750;
+        font-size: 20px;
+        letter-spacing: -0.5px;
+      }
+      .brand span {
+        color: var(--green);
+        margin-right: 9px;
+      }
+      .nav-note {
+        color: var(--muted);
+        font-size: 13px;
+      }
+      main {
+        max-width: 1220px;
+        margin: 0 auto;
+        padding: 38px 28px 48px;
+      }
+      .eyebrow {
+        font-size: 12px;
+        letter-spacing: 2px;
+        font-weight: 700;
+        color: var(--green);
+        margin-bottom: 8px;
+      }
+      h1 {
+        font-size: 36px;
+        line-height: 1.3;
+        letter-spacing: -1.4px;
+        font-weight: 740;
+      }
+      .lead {
+        color: var(--muted);
+        margin-top: 12px;
+      }
+      .head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 24px;
+      }
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        padding: 4px 11px;
+        border-radius: 99px;
+        font-size: 12px;
+        font-weight: 650;
+        background: var(--soft);
+        color: var(--green);
+      }
+      .pill.fail {
+        background: var(--redsoft);
+        color: var(--red);
+      }
+      .pill.neutral {
+        background: #f0f1ec;
+        color: var(--muted);
+      }
+      .replay {
+        margin-top: 28px;
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        border: 1px solid var(--line);
+        border-radius: 13px;
+        background: var(--paper);
+        overflow: hidden;
+      }
+      .condition {
+        padding: 16px 21px;
+        display: flex;
+        gap: 18px;
+        align-items: center;
+        border-right: 1px solid var(--line);
+      }
+      .condition:last-child {
+        border: 0;
+      }
+      .condition-label {
+        flex: 1;
+        font-size: 14px;
+        font-weight: 650;
+      }
+      .condition small {
+        display: block;
+        font-size: 11px;
+        color: var(--muted);
+        font-weight: 400;
+        letter-spacing: 0.3px;
+      }
+      .condition b {
+        font-size: 24px;
+        font-weight: 650;
+        font-variant-numeric: tabular-nums;
+      }
+      .condition b.failed {
+        color: var(--red);
+      }
+      .condition b span {
+        font-size: 14px;
+        color: var(--muted);
+        font-weight: 450;
+      }
+      .story {
+        display: flex;
+        align-items: center;
+        gap: 25px;
+        margin: 34px 0 22px;
+      }
+      .stat {
+        display: flex;
+        align-items: baseline;
+        gap: 11px;
+      }
+      .stat strong {
+        font-size: 48px;
+        font-weight: 650;
+        letter-spacing: -2px;
+        line-height: 1.1;
+      }
+      .stat span {
+        font-size: 16px;
+        color: var(--muted);
+      }
+      .arrow {
+        color: #9ba89d;
+        font-size: 27px;
+      }
+      .switch {
+        margin-left: auto;
+        display: flex;
+        gap: 4px;
+        background: #e8ece4;
+        border-radius: 9px;
+        padding: 4px;
+      }
+      .switch button {
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        padding: 7px 15px;
+        font-size: 13px;
+        color: var(--muted);
+      }
+      .switch button[aria-pressed="true"] {
+        background: white;
+        color: var(--ink);
+        box-shadow: 0 1px 4px #263f3310;
+      }
+      .section-meta {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 15px;
+        margin-bottom: 15px;
+        font-size: 13px;
+        color: var(--muted);
+      }
+      .section-meta h2 {
+        font-size: 16px;
+        color: var(--ink);
+      }
+      .cards {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 16px;
+      }
+      .card {
+        display: flex;
+        flex-direction: column;
+        text-align: left;
+        border: 1px solid var(--line);
+        border-radius: 13px;
+        background: var(--paper);
+        padding: 23px;
+        min-height: 270px;
+        transition:
+          border-color 0.15s,
+          box-shadow 0.15s;
+      }
+      .card:hover,
+      .card[aria-expanded="true"] {
+        border-color: var(--green);
+        box-shadow: 0 3px 18px #2452350c;
+      }
+      .card-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 9px;
+      }
+      .card-index {
+        font: 13px var(--mono);
+        color: var(--muted);
+      }
+      .card h3 {
+        font-size: 21px;
+        line-height: 1.4;
+        letter-spacing: -0.5px;
+        margin-top: 20px;
+      }
+      .observation {
+        font-size: 14px;
+        color: var(--muted);
+        margin: 12px 0 19px;
+        line-height: 1.7;
+      }
+      .card-bottom {
+        border-top: 1px solid var(--line);
+        padding-top: 16px;
+        margin-top: auto;
+      }
+      .card-bottom small {
+        font-size: 11px;
+        letter-spacing: 0.4px;
+        color: var(--green);
+        font-weight: 700;
+        display: block;
+        margin-bottom: 5px;
+      }
+      .action {
+        font-size: 14px;
+        line-height: 1.7;
+      }
+      .card-link {
+        display: block;
+        color: var(--green);
+        font-size: 13px;
+        margin-top: 17px;
+        font-weight: 600;
+      }
+      .detail {
+        margin-top: 20px;
+        background: var(--paper);
+        border: 1px solid var(--green);
+        border-radius: 13px;
+        padding: 24px;
+      }
+      .detail-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 16px;
+      }
+      .detail-head h3 {
+        font-size: 20px;
+      }
+      .close {
+        border: 0;
+        background: #f0f2ec;
+        border-radius: 6px;
+        padding: 2px 10px;
+        font-size: 19px;
+      }
+      .detail-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 28px;
+      }
+      .label {
+        font-size: 12px;
+        font-weight: 700;
+        color: var(--muted);
+        display: block;
+        margin-bottom: 6px;
+      }
+      .detail p {
+        font-size: 14px;
+        margin-bottom: 18px;
+      }
+      .code-title {
+        font: 12px var(--mono);
+        color: var(--muted);
+        margin: 13px 0 7px;
+      }
+      .code {
+        overflow: auto;
+        background: #f3f5ef;
+        border-radius: 7px;
+        padding: 12px 15px;
+        font: 12px/1.8 var(--mono);
+        white-space: pre;
+        word-break: normal;
+        color: #335545;
+      }
+      .code-line {
+        display: block;
+      }
+      .ln {
+        color: #929b91;
+        user-select: none;
+        display: inline-block;
+        min-width: 36px;
+      }
+      .evidence {
+        border-top: 1px solid var(--line);
+        padding-top: 17px;
+        margin-top: 6px;
+      }
+      .evidence summary {
+        font-size: 13px;
+        cursor: pointer;
+        color: var(--green);
+      }
+      .fact {
+        font-size: 12px;
+        padding: 9px 0;
+        color: var(--muted);
+        font-family: var(--mono);
+      }
+      .table-wrap {
+        overflow: auto;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        text-align: left;
+        font-size: 13px;
+        background: white;
+      }
+      th {
+        background: #f0f3ec;
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 600;
+        padding: 10px 14px;
+        white-space: nowrap;
+      }
+      td {
+        padding: 10px 14px;
+        border-top: 1px solid var(--line);
+        vertical-align: top;
+      }
+      td.response {
+        font: 11px/1.7 var(--mono);
+        min-width: 200px;
+        max-width: 320px;
+        word-break: break-word;
+      }
+      td.req {
+        white-space: nowrap;
+        font-family: var(--mono);
+        font-size: 12px;
+      }
+      .result-note {
+        margin-top: 21px;
+        display: flex;
+        gap: 10px;
+        align-items: baseline;
+        padding: 15px 19px;
+        border-radius: 10px;
+        background: #eaf0e5;
+        font-size: 14px;
+      }
+      .result-note strong {
+        white-space: nowrap;
+        color: var(--green);
+      }
+      .foot {
+        margin-top: 28px;
+        border-top: 1px solid var(--line);
+        padding-top: 18px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .foot summary {
+        cursor: pointer;
+        display: list-item;
+        font-size: 12px;
+      }
+      .provenance {
+        display: grid;
+        grid-template-columns: 150px 1fr;
+        gap: 7px 16px;
+        margin-top: 16px;
+      }
+      .provenance dt {
+        font-weight: 600;
+      }
+      .provenance dd {
+        margin: 0;
+        font-family: var(--mono);
+        font-size: 11px;
+        word-break: break-all;
+      }
+      .foot p {
+        margin-top: 12px;
+        max-width: 850px;
+      }
+      .unexplained {
+        margin-top: 15px;
+        color: var(--red);
+        font-size: 14px;
+      }
+      .empty {
+        padding: 35px;
+        background: white;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        color: var(--muted);
+      }
+      [hidden] {
+        display: none !important;
+      }
+      .example {
+        margin: 17px 0 21px;
+        font-size: 13px;
+      }
+      .example-request {
+        font: 11px var(--mono);
+        color: var(--muted);
+        margin-bottom: 9px;
+      }
+      .response-pair {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .response-pair code {
+        font: 14px/1.7 var(--mono);
+        background: #f1f4ee;
+        padding: 3px 9px;
+        border-radius: 5px;
+        word-break: break-word;
+      }
+      .response-pair code:last-child {
+        background: var(--redsoft);
+        color: var(--red);
+      }
+      .action {
+        display: -webkit-box;
+        -webkit-line-clamp: 4;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+      .cited {
+        background: #e3ecd9;
+        margin: 0 -6px;
+        padding: 0 6px;
+      }
+      .card h3 {
+        min-height: 2.8em;
+      }
+      .card {
+        min-height: 330px;
+      }
+      .cards[data-many="true"] {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .detail-grid > div {
+        min-width: 0;
+      }
+      .table-wrap {
+        max-width: 100%;
+      }
+      .code {
+        max-width: 100%;
+      }
+      @media (min-width: 1300px) {
+        main {
+          padding-top: 38px;
+        }
+        .card h3 {
+          font-size: 21px;
+        }
+      }
+      @media (max-width: 850px) {
+        .cards,
+        .cards[data-many="true"] {
+          grid-template-columns: 1fr;
+        }
+        .card {
+          min-height: 0;
+        }
+        .detail-grid {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .story {
+          flex-wrap: wrap;
+          gap: 16px;
+        }
+        .switch {
+          margin-left: 0;
+        }
+        .condition {
+          padding: 12px;
+          gap: 8px;
+        }
+        .condition b {
+          font-size: 20px;
+        }
+        .head {
+          align-items: flex-start;
+        }
+        h1 {
+          font-size: 29px;
+        }
+        .stat strong {
+          font-size: 37px;
+        }
+        .stat span {
+          font-size: 14px;
+        }
+      }
+      @media (max-width: 520px) {
+        main {
+          padding: 25px 16px;
+        }
+        nav > div {
+          padding: 14px 16px;
+        }
+        .nav-note {
+          font-size: 11px;
+        }
+        .replay {
+          grid-template-columns: 1fr;
+        }
+        .condition {
+          border-right: 0;
+          border-bottom: 1px solid var(--line);
+        }
+        .head > .pill {
+          display: none;
+        }
+        .section-meta {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+        .result-note {
+          display: block;
+        }
+        .provenance {
+          grid-template-columns: 1fr;
+        }
+        .detail {
+          padding: 17px;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        * {
+          transition: none !important;
+          scroll-behavior: auto !important;
+        }
+      }
+      @media print {
+        .switch,
+        .close {
+          display: none;
+        }
+        body {
+          background: white;
+        }
+        main {
+          padding: 12px;
+        }
+        .cards {
+          display: block;
+        }
+        .card {
+          break-inside: avoid;
+          margin-bottom: 12px;
+          min-height: 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <nav>
+      <div>
+        <div class="brand"><span aria-hidden="true">✳</span>Hibiscus</div>
+        <span class="nav-note" id="record-label">실제 실행 기록</span>
+      </div>
+    </nav>
+    <main>
+      <header class="head">
+        <div>
+          <p class="eyebrow">FAILURE DIAGNOSIS</p>
+          <h1>어디부터 고칠까요?</h1>
+          <p class="lead">
+            같은 요청을 다시 보냈을 때 달라진 응답을 코드와 함께 살펴봅니다.
+          </p>
+        </div>
+        <span class="pill fail" id="test-status">테스트 결과</span>
+      </header>
+      <section
+        class="replay"
+        id="conditions"
+        aria-label="조건별 재현 결과"
+      ></section>
+      <div class="story">
+        <div class="stat">
+          <strong id="mismatch-count">—</strong><span>응답 불일치</span>
+        </div>
+        <span class="arrow" aria-hidden="true">→</span>
+        <div class="stat">
+          <strong id="finding-count">—</strong><span>원인 가설</span>
+        </div>
+        <div class="switch" role="group" aria-label="표시 방식">
+          <button type="button" id="show-raw" aria-pressed="false">
+            실패 기록</button
+          ><button type="button" id="show-analysis" aria-pressed="true">
+            저장된 AI 분석
+          </button>
+        </div>
+      </div>
+      <section id="analysis-view">
+        <div class="section-meta">
+          <h2>무엇을 바꾸면 될까요?</h2>
+          <span>카드를 누르면 응답과 코드 근거가 열립니다.</span>
+        </div>
+        <div id="cards" class="cards"></div>
+        <div id="empty" class="empty" hidden></div>
+        <p class="unexplained" id="unexplained" hidden></p>
+        <section
+          id="detail"
+          class="detail"
+          aria-label="원인과 근거"
+          tabindex="-1"
+          hidden
+        ></section>
+        <div class="result-note">
+          <strong>다음은 재검증</strong
+          ><span
+            >원인을 고친 뒤 같은 요청으로 다시 확인합니다. 분석 결과만으로
+            배포를 허용하지 않습니다.</span
+          >
+        </div>
+      </section>
+      <section id="raw-view" hidden>
+        <div class="section-meta">
+          <h2>실제로 달라진 응답</h2>
+          <span>같은 요청이 여러 조건에서 실패하면 각각 셉니다.</span>
+        </div>
+        <div id="raw-table"></div>
+      </section>
+      <footer class="foot">
+        <details>
+          <summary id="provenance-summary">이 분석의 실행 기록과 한계</summary>
+          <dl id="provenance" class="provenance"></dl>
+          <p>
+            소스와 실행 산출물의 해시 일치를 확인했습니다. 주석·설명문과 정책의
+            해결 힌트는 AI 입력에서 제외했습니다. 이 검사는 기록 간 일관성을
+            확인하며, 별도의 서명 검증을 대신하지 않습니다.
+          </p>
+          <p>
+            AI가 인용한 요청·파일·줄이 실제 입력에 있는지 검사합니다. 원인
+            가설의 정확성과 수정 효과는 코드 검토와 재실행으로 확인해야 합니다.
+            현재 VM의 실시간 상태를 표시하는 화면은 아닙니다.
+          </p>
+        </details>
+      </footer>
+    </main>
+    <!-- prettier-ignore -->
+    <script type="application/json" id="report-data">__REPORT_DATA__</script>
+    <script>
+      "use strict";
+      const { input, analysis } = JSON.parse(
+        document.getElementById("report-data").textContent,
+      );
+      const $ = (id) => document.getElementById(id);
+      const element = (tag, text, cls) => {
+        const e = document.createElement(tag);
+        if (text !== undefined) e.textContent = text;
+        if (cls) e.className = cls;
+        return e;
+      };
+      const successful = analysis?.status === "succeeded";
+      const findings = successful ? analysis.output.findings : [];
+      const conditionNames = {
+        none: "평상시",
+        restart: "재시작",
+        replace: "교체",
+      };
+      const scopeNames = {
+        code: "코드 수정",
+        configuration: "설정 변경",
+        code_and_infrastructure: "코드 + 저장소·인프라",
+        unknown: "추가 확인",
+      };
+      $("mismatch-count").textContent = input.mismatches.length;
+      $("finding-count").textContent = successful ? findings.length : "—";
+      $("test-status").textContent = input.mismatches.length
+        ? "재현 테스트 실패"
+        : "응답 일치";
+      $("test-status").classList.toggle("fail", input.mismatches.length > 0);
+      $("record-label").textContent = successful
+        ? "실제 실행 · 저장된 AI 분석"
+        : "실제 실행 · AI 분석 미완료";
+      for (const c of input.conditions) {
+        const box = element("div", undefined, "condition");
+        const label = element(
+          "div",
+          conditionNames[c.condition],
+          "condition-label",
+        );
+        label.append(element("small", c.condition));
+        box.append(label);
+        const count = element(
+          "b",
+          String(c.matched),
+          c.matched < c.total ? "failed" : "",
+        );
+        count.append(element("span", " / " + c.total));
+        box.append(
+          count,
+          element(
+            "span",
+            c.matched === c.total ? "일치" : `${c.total - c.matched}건 불일치`,
+            "pill " + (c.matched < c.total ? "fail" : "neutral"),
+          ),
+        );
+        $("conditions").append(box);
+      }
+      function table(mismatches) {
+        const wrap = element("div", undefined, "table-wrap"),
+          t = element("table"),
+          head = element("thead"),
+          hr = element("tr");
+        for (const label of ["조건 · 요청", "호출", "기대 응답", "실제 응답"]) {
+          const h = element("th", label);
+          h.scope = "col";
+          hr.append(h);
+        }
+        head.append(hr);
+        t.append(head);
+        const body = element("tbody");
+        for (const m of mismatches) {
+          const row = element("tr");
+          row.append(
+            element("td", `${conditionNames[m.condition]} #${m.index}`),
+            element("td", m.request, "req"),
+            element("td", m.expected, "response"),
+            element("td", m.actual, "response"),
+          );
+          body.append(row);
+        }
+        t.append(body);
+        wrap.append(t);
+        return wrap;
+      }
+      $("raw-table").append(table(input.mismatches));
+      let active = null;
+      function closeDetail() {
+        active = null;
+        $("detail").hidden = true;
+        document
+          .querySelectorAll(".card")
+          .forEach((c) => c.setAttribute("aria-expanded", "false"));
+      }
+      function showDetail(f, button) {
+        if (active === f.id) {
+          closeDetail();
+          return;
+        }
+        closeDetail();
+        active = f.id;
+        button.setAttribute("aria-expanded", "true");
+        const panel = $("detail");
+        panel.replaceChildren();
+        panel.hidden = false;
+        const head = element("div", undefined, "detail-head");
+        head.append(element("h3", f.title));
+        const close = element("button", "×", "close");
+        close.type = "button";
+        close.setAttribute("aria-label", "근거 닫기");
+        close.onclick = () => {
+          closeDetail();
+          button.focus();
+        };
+        head.append(close);
+        panel.append(head);
+        const grid = element("div", undefined, "detail-grid"),
+          explanation = element("div"),
+          code = element("div");
+        for (const [label, value] of [
+          ["관측된 현상", f.observed],
+          ["AI의 원인 가설", f.hypothesis],
+          ["다음 조치", f.next_action],
+          ["다음에 확인할 것", f.verification],
+          ["이 조치만으로 해결되지 않는 것", f.limit],
+        ])
+          explanation.append(
+            element("span", label, "label"),
+            element("p", value),
+          );
+        code.append(element("span", "AI가 근거로 지목한 코드", "label"));
+        for (const loc of f.source_locations) {
+          const source = input.sources.find((s) => s.path === loc.path);
+          code.append(
+            element(
+              "div",
+              `${loc.path}:${loc.line_start}–${loc.line_end} · 앞뒤 2줄 포함`,
+              "code-title",
+            ),
+          );
+          const start = Math.max(1, loc.line_start - 2),
+            pre = element("pre", undefined, "code");
+          source.content
+            .split("\n")
+            .slice(start - 1, loc.line_end + 2)
+            .forEach((line, i) => {
+              const n = start + i,
+                row = element(
+                  "span",
+                  undefined,
+                  "code-line" +
+                    (n >= loc.line_start && n <= loc.line_end ? " cited" : ""),
+                );
+              row.append(
+                element("span", String(n), "ln"),
+                document.createTextNode(line),
+              );
+              pre.append(row);
+            });
+          code.append(pre);
+        }
+        if (!f.source_locations.length)
+          code.append(element("p", "특정 코드 위치를 확인하지 못했습니다."));
+        for (const id of f.fact_ids) {
+          const fact = input.facts.find((x) => x.id === id);
+          code.append(
+            element(
+              "div",
+              `${fact.path} · ${fact.storage}\n${fact.evidence}`,
+              "fact",
+            ),
+          );
+        }
+        grid.append(explanation, code);
+        panel.append(grid);
+        const evidence = element("details", undefined, "evidence");
+        const rows = input.mismatches.filter((m) =>
+          f.mismatch_ids.includes(m.id),
+        );
+        evidence.append(
+          element("summary", `관련 응답 ${rows.length}건 보기`),
+          table(rows),
+        );
+        panel.append(evidence);
+        panel.focus({ preventScroll: true });
+        panel.scrollIntoView({
+          behavior: matchMedia("(prefers-reduced-motion: reduce)").matches
+            ? "instant"
+            : "smooth",
+          block: "nearest",
+        });
+      }
+      function responsePair(m) {
+        const parse = (s) => {
+          const match = s.match(/^(\d+)\s+([\s\S]*)$/);
+          if (!match) return null;
+          try {
+            return { status: match[1], body: JSON.parse(match[2]) };
+          } catch {
+            return { status: match[1], body: match[2] };
+          }
+        };
+        const expected = parse(m.expected),
+          actual = parse(m.actual);
+        if (expected && actual) {
+          if (expected.status !== actual.status)
+            return [expected.status, actual.status];
+          const a = expected.body,
+            b = actual.body;
+          if (
+            a &&
+            b &&
+            typeof a === "object" &&
+            typeof b === "object" &&
+            !Array.isArray(a) &&
+            !Array.isArray(b)
+          ) {
+            const key = Object.keys(a).find(
+              (k) => JSON.stringify(a[k]) !== JSON.stringify(b[k]),
+            );
+            if (key)
+              return [
+                `${key}: ${JSON.stringify(a[key])}`,
+                `${key}: ${JSON.stringify(b[key])}`,
+              ];
+          }
+          if (
+            Array.isArray(a) &&
+            Array.isArray(b) &&
+            a.every((x) => typeof x === "string") &&
+            b.every((x) => typeof x === "string")
+          )
+            return [a.join(", "), b.join(", ")];
+        }
+        return [m.expected, m.actual].map((s) =>
+          s.length > 80 ? s.slice(0, 77) + "…" : s,
+        );
+      }
+      $("cards").dataset.many = String(findings.length > 3);
+      findings.forEach((f, i) => {
+        const card = element("button", undefined, "card");
+        card.type = "button";
+        card.setAttribute("aria-expanded", "false");
+        card.setAttribute("aria-controls", "detail");
+        const top = element("div", undefined, "card-top");
+        top.append(
+          element("span", String(i + 1).padStart(2, "0"), "card-index"),
+          element("span", scopeNames[f.scope], "pill neutral"),
+        );
+        const bottom = element("div", undefined, "card-bottom");
+        bottom.append(
+          element("small", "다음 조치"),
+          element("div", f.next_action.split(/(?<=\.)\s+/)[0], "action"),
+        );
+        const unique = f.mismatch_ids.find(
+          (id) =>
+            findings.filter((other) => other.mismatch_ids.includes(id))
+              .length === 1,
+        );
+        const example = input.mismatches.find(
+          (m) => m.id === (unique || f.mismatch_ids[0]),
+        );
+        const sample = element("div", undefined, "example"),
+          pair = element("div", undefined, "response-pair");
+        sample.append(
+          element(
+            "div",
+            `${example.request} · ${conditionNames[example.condition]} #${example.index}`,
+            "example-request",
+          ),
+        );
+        const [expected, actual] = responsePair(example);
+        pair.append(
+          element("code", expected),
+          element("span", "→"),
+          element("code", actual),
+        );
+        sample.append(pair);
+        card.append(
+          top,
+          element("h3", f.title),
+          sample,
+          bottom,
+          element(
+            "span",
+            `근거 ${f.mismatch_ids.length}건 보기 ↗`,
+            "card-link",
+          ),
+        );
+        card.onclick = () => showDetail(f, card);
+        $("cards").append(card);
+      });
+      if (!successful || !findings.length) {
+        $("empty").hidden = false;
+        $("empty").textContent = successful
+          ? "근거로 뒷받침할 원인 가설을 찾지 못했습니다."
+          : "아직 유효한 AI 분석이 없습니다. 실제 실패 기록을 먼저 확인할 수 있습니다.";
+      }
+      if (successful && analysis.output.unexplained_mismatch_ids.length) {
+        $("unexplained").hidden = false;
+        $("unexplained").textContent =
+          `원인 미확인 ${analysis.output.unexplained_mismatch_ids.length}건: ${analysis.output.unexplained_mismatch_ids.join(", ")}`;
+      }
+      if (
+        findings.reduce((n, f) => n + f.mismatch_ids.length, 0) >
+        input.mismatches.length
+      ) {
+        const note = element(
+          "p",
+          "하나의 불일치에 여러 원인이 겹칠 수 있습니다. 카드의 근거 건수에는 중복이 포함됩니다.",
+        );
+        note.style.cssText =
+          "font-size:12px;color:var(--muted);margin-top:12px";
+        $("cards").after(note);
+      }
+      function view(name) {
+        $("analysis-view").hidden = name !== "analysis";
+        $("raw-view").hidden = name !== "raw";
+        $("show-analysis").setAttribute(
+          "aria-pressed",
+          String(name === "analysis"),
+        );
+        $("show-raw").setAttribute("aria-pressed", String(name === "raw"));
+      }
+      $("show-analysis").onclick = () => view("analysis");
+      $("show-raw").onclick = () => view("raw");
+      view(successful ? "analysis" : "raw");
+      const fields = [
+        ["기록한 시점", input.recorded_at],
+        ["실행 ID", input.run_id],
+        ["소스 커밋", input.source_revision],
+        ["이미지 digest", input.image_digest],
+        ["결과 SHA-256", input.result_sha256],
+        ["소스 SHA-256", input.source_tree_sha256],
+        ["AI 모델", analysis?.model || "호출하지 않음"],
+        ["AI 분석 시점", analysis?.created_at || "—"],
+        ["AI 분석 상태", analysis?.status || "not_run"],
+        ["분석 입력 SHA-256", analysis?.input_sha256 || "—"],
+        ["근거 검사", "참조 일치 검사. 원인 정확도는 자동 검증하지 않음"],
+      ];
+      for (const [label, value] of fields)
+        $("provenance").append(element("dt", label), element("dd", value));
+    </script>
+  </body>
+</html>

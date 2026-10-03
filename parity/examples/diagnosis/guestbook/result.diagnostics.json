@@ -1,0 +1,32 @@
+{
+  "format": "parity-execution-v1",
+  "status": "completed",
+  "phase": "complete",
+  "container": "premortem-rehearsal-07d13af8ec-guestbook-parity-24f7a17c-1",
+  "target": "http://127.0.0.1:56509",
+  "local_image_id": "sha256:a2c3c7624d267a74e795cf03b13d9cf7ac0f4522bad1eaeabdae6f3612df5723",
+  "registry_digest": null,
+  "target_binding_verified": false,
+  "source_revision": null,
+  "baseline_sha256": {
+    "record": "54bf7486712b02db86b487f1ec55e1bb00bba904bfe898f1d4baa96e9d3d4d3c",
+    "noise": "633ab6aff00be5312011df4e910e141d957936c3c912098bd8925a123e8e34fa"
+  },
+  "baseline_unchanged": true,
+  "facts_collected": true,
+  "conditions": [
+    {
+      "condition": "none",
+      "executed": 20
+    },
+    {
+      "condition": "restart",
+      "executed": 20
+    },
+    {
+      "condition": "replace",
+      "executed": 20
+    }
+  ],
+  "error": null
+}

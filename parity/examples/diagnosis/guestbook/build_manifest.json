@@ -1,0 +1,27 @@
+{
+  "schema_version": "premortem.build.v1",
+  "run_id": "rehearsal-07d13af8ec-guestbook",
+  "created_at": "2026-10-02T07:09:14.233684+00:00",
+  "source": {
+    "commit": "86251f2f63aeb213aed4a48bf7c9066b427b8d52",
+    "subdir": "sample-app",
+    "tree_sha256": "f72cdf694263523944679401a601a530156fe9626231fea25f96b38209e2eac3",
+    "excludes": [],
+    "context": "committed-files"
+  },
+  "image": {
+    "reference": "localhost:58729/guestbook@sha256:2424ca26e6da2d09d9f15a7b4087773b5848e31fb25ac430605cb3a08b83a2ac",
+    "build_tag": "localhost:58729/guestbook:build-rehearsal-07d13af8ec-guestbook-5e4a408a",
+    "registry_digest": "sha256:2424ca26e6da2d09d9f15a7b4087773b5848e31fb25ac430605cb3a08b83a2ac",
+    "platforms": {
+      "linux/amd64": {
+        "manifest_digest": "sha256:5cdc2c00d4ff1c0a3cbf3920180691b044099adb6993dd66932d59b49f5f7a9f",
+        "config_digest": "sha256:a2c3c7624d267a74e795cf03b13d9cf7ac0f4522bad1eaeabdae6f3612df5723"
+      }
+    },
+    "platform": "linux/amd64",
+    "local_image_id": "sha256:a2c3c7624d267a74e795cf03b13d9cf7ac0f4522bad1eaeabdae6f3612df5723",
+    "source_build_link_verified": true,
+    "registry_link_verified": true
+  }
+}
