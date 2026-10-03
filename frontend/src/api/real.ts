@@ -22,12 +22,14 @@ import type {
   RouteSnapshot,
   RoutingTargetView,
   UpdateHealthCheckInput,
+  UpdateApplicationEnvironmentInput,
+  UpdateApplicationEnvironmentResponse,
 } from './types';
 
 /** GitHub 목록은 한 페이지에 최대 100개(backend GithubPageDto 의 per_page 상한) */
 export const GITHUB_PAGE_SIZE = 100;
 
-type HttpMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
+type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
 async function send(fetchImpl: FetchLike, method: HttpMethod, path: string, body: unknown): Promise<Response> {
   const headers: Record<string, string> = { Accept: 'application/json' };
@@ -88,6 +90,10 @@ export class RealDataSource implements DataSource {
     return request<T>('DELETE', path, undefined, this.fetchImpl);
   }
 
+  private put<T>(path: string, body: unknown) {
+    return request<T>('PUT', path, body, this.fetchImpl);
+  }
+
   healthz() {
     return this.get<{ ok: boolean }>('/healthz');
   }
@@ -106,6 +112,10 @@ export class RealDataSource implements DataSource {
 
   updateHealthCheck(applicationId: string, input: UpdateHealthCheckInput) {
     return this.patch<HealthCheckConfig>(`/applications/${encodeURIComponent(applicationId)}/health-check`, input);
+  }
+
+  updateApplicationEnvironment(applicationId: string, input: UpdateApplicationEnvironmentInput) {
+    return this.put<UpdateApplicationEnvironmentResponse>(`/applications/${encodeURIComponent(applicationId)}/environment`, input);
   }
 
   listDeployments(applicationId: string) {

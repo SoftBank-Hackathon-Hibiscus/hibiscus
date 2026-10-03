@@ -2,14 +2,15 @@ import { ArrowRight, Check, ChevronRight, Clock, Cloud, LoaderCircle, Minus, Plu
 import { useEffect, useRef, useState } from 'react';
 import { ApiError, type DataSource } from '../api/client';
 import { MockDataSource } from '../api/mock';
-import type { AgentStatusResponse, ApplicationAgentSummary, ApplicationView, Deployment, DeploymentStatus, PolicyResult, RouteSnapshot, RoutingTargetHealth, RoutingTargetView, TargetKind } from '../api/types';
+import type { AgentStatusResponse, ApplicationAgentSummary, ApplicationEnvironmentVariableInput, ApplicationView, Deployment, DeploymentStatus, PolicyResult, RouteSnapshot, RoutingTargetHealth, RoutingTargetView, TargetKind } from '../api/types';
 import { ErrorNotice, describeError } from '../components/ErrorNotice';
 import { HealthCheckModal } from '../components/HealthCheckModal';
+import { EnvironmentEditor } from '../components/EnvironmentEditor';
 import { NewDeploymentModal } from '../components/NewDeploymentModal';
-import { isGithubSource } from '../lib/forms';
+import { isGithubSource, validateEnvironment } from '../lib/forms';
 import { PageError } from '../components/PageError';
 import { Loader } from '../components/Loader';
-import { Crumbs, Empty, Hash, PageTitle, Pill, type Tone } from '../components/ui';
+import { Crumbs, Empty, Hash, Notice, PageTitle, Pill, type Tone } from '../components/ui';
 import { useMinVisible } from '../hooks/useMinVisible';
 import { usePolling } from '../hooks/usePolling';
 import { detectRouteChange, markOf, type RouteChange, type RouteMark } from '../lib/failover';
@@ -202,6 +203,8 @@ export function ApplicationDetail({ id, source }: { id: string; source: DataSour
         <AgentsCard rows={snap.agents} deployments={snap.deployments} activeDeploymentId={route?.target.deploymentId ?? null} />
       </div>
 
+      <EnvironmentCard applicationId={a.id} names={snap.app.environment ?? []} source={source} onSaved={poll.refresh} />
+
       <section className="card">
         <div className="card-head">
           <h2 className="card-title">{t('deployHistory')}</h2>
@@ -224,6 +227,66 @@ export function ApplicationDetail({ id, source }: { id: string; source: DataSour
         </section>
       )}
     </div>
+  );
+}
+
+function EnvironmentCard({ applicationId, names, source, onSaved }: { applicationId: string; names: string[]; source: DataSource; onSaved: () => void }) {
+  const { t } = useLang();
+  const [editing, setEditing] = useState(false);
+  const [rows, setRows] = useState<ApplicationEnvironmentVariableInput[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+
+  const save = async () => {
+    if (validateEnvironment(rows) !== null) return;
+    setSaving(true);
+    setSaved(false);
+    setError(null);
+    try {
+      await source.updateApplicationEnvironment(applicationId, { environment: rows.map(({ name, value }) => ({ name: name.trim(), value })) });
+      setRows([]);
+      setEditing(false);
+      setSaved(true);
+      onSaved();
+    } catch (cause) {
+      setError(cause);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section className="card">
+      <div className="card-head">
+        <div>
+          <h2 className="card-title">{t('environmentTitle')}</h2>
+          <p className="small muted">{t('environmentDetailHint')}</p>
+        </div>
+        {!editing ? (
+          <button type="button" className="btn btn-small" onClick={() => { setEditing(true); setSaved(false); setError(null); }}>
+            {t('environmentEdit')}
+          </button>
+        ) : null}
+      </div>
+      {names.length > 0 ? (
+        <div className="environment-names" aria-label={t('environmentConfigured')}>
+          {names.map((name) => <span className="tag mono" key={name}>{name}</span>)}
+        </div>
+      ) : <Empty>{t('environmentNone')}</Empty>}
+      {editing ? (
+        <div className="environment-replace">
+          <Notice tone="warning">{t('environmentReplaceWarning')}</Notice>
+          <EnvironmentEditor value={rows} onChange={setRows} disabled={saving} />
+          {error ? <ErrorNotice error={error} /> : null}
+          <div className="row">
+            <button type="button" className="btn btn-primary" disabled={saving || validateEnvironment(rows) !== null} onClick={save}>{saving ? t('environmentSaving') : t('environmentSave')}</button>
+            <button type="button" className="btn" disabled={saving} onClick={() => { setEditing(false); setRows([]); setError(null); }}>{t('cancel')}</button>
+          </div>
+        </div>
+      ) : null}
+      {saved ? <p className="small success-text" role="status">{t('environmentSaved')}</p> : null}
+    </section>
   );
 }
 

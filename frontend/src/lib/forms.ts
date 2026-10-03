@@ -1,7 +1,7 @@
 // 등록·배포 입력 검증. backend-v2 DTO(origin/main) 와 같은 규칙을 화면에서 먼저 적용한다.
 //  - CreateApplicationDto / GithubApplicationDto (application.dto.ts, github.dto.ts)
 //  - CreateDeploymentDto (deployment.dto.ts)
-import type { CreateDeploymentInput, GithubApplicationCreated, GithubApplicationInput } from '../api/types';
+import type { ApplicationEnvironmentVariableInput, CreateDeploymentInput, GithubApplicationCreated, GithubApplicationInput } from '../api/types';
 import { applicationPath, deploymentPath } from './router';
 import type { DictKey } from './i18n';
 
@@ -29,6 +29,10 @@ export const BRANCH_MAX = 255;
 export const PORT_MIN = 1;
 export const PORT_MAX = 65_535;
 export const DEFAULT_CONTAINER_PORT = 8080;
+export const ENV_NAME_RE = /^[A-Z_][A-Z0-9_]{0,63}$/;
+export const ENV_MAX_COUNT = 50;
+export const ENV_VALUE_MAX = 4096;
+export const RESERVED_ENV_NAMES = new Set(['PORT', 'HIB_RUN_ID', 'HIB_DIGEST']);
 
 export type TestTemplate = 'allow' | 'block-test-failed';
 
@@ -44,6 +48,7 @@ export interface RegistrationDraft {
   testTemplate: TestTemplate;
   requiresApproval: boolean;
   autoDeploy: boolean;
+  environment: ApplicationEnvironmentVariableInput[];
 }
 
 export const EMPTY_REGISTRATION: RegistrationDraft = {
@@ -57,6 +62,7 @@ export const EMPTY_REGISTRATION: RegistrationDraft = {
   testTemplate: 'allow',
   requiresApproval: false,
   autoDeploy: true,
+  environment: [],
 };
 
 export type RegistrationField = keyof RegistrationDraft;
@@ -103,6 +109,8 @@ export function validateRegistration(d: RegistrationDraft): RegistrationErrors {
   const port = parsePort(d.containerPort);
   if (port === null || port < PORT_MIN || port > PORT_MAX) errors.containerPort = 'errPort';
 
+  if (validateEnvironment(d.environment) !== null) errors.environment = 'errEnvironment';
+
   return errors;
 }
 
@@ -122,8 +130,24 @@ export function toGithubApplicationInput(d: RegistrationDraft): GithubApplicatio
     repository_id: d.repositoryId ?? 0,
     branch: d.branch,
     auto_deploy: d.autoDeploy,
+    environment: normalizeEnvironment(d.environment),
   };
   return input;
+}
+
+export function normalizeEnvironment(environment: ApplicationEnvironmentVariableInput[]): ApplicationEnvironmentVariableInput[] {
+  return environment.map(({ name, value }) => ({ name: name.trim(), value }));
+}
+
+/** Backend ApplicationEnvironmentVariableDto 및 서비스 검증과 같은 규칙. */
+export function validateEnvironment(environment: ApplicationEnvironmentVariableInput[]): 'count' | 'name' | 'duplicate' | 'reserved' | 'value' | null {
+  if (environment.length > ENV_MAX_COUNT) return 'count';
+  const names = environment.map(({ name }) => name.trim());
+  if (names.some((name) => !ENV_NAME_RE.test(name))) return 'name';
+  if (new Set(names).size !== names.length) return 'duplicate';
+  if (names.some((name) => RESERVED_ENV_NAMES.has(name))) return 'reserved';
+  if (environment.some(({ value }) => value.length > ENV_VALUE_MAX)) return 'value';
+  return null;
 }
 
 /** 등록 직후 갈 곳. backend 가 만든 최초 배포가 있으면 그 진행(테스트 → 정책 → 서명 → 배포)을 바로 보여 주고, 없으면 앱 상세 */

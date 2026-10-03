@@ -22,7 +22,10 @@ import type {
   RoutingTargetView,
   Trigger,
   UpdateHealthCheckInput,
+  UpdateApplicationEnvironmentInput,
+  UpdateApplicationEnvironmentResponse,
 } from './types';
+import { normalizeEnvironment, validateEnvironment } from '../lib/forms';
 import type { MockScenario } from '../mocks';
 import { MOCK_BRANCHES, MOCK_GATEWAY_DOMAIN, MOCK_GITHUB_CONNECTION, MOCK_INSTALLATIONS, MOCK_REPOSITORIES } from '../mocks/github';
 
@@ -179,6 +182,16 @@ export class MockDataSource implements DataSource {
     };
     view.healthCheck = updated;
     return this.delay(updated);
+  }
+
+  async updateApplicationEnvironment(applicationId: string, input: UpdateApplicationEnvironmentInput): Promise<UpdateApplicationEnvironmentResponse> {
+    this.tick();
+    if (validateEnvironment(input.environment) !== null) return this.fail(400, 'Invalid environment variables');
+    const view = this.isScenarioApp(applicationId) ? this.scenario.application : this.createdApp(applicationId)?.view;
+    if (!view) return this.fail(404, 'Application not found');
+    const environment = normalizeEnvironment(input.environment).map(({ name }) => name).sort();
+    view.environment = environment;
+    return this.delay({ environment });
   }
 
   async listDeployments(applicationId: string): Promise<Deployment[]> {
@@ -366,6 +379,7 @@ export class MockDataSource implements DataSource {
         createdAt: timestamp,
         updatedAt: timestamp,
       },
+      environment: (input.environment ?? []).map(({ name }) => name).sort(),
       agents: [],
     };
     const github: GithubApplicationLink = {

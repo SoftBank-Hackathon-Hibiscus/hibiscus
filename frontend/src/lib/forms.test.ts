@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { EMPTY_REGISTRATION, friendlyBackendError, registeredPath, repoShortName, slugify, isGithubSource, toCreateDeploymentInput, toGithubApplicationInput, validateDeployment, validateRegistration, type RegistrationDraft } from './forms';
+import { EMPTY_REGISTRATION, friendlyBackendError, registeredPath, repoShortName, slugify, isGithubSource, toCreateDeploymentInput, toGithubApplicationInput, validateDeployment, validateEnvironment, validateRegistration, type RegistrationDraft } from './forms';
 import { applicationPath, deploymentPath } from './router';
 import type { GithubApplicationCreated } from '../api/types';
 
@@ -71,9 +71,28 @@ describe('toGithubApplicationInput', () => {
       repository_id: 50010001,
       branch: 'main',
       auto_deploy: true,
+      environment: [],
     });
     expect(Object.keys(input)).not.toContain('source_path');
     expect(Object.keys(input)).not.toContain('policy_path');
+  });
+  it('환경변수는 정규화하여 요청에 포함한다', () => {
+    const input = toGithubApplicationInput({ ...valid, environment: [{ name: ' DATABASE_URL ', value: ' postgres://db/app ' }] });
+    expect(input.environment).toEqual([{ name: 'DATABASE_URL', value: ' postgres://db/app ' }]);
+  });
+});
+
+describe('validateEnvironment', () => {
+  it('Backend와 같은 이름, 중복, 예약 키, 값 길이 규칙을 검사한다', () => {
+    expect(validateEnvironment([{ name: 'DATABASE_URL', value: 'postgres://db/app' }])).toBeNull();
+    expect(validateEnvironment([{ name: 'lowercase', value: 'x' }])).toBe('name');
+    expect(validateEnvironment([{ name: 'A', value: '1' }, { name: ' A ', value: '2' }])).toBe('duplicate');
+    expect(validateEnvironment([{ name: 'PORT', value: '3000' }])).toBe('reserved');
+    expect(validateEnvironment([{ name: 'SECRET', value: 'x'.repeat(4097) }])).toBe('value');
+    expect(validateEnvironment(Array.from({ length: 51 }, (_, index) => ({ name: `KEY_${index}`, value: '' })))).toBe('count');
+  });
+  it('등록 검증에 환경변수 오류를 포함한다', () => {
+    expect(validateRegistration({ ...valid, environment: [{ name: 'PORT', value: '3000' }] }).environment).toBe('errEnvironment');
   });
 });
 
