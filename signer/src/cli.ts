@@ -16,11 +16,12 @@ const USAGE = `사용법
   npx tsx src/cli.ts sign --plan <plan.json> --requester <id> [--approval <approval.json>]
                           --image-repo <저장소> (--key <cosign.key> [--no-tlog] | --dry-run)
                           [--out sign_result.json] [--log decisions.jsonl] [--audit <감사 로그>] [--approval-ttl <분>]
-                          [--plan-schema <Plan.schema.json>]
+                          [--self-verify] [--attest [--test-result <test_result.json>]] [--minimal-env]
+                          [--pub <cosign.pub>] [--pubkey-sha256 <지문>] [--plan-schema <Plan.schema.json>]
   npx tsx src/cli.ts verify --result <sign_result.json> [--plan <plan.json>] [--approval <approval.json>] [--audit <감사 로그>] [--image-repo <저장소>]
-                            [--attestation [--policy <deploy.rego>]] [--max-age <분>] [--json]
-                            [--pub <cosign.pub>] [--no-tlog] [--plan-schema <Plan.schema.json>]
-  npx tsx src/cli.ts audit --audit <감사 로그> [--images [--image-repo <저장소>] [--pub <cosign.pub>] [--no-tlog]]
+                            [--attestation [--policy <deploy.rego>] [--test-result <test_result.json>]] [--max-age <분>] [--json]
+                            [--pub <cosign.pub>] [--pubkey-sha256 <지문>] [--no-tlog] [--plan-schema <Plan.schema.json>]
+  npx tsx src/cli.ts audit --audit <감사 로그> [--anchors <고정값 파일>] [--images [--strict-images] [--image-repo <저장소>]] [--pub <cosign.pub>] [--no-tlog]
   npx tsx src/cli.ts fingerprint [--pub <cosign.pub>] [--pubkey-sha256 <지문>]
   npx tsx src/cli.ts anchor --audit <감사 로그> [--anchors <고정값 파일>] (--key <cosign.key>) [--no-tlog]
 
@@ -50,8 +51,8 @@ const USAGE = `사용법
   audit         감사 로그가 처음부터 끝까지 이어지는지 확인. 끊긴 첫 줄 번호를 알려줌
   --anchors     감사 로그 끝 고정값 파일. anchor 는 여기에 추가, audit 는 이 고정값과도 맞춰 봄 (끝 자르기·다시 쓰기). 없으면 SIGNER_AUDIT_ANCHORS
   --images      레지스트리 서명과 맞춰 봄: signed 줄마다 맞는 서명이 있는지, audit_head 가 붙은 서명이 전부 로그에 있는지
-  --strict-images  --images 와 같이: audit_head 없는 서명(감사 로그 없이 한 서명)도 로그에 없는 서명으로 봄. 키 도용 감지
                 (체인을 통째로 다시 계산하거나 signed 줄을 지우거나 거절로 바꾼 것도 잡음). 거절 줄 digest 는 --image-repo 저장소에서 찾음
+  --strict-images --images 와 같이: audit_head 없는 서명(감사 로그 없이 한 서명)도 로그에 없는 서명으로 봄. 키 도용 감지
 
 종료 코드: 0 서명함·확인함 / 1 서명 거절·확인 실패 / 2 실행 오류`;
 
