@@ -18,7 +18,7 @@ function fakeCrane(dir: string, o: { tags?: string[]; digests?: Record<string, s
   writeFileSync(
     bin,
     `#!/bin/sh
-printf '%s\\n' "$@" >> "${dir}/args.txt"
+echo "$*" >> "${dir}/args.txt"
 echo "DB_PASSWORD=\${DB_PASSWORD:-<unset>}" >> "${dir}/env.txt"
 ${o.fail !== undefined ? `echo 'Error: ${o.fail}' >&2; exit 1` : ""}
 if [ "$1" = "ls" ]; then
@@ -45,14 +45,15 @@ describe("CraneLister·sweepDigests", () => {
     const dir = tmp();
     const lister = new CraneLister(fakeCrane(dir, { tags: [tag] }));
     expect(await sweepDigests(lister, REPO)).toEqual({ digests: [digest], tags: 1, signatureTags: 1 });
-    expect(readFileSync(join(dir, "args.txt"), "utf8").trim().split("\n")).toEqual(["ls", "--", REPO]);
+    expect(readFileSync(join(dir, "args.txt"), "utf8").trim().split("\n")).toEqual([`ls -- ${REPO}`]);
   });
 
   it("일반 태그(v1, 짧은 sha256-abc)는 crane digest -- <저장소>:<태그> 로 풂", async () => {
     const dir = tmp();
     const lister = new CraneLister(fakeCrane(dir, { tags: ["v1", "sha256-abc"], digests: { [`${REPO}:v1`]: `sha256:${hex("e")}`, [`${REPO}:sha256-abc`]: `sha256:${hex("f")}` } }));
     expect(await sweepDigests(lister, REPO)).toEqual({ digests: [`sha256:${hex("e")}`, `sha256:${hex("f")}`], tags: 2, signatureTags: 0 });
-    expect(readFileSync(join(dir, "args.txt"), "utf8")).toContain(`digest\n--\n${REPO}:v1`);
+    // 4개씩 동시에 부르니 순서는 안 봄 (호출마다 한 줄)
+    expect(readFileSync(join(dir, "args.txt"), "utf8").trim().split("\n").sort()).toEqual([`digest -- ${REPO}:sha256-abc`, `digest -- ${REPO}:v1`, `ls -- ${REPO}`]);
   });
 
   it("태그가 한도보다 많으면 일부만 보고 통과시키지 않고 SWEEP_TRUNCATED", async () => {
