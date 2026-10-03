@@ -245,6 +245,17 @@ describe("CosignVerifier", () => {
     expect(readFileSync(argsFile, "utf8")).not.toContain("-a\n");
   });
 
+  it("signatures: 같은 키로 붙인 증명서(critical.type 이 predicate 종류)는 서명 목록에서 뺌 (cosign v3)", async () => {
+    const dir = tmp();
+    const stdout = JSON.stringify([
+      { critical: { type: "https://hibiscus.lth.so/attestations/deploy-decision/v1" }, optional: {} },
+      { critical: { type: "https://sigstore.dev/cosign/sign/v1" }, optional: { run_id: "r-1" } },
+      { critical: { type: "cosign container image signature" }, optional: { run_id: "r-0" } },
+    ]);
+    const { bin } = fakeCosign(dir, { stdout });
+    expect(await new CosignVerifier(pubKey(dir), bin).signatures(`${REPO}@${DIGEST}`)).toEqual([{ run_id: "r-1" }, { run_id: "r-0" }]);
+  });
+
   it("signatures: 서명이 없으면 빈 배열, 레지스트리 오류는 그대로 실행 오류", async () => {
     const dir = tmp();
     const none = fakeCosign(dir, { code: 1, stderr: "Error: no signatures found" });

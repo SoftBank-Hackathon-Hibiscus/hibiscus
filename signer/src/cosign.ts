@@ -204,11 +204,12 @@ export class CosignVerifier implements ImageVerifier, BlobVerifier {
       if (e instanceof SignerError && e.code === "SIGNATURE_NOT_FOUND") return [];
       throw e;
     }
-    // stdout 은 서명 payload 의 JSON 배열. optional 에 -a 주석이 들어 있음
+    // stdout 은 서명 payload 의 JSON 배열. optional 에 -a 주석이 들어 있음.
+    // cosign v3 는 같은 키로 붙인 증명서(attest)도 critical.type 에 predicate 종류를 달아 같이 돌려줘서 뺌
     try {
       const payloads: unknown = JSON.parse(stdout);
       if (!Array.isArray(payloads)) throw new Error("JSON 배열이 아님");
-      return payloads.map((payload: unknown) => {
+      return payloads.filter((payload: unknown) => !isAttestationPayload(payload)).map((payload: unknown) => {
         if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("서명 payload 형식 오류");
         const optional: unknown = (payload as { optional?: unknown }).optional ?? {};
         if (optional === null || typeof optional !== "object" || Array.isArray(optional)) throw new Error("서명 주석 형식 오류");
@@ -304,6 +305,14 @@ const SIGNATURE_ERROR_RE = /no matching (?:signatures|attestations)|none of the 
 // verify-attestation --policy 에서 Rego 정책을 통과 못 함
 const POLICY_ERROR_RE = /validation errors? occurred/i;
 
+// 이미지 서명 payload 의 critical.type (v3 bundle, 예전 simple signing)
+const SIGNATURE_TYPES = new Set(["https://sigstore.dev/cosign/sign/v1", "cosign container image signature"]);
+
+function isAttestationPayload(payload: unknown): boolean {
+  const type = (payload as { critical?: { type?: unknown } } | null)?.critical?.type;
+  return typeof type === "string" && !SIGNATURE_TYPES.has(type);
+}
+
 function lastStderrLine(e: unknown): string {
   return String((e as { stderr?: unknown }).stderr ?? "").trim().split("\n").pop() ?? "";
 }
@@ -354,7 +363,21 @@ export class MultiKeyVerifier implements ImageVerifier, BlobVerifier {
 
   async signatures(imageRef: string): Promise<Array<Record<string, string>>> {
     const all: Array<Record<string, string>> = [];
-    for (const v of this.verifiers) all.push(...(await v.signatures(imageRef)));
+    const invalid: unknown[] = [];
+    for (const v of this.verifiers) {
+      try {
+        all.push(...(await v.signatures(imageRef)));
+      } catch (e) {
+        // 키 교체 중엔 이미지가 다른 키로만 서명돼 있어서 이 키로는 서명이 안 맞음
+        // (cosign v3: accepted signatures do not match threshold). 다른 키로 서명이 확인됐을 때만 넘어감
+        if (e instanceof SignerError && e.code === "SIGNATURE_INVALID") {
+          invalid.push(e);
+          continue;
+        }
+        throw e;
+      }
+    }
+    if (invalid.length > 0 && all.length === 0) throw invalid[0];
     return all;
   }
 

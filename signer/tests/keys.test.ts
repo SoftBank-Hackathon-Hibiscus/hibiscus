@@ -110,6 +110,14 @@ describe("키 교체: 여러 공개키로 확인 (MultiKeyVerifier)", () => {
     expect(await new MultiKeyVerifier([invalid, ok]).attestations("r", "t")).toEqual([{ s: "ok" }]);
   });
 
+  it("서명 목록: 다른 키로만 서명된 이미지는 그 키 결과만 (키 교체 중 audit --images)", async () => {
+    const otherKey: ImageVerifier = { ...invalid, signatures: async () => { throw new SignerError("SIGNATURE_INVALID", "accepted signatures do not match threshold"); } };
+    expect(await new MultiKeyVerifier([otherKey, ok]).signatures("r")).toEqual([{ k: "ok" }]);
+    // 어느 키로도 확인되는 서명이 없으면 숨기지 않음 (모르는 키로 서명됐거나 서명이 망가짐)
+    await expect(new MultiKeyVerifier([otherKey, otherKey]).signatures("r")).rejects.toMatchObject({ code: "SIGNATURE_INVALID" });
+    await expect(new MultiKeyVerifier([otherKey, down]).signatures("r")).rejects.toMatchObject({ code: "REGISTRY_UNAVAILABLE" });
+  });
+
   it("감사 로그 고정값(blob)도 어느 키로든 확인되면 통과", async () => {
     const blobOk = { ...ok, verifyBlob: async () => {} };
     const blobBad = { ...invalid, verifyBlob: async () => { throw new SignerError("SIGNATURE_INVALID", "다른 키"); } };
