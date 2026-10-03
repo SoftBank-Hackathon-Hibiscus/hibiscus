@@ -53,9 +53,10 @@ valid_approval {
 	predicate.approval_sha256 != "none"
 }
 
-# 시험 결과: 있어야 하고, 통과, 조건마다 전부 일치
+# 시험 결과: 있어야 하고, 통과, 한 건 이상 재생했고, 조건마다 전부 일치 (0건이면 시험을 안 한 것)
 tested {
 	predicate.test.passed == true
+	predicate.test.match.total > 0
 	predicate.test.match.matched == predicate.test.match.total
 	not condition_failed
 }

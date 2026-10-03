@@ -84,10 +84,13 @@ crane catalog "localhost:$PORT" >/dev/null 2>&1 || { echo "레지스트리가 �
 
 tar cf "$W/v1.tar" -T /dev/null
 echo v2 >"$W/v2" && tar cf "$W/v2.tar" -C "$W" v2
+echo v3 >"$W/v3" && tar cf "$W/v3.tar" -C "$W" v3
 crane append -f "$W/v1.tar" -t "$REG:v1" >/dev/null 2>&1
 crane append -f "$W/v2.tar" -t "$REG:v2" >/dev/null 2>&1
 D1="$(crane digest "$REG:v1")"
+crane append -f "$W/v3.tar" -t "$REG:v3" >/dev/null 2>&1
 D2="$(crane digest "$REG:v2")"
+D3="$(crane digest "$REG:v3")"
 
 mkdir -p "$W/team" "$W/next" "$W/evil"
 for k in team next evil; do (cd "$W/$k" && cosign generate-key-pair >/dev/null 2>&1); done
@@ -103,6 +106,9 @@ edit fixtures/plans/block.plan.json "$W/plan-block.json" "o.digest='$D1'"
 # 두 번째 이미지: 시험에서 20건 중 19건만 맞음
 edit fixtures/plans/allow-onprem.plan.json "$W/plan2.json" "o.run_id='r-103';o.digest='$D2'"
 edit ../policy/fixtures/01-allow/test_result.json "$W/test2.json" "o.run_id='r-103';o.digest='$D2';o.passed=false;o.match.matched=o.match.total-1"
+# 세 번째 이미지: 시험을 0건 재생하고 통과로 표시
+edit fixtures/plans/allow-onprem.plan.json "$W/plan3.json" "o.run_id='r-104';o.digest='$D3'"
+edit ../policy/fixtures/01-allow/test_result.json "$W/test3.json" "o.run_id='r-104';o.digest='$D3';o.passed=true;o.match={total:0,matched:0}"
 echo "  이미지 v1 $D1"
 echo "  이미지 v2 $D2"
 echo "  팀 공개키 $FP"
@@ -211,6 +217,10 @@ check 1 "v2: 서명은 맞지만 증명서의 시험 결과가 strict.rego 에 �
   signer verify --result "$W/sr2.json" --attestation --policy policy/strict.rego "${VERIFY[@]}"
 check 1 "v2: 시험 결과 파일을 통과한 것(v1 것)으로 바꿔 제출" \
   signer verify --result "$W/sr2.json" --attestation --test-result "$W/test.json" "${VERIFY[@]}"
+env SIGNER_COSIGN_KEY="$KEY" "${SIGNER[@]}" sign --plan "$W/plan3.json" --requester alice --image-repo "$REG" --log "$W/x.jsonl" --no-tlog \
+  --attest --test-result "$W/test3.json" --out "$W/sr3.json" >/dev/null 2>&1
+check 1 "v3: 시험을 0건 재생하고 통과로 표시한 결과 (strict.rego)" \
+  signer verify --result "$W/sr3.json" --attestation --policy policy/strict.rego "${VERIFY[@]}"
 # 레포 쓰기 권한자가 정책 끝에 한 줄만 붙임 (Rego 는 같은 이름 규칙을 OR 로 합쳐서 시험 조건이 무력해짐)
 { cat policy/strict.rego; echo 'tested { true }'; } >"$W/strict-weak.rego"
 check 0 "(약점) strict.rego 끝에 'tested { true }' 한 줄: 시험 실패 v2 통과" \
