@@ -94,7 +94,8 @@ export function fakeCosign(
   writeFileSync(stdoutFile, o.stdout !== undefined ? o.stdout + "\n" : "");
   // version --json 은 기록하지 않고 버전만 답함 (signer 가 cosign v3 이상인지 먼저 확인함)
   const version = `if [ "$1" = "version" ]; then echo '{"gitVersion":"${o.version ?? "v3.1.3"}"}'; exit 0; fi`;
-  writeFileSync(bin, `#!/bin/sh\n${version}\nprintf '%s\\n' "$@" > "${argsFile}"\ncat "${stdoutFile}"\necho '${stderr}' >&2\n${check}\n`);
+  // args.txt 는 마지막 호출, calls.txt 는 모든 호출
+  writeFileSync(bin, `#!/bin/sh\n${version}\nprintf '%s\\n' "$@" > "${argsFile}"\nprintf '%s\\n' "$@" >> "${join(dir, "calls.txt")}"\ncat "${stdoutFile}"\necho '${stderr}' >&2\n${check}\n`);
   chmodSync(bin, 0o755);
   return { bin, argsFile };
 }

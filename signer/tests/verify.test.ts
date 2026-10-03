@@ -7,7 +7,7 @@ import { CosignVerifier } from "../src/cosign.js";
 import { writeJson } from "../src/io.js";
 import { loadPlan } from "../src/plan.js";
 import { runSign } from "../src/sign.js";
-import { runVerify } from "../src/verify.js";
+import { runAuditVerify, runVerify } from "../src/verify.js";
 import { copyPlan, fakeCosign, NOW, plan, readJsonFile, RecordingSigner, REPO, tmp } from "./helpers.js";
 
 const FIELDS = {
@@ -96,6 +96,7 @@ describe("runVerify", () => {
       approver: "auto",
       approval_sha256: "none",
       signed_at: encodeURIComponent(NOW.toISOString()),
+      image_repo: encodeURIComponent(REPO),
     });
   });
 
@@ -185,15 +186,15 @@ describe("runVerify", () => {
     writeFileSync(pub, "dummy");
     const imageRef = `${REPO}@${r.digest}`;
     // 서명된 그대로의 인자일 때만 통과하는 cosign
-    const expectArgs = ["verify", "--key", pub, ...Object.entries(signAnnotations(r, { approvalSha256: "none" })).flatMap(([k, v]) => ["-a", `${k}=${v}`]), "--", imageRef];
-    const { bin, argsFile } = fakeCosign(dir, { expectArgs });
+    const expectArgs = ["verify", "--key", pub, ...Object.entries(signAnnotations(r, { approvalSha256: "none", imageRepo: REPO })).flatMap(([k, v]) => ["-a", `${k}=${v}`]), "--", imageRef];
+    const { bin } = fakeCosign(dir, { expectArgs });
     const verifier = new CosignVerifier(pub, bin);
 
     expect(await runVerify({ resultPath, verifier })).toMatchObject({ code: 0 });
 
     const outcome = await runVerify({ resultPath: tamper(resultPath, { targets: ["onprem", "cloud_run"] }), verifier });
     expect(outcome).toMatchObject({ code: 1, reason: "signature_invalid" });
-    expect(readFileSync(argsFile, "utf8")).toContain("targets=onprem+cloud_run");
+    expect(readFileSync(join(dir, "calls.txt"), "utf8")).toContain("targets=onprem+cloud_run");
   });
 
   describe("승인 기록 확인 (--approval)", () => {
@@ -261,5 +262,42 @@ describe("runVerify", () => {
       const { signer, resultPath } = await signed(tmp());
       expect(await runVerify({ resultPath, verifier: signer, maxAgeMs: DAY, now: () => new Date(NOW.getTime() - 5 * 60_000) })).toMatchObject({ code: 1, reason: "expired" });
     });
+  });
+});
+
+describe("서명에 저장소 묶기 (image_repo)", () => {
+  const OTHER = "asia-northeast3-docker.pkg.dev/hib-test/apps/other";
+
+  it("이미지와 서명을 다른 저장소로 복사하고 signature_ref 만 고치면 repo_mismatch (두 저장소가 detail 에)", async () => {
+    const dir = tmp();
+    const { signer, resultPath } = await signed(dir);
+    const r = readJsonFile(resultPath);
+    // 레지스트리 쓰기 권한자가 crane cp 로 서명까지 옮김
+    signer.calls.push({ imageRef: `${OTHER}@${r.digest}`, annotations: { ...signer.calls[0]!.annotations } });
+    const moved = tamper(resultPath, { signature_ref: `cosign:${OTHER}@${r.digest}` });
+    expect(await runVerify({ resultPath: moved, verifier: signer, imageRepo: OTHER })).toMatchObject({
+      code: 1,
+      reason: "repo_mismatch",
+      detail: expect.stringMatching(new RegExp(`${REPO}.*${OTHER}`)),
+    });
+  });
+
+  it("image_repo 주석이 없는 예전 서명은 signature_invalid (다시 서명해야 함)", async () => {
+    const dir = tmp();
+    const { signer, resultPath } = await signed(dir);
+    const { image_repo: _r, ...old } = signer.calls[0]!.annotations;
+    signer.calls[0]!.annotations = old;
+    expect(await runVerify({ resultPath, verifier: signer })).toMatchObject({ code: 1, reason: "signature_invalid" });
+  });
+
+  it("audit --images 를 옮겨 간 저장소로 돌리면 foreign_signature", async () => {
+    const dir = tmp();
+    const signer = new RecordingSigner();
+    const auditPath = join(dir, "sign_audit.jsonl");
+    await runSign({ planPath: plan("allow-onprem"), requester: "alice", imageRepo: REPO, signer, outPath: join(dir, "r.json"), logPath: join(dir, "d.jsonl"), auditPath, now: () => NOW });
+    const c = signer.calls[0]!;
+    signer.calls.push({ imageRef: c.imageRef.replace(REPO, OTHER), annotations: { ...c.annotations } });
+    expect(await runAuditVerify({ auditPath, verifier: signer, imageRepo: OTHER })).toMatchObject({ code: 1, reason: "foreign_signature" });
+    expect(await runAuditVerify({ auditPath, verifier: signer })).toMatchObject({ code: 0 });
   });
 });

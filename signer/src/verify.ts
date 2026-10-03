@@ -1,6 +1,6 @@
 // sign_result.json 이 signer 가 서명한 그대로인지(verify), 감사 로그가 끊기지 않았는지(audit) 확인
 import { fileURLToPath } from "node:url";
-import { logAnnotations, NO_APPROVAL, signAnnotations } from "./annotations.js";
+import { encodeImageRepo, logAnnotations, NO_APPROVAL, signAnnotations } from "./annotations.js";
 import { loadApproval } from "./approval.js";
 import { checkAnchors, type AnchorBreak } from "./anchor.js";
 import { DEPLOY_PREDICATE_TYPE, findDeployStatement } from "./attestation.js";
@@ -106,7 +106,7 @@ export async function runVerify(o: VerifyOptions): Promise<VerifyOutcome> {
     recorded = line.annotations;
   }
 
-  let annotations = signAnnotations(result, { planSha256, auditHead, approvalSha256 });
+  let annotations = signAnnotations(result, { planSha256, auditHead, approvalSha256, imageRepo: repo });
   if (recorded !== undefined) {
     // 서명 당시 기록한 주석과 sign_result 가 같아야 하고, 레지스트리에는 기록한 그 서명(주석 전체)이 있어야 함.
     // 키를 가진 사람이 targets 만 바꾼 쌍둥이 서명을 붙이고 sign_result 를 고쳐도 걸림
@@ -117,7 +117,12 @@ export async function runVerify(o: VerifyOptions): Promise<VerifyOutcome> {
   try {
     await o.verifier.verify(imageRef, annotations);
   } catch (e) {
-    if (e instanceof SignerError && e.code === "SIGNATURE_INVALID") return fail("signature_invalid", e.message);
+    if (e instanceof SignerError && e.code === "SIGNATURE_INVALID") {
+      // 저장소만 다르고 나머지는 같은 서명이면, 다른 저장소의 서명을 복사해 온 것
+      const from = await movedFrom(o.verifier, imageRef, annotations);
+      if (from !== undefined) return fail("repo_mismatch", `다른 저장소에서 옮겨 온 서명 (서명한 저장소 ${from}, 확인한 저장소 ${repo})`);
+      return fail("signature_invalid", e.message);
+    }
     throw e;
   }
 
@@ -139,6 +144,25 @@ export async function runVerify(o: VerifyOptions): Promise<VerifyOutcome> {
   return { code: 0, result, imageRef, annotations };
 }
 
+/** image_repo 만 다르고 다른 주석은 다 같은 서명이 있으면 그 서명의 저장소 */
+async function movedFrom(verifier: ImageVerifier, imageRef: string, annotations: Record<string, string>): Promise<string | undefined> {
+  let sigs: Array<Record<string, string>>;
+  try {
+    sigs = await verifier.signatures(imageRef);
+  } catch {
+    return undefined; // 원래 이유(signature_invalid)로 알림
+  }
+  const moved = sigs.find(
+    (sig) => sig.image_repo !== undefined && sig.image_repo !== annotations.image_repo && Object.entries(annotations).every(([k, v]) => k === "image_repo" || sig[k] === v),
+  );
+  if (moved?.image_repo === undefined) return undefined;
+  try {
+    return decodeURIComponent(moved.image_repo);
+  } catch {
+    return moved.image_repo;
+  }
+}
+
 export interface AuditVerifyOptions {
   auditPath: string;
   /** 있으면 레지스트리의 이미지 서명과 감사 로그를 맞춰 봄 */
@@ -154,7 +178,7 @@ export interface AuditVerifyOptions {
   anchors?: { path: string; verifier: BlobVerifier };
 }
 
-export type AuditImageReason = "ref_invalid" | "signature_invalid" | "unlogged_signature" | "twin_signature";
+export type AuditImageReason = "ref_invalid" | "signature_invalid" | "unlogged_signature" | "twin_signature" | "foreign_signature";
 
 /**
  * 레지스트리 서명이 이 signed 줄의 서명인지. 주석 전체를 기록한 줄은 정확히 같아야 하고(쌍둥이 서명 거부),
@@ -244,7 +268,12 @@ export async function runAuditVerify(o: AuditVerifyOptions): Promise<AuditVerify
         return { code: 1, line: line.seq, reason: "signature_invalid", detail: `이 줄 내용·anchor 와 맞는 이미지 서명이 없음: ${imageRef}` };
       }
     }
+    const queriedRepo = encodeImageRepo(imageRef.slice(0, imageRef.lastIndexOf("@")));
     for (const sig of sigs) {
+      // 다른 저장소에서 서명한 것을 이미지와 같이 복사해 온 서명
+      if (sig.image_repo !== undefined && sig.image_repo !== queriedRepo) {
+        return { code: 1, line: 0, reason: "foreign_signature", detail: `다른 저장소(image_repo=${sig.image_repo})에서 옮겨 온 서명 (run_id=${sig.run_id ?? "?"}): ${imageRef}` };
+      }
       const anchor = sig.audit_head;
       if (anchor === undefined) {
         if (!o.strictImages) continue; // 감사 로그를 안 켜고 한 서명

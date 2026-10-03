@@ -12,6 +12,8 @@ export interface AnnotationExtras {
   auditHead?: string | undefined;
   /** 승인 기록(approval.json, 키 정렬 JSON)의 sha256. 자동 승인이면 none */
   approvalSha256?: string | undefined;
+  /** 서명한 저장소 (태그 없는 주소). 이미지와 서명을 다른 저장소로 복사해 쓰지 못하게 */
+  imageRepo?: string | undefined;
 }
 
 /** 승인 기록이 없을 때(allow, approver auto) 주석 값 */
@@ -56,7 +58,13 @@ export function signAnnotations(f: SignedFields, x: AnnotationExtras = {}): Reco
     signed_at: encodeValue("signed_at", f.signed_at),
     ...(x.planSha256 !== undefined ? { plan_sha256: x.planSha256 } : {}),
     ...(x.auditHead !== undefined ? { audit_head: x.auditHead } : {}),
+    ...(x.imageRepo !== undefined ? { image_repo: encodeImageRepo(x.imageRepo) } : {}),
   });
+}
+
+/** image_repo 주석 값 (: / 를 인코딩) */
+export function encodeImageRepo(repo: string): string {
+  return encodeValue("image_repo", repo);
 }
 
 /** 감사 로그 signed 줄로 확인할 수 있는 주석만 (SignLog 에 targets 가 없음) */

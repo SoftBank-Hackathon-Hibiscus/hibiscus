@@ -54,6 +54,8 @@ describe("runSign", () => {
           approval_sha256: "none",
           signed_at: encodeURIComponent(NOW.toISOString()),
           plan_sha256: loadPlan(plan("allow-onprem")).planSha256,
+          // 저장소도 묶음 (: / 인코딩)
+          image_repo: encodeURIComponent(REPO),
         },
       },
     ]);

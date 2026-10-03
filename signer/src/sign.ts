@@ -109,7 +109,7 @@ async function signOnce(o: SignOptions, seen: { runId?: string }): Promise<SignO
   const approvalSha256 = decision.approver === AUTO_APPROVER || !approval ? NO_APPROVAL : sha256Hex(canonicalize(approval));
   // 서명 시각은 서명 전에 정해서 주석·sign_result·감사 로그에 같은 값으로 씀
   const signedAt = now();
-  const annotations = signAnnotations({ ...claims, signed_at: signedAt.toISOString() }, { planSha256: loaded.planSha256, auditHead, approvalSha256 });
+  const annotations = signAnnotations({ ...claims, signed_at: signedAt.toISOString() }, { planSha256: loaded.planSha256, auditHead, approvalSha256, imageRepo: o.imageRepo });
 
   let signatureRef: string;
   try {

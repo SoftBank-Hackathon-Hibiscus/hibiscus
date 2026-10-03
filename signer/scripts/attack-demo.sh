@@ -145,6 +145,13 @@ edit "$W/plan.json" "$W/plan-rules.json" "o.rules.find(r=>r.id==='R4').result='n
 check 1 "plan.json 의 개인정보 규칙(R4) 결과를 not_matched 로" signer verify --result "$W/sr.json" --plan "$W/plan-rules.json" "${VERIFY[@]}"
 edit "$W/sr.json" "$W/sr-digest.json" "o.digest='$D2'"
 check 1 "서명 안 받은 다른 이미지(v2) digest 로 바꾸기" signer verify --result "$W/sr-digest.json" "${VERIFY[@]}"
+# 레지스트리 쓰기 권한자가 이미지와 서명을 다른 저장소로 복사 (cosign v3 는 sha256-<digest> 태그에 서명 목록을 둠)
+OTHER="localhost:$PORT/hib/other"
+crane cp "$REG@$D1" "$OTHER@$D1" >/dev/null 2>&1
+crane cp "$REG:sha256-${D1#sha256:}" "$OTHER:sha256-${D1#sha256:}" >/dev/null 2>&1
+edit "$W/sr.json" "$W/sr-other.json" "o.signature_ref='cosign:$OTHER@$D1'"
+check 1 "v1 이미지·서명을 다른 저장소로 복사하고 signature_ref 만 고침" \
+  signer verify --result "$W/sr-other.json" --image-repo "$OTHER" "${VERIFY[@]}"
 env SIGNER_COSIGN_KEY= "${SIGNER[@]}" sign --plan "$W/plan.json" --requester alice --image-repo "$REG" --log "$W/x.jsonl" --dry-run --out "$W/sr-dry.json" >/dev/null 2>&1
 check 1 "cosign 없이 만든 dry-run 결과로 배포" signer verify --result "$W/sr-dry.json" "${VERIFY[@]}"
 
