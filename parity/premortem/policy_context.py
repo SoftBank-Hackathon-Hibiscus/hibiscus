@@ -1,9 +1,9 @@
 """류진님 정책 결과(plan.json)의 requires를 AI 수정 목표로 읽는다 (IMPLEMENTATION_SPEC 12절).
 
-- 형식은 류진님 개발일지 기준: requires = [{id, hint, rule_id, allowed_targets}]. 실제 contracts를 받으면 그 스키마로 다시 확인한다.
+- requires = [{id, hint, rule_id, allowed_targets}]. registry 실행은 루트 Plan 계약과 앱 커밋도 대조한다.
 - allowed_targets는 "이 조건을 충족하면 갈 수 있는 후보 위치"다. 지금 배포해도 된다는 뜻이 아니며, 여러 조건을 합쳐 허가로 만들지 않는다.
 - 모르는 id는 지우거나 해결했다고 하지 않고 사람이 할 일로 남긴다.
-- plan의 run_id(와 둘 다 있을 때 digest)가 이번 실행과 다르면 섞인 입력이라 멈춘다.
+- plan의 run_id·registry digest가 이번 실행과 다르면 섞인 입력이라 멈춘다.
 """
 
 from pathlib import Path
@@ -14,13 +14,16 @@ from .jsonio import load_json
 
 KNOWN_REQUIREMENTS = {
     "fix_tests": "실제 불일치를 근거로 작은 앱 코드 수정 제안",
+    "fix_restart_failure": "재시작 뒤 불일치를 근거로 앱 상태·초기화 코드 수정 제안",
+    "investigate_replace_failure": "교체 뒤 불일치 원인 조사. 외부 저장소가 필요하면 수동 조치로 남김",
     "managed_db": "위치 제약을 지킨 채 DB 저장 방식 변경 제안. 실제 DB 생성·이관은 사람이 함",
     "object_storage": "파일 저장을 바깥으로 옮기는 변경 제안. 개인정보 제약을 넘는 저장소는 고르지 않음",
     "two_phase_migration": "자동 수정하지 않음. 호환 계획 검토 필요",
 }
 
 
-def load_requires(plan_path: Path, run_id: str, registry_digest: Optional[str]) -> list:
+def load_requires(plan_path: Path, run_id: str, registry_digest: Optional[str],
+                  source_revision: Optional[str] = None) -> list:
     plan = load_json(plan_path)
     if not isinstance(plan, dict):
         raise PremortemError("SCHEMA_INVALID", "plan.json은 객체여야 함")
@@ -28,8 +31,19 @@ def load_requires(plan_path: Path, run_id: str, registry_digest: Optional[str]) 
         raise PremortemError("POLICY_CONTEXT_MISMATCH",
                              f"plan의 run_id({plan.get('run_id')})가 이번 실행({run_id})과 다름. 다른 실행의 정책 결과를 섞지 않음")
     plan_digest = plan.get("digest")
-    if plan_digest and registry_digest and plan_digest != registry_digest:
+    if registry_digest is not None and plan_digest != registry_digest:
         raise PremortemError("POLICY_CONTEXT_MISMATCH", "plan의 이미지 digest가 이번 실행과 다름")
+    if source_revision is not None:
+        if plan.get('source_revision') != source_revision:
+            raise PremortemError('POLICY_CONTEXT_MISMATCH', 'plan의 앱 커밋이 이번 실행과 다름')
+        try:
+            from jsonschema import Draft202012Validator
+        except ImportError:
+            raise PremortemError('SCHEMA_UNCHECKED', '정책 결과를 검사하려면 jsonschema가 필요함') from None
+        contract = Path(__file__).resolve().parents[2] / 'contracts/Plan.schema.json'
+        errors = list(Draft202012Validator(load_json(contract)).iter_errors(plan))
+        if errors:
+            raise PremortemError('SCHEMA_INVALID', '정책 결과가 공용 Plan 계약과 다름')
     requires = []
     for item in plan.get("requires") or []:
         if not isinstance(item, dict) or not isinstance(item.get("id"), str):
