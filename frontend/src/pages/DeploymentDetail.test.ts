@@ -42,10 +42,10 @@ function renderReal(view: DeploymentView, lang = 'ko') {
   );
 }
 
-describe('배포 상세의 저장된 진단 표시', () => {
+describe('배포 상세에서 별도 실행 진단을 표시하지 않음', () => {
   it.each([
     ['real', 'ko'], ['mock', 'ko'], ['real', 'ja'], ['mock', 'ja'],
-  ] as const)('%s 모드·%s 언어에서는 별도 실행의 진단을 올바르게 구분한다', (kind, lang) => {
+  ] as const)('%s 모드·%s 언어에서는 별도 실행의 진단을 표시하지 않는다', (kind, lang) => {
     vi.stubGlobal('localStorage', { getItem: () => lang });
     const scenario = buildScenario(1);
     const view = scenario.deployments[0]!;
@@ -61,18 +61,16 @@ describe('배포 상세의 저장된 진단 표시', () => {
       createElement(LangProvider, null, createElement(DeploymentDetail, { id: view.deployment.id, source })),
     );
 
-    expect(markup.includes(`href="/diagnosis/guestbook.html?lang=${lang}"`)).toBe(kind === 'mock');
-    expect(markup.includes(lang === 'ja' ? '保存済みLLM診断を見る' : '저장된 LLM 진단 보기')).toBe(kind === 'mock');
+    expect(markup.includes(`href="/diagnosis/guestbook.html?lang=${lang}"`)).toBe(false);
+    expect(markup.includes(lang === 'ja' ? '保存済みLLM診断を見る' : '저장된 LLM 진단 보기')).toBe(false);
   });
 
-  it.each(['ko', 'ja'])('real의 같은 방명록 실패 패턴에 별도 실행 안내와 %s 링크를 표시한다', (lang) => {
+  it.each(['ko', 'ja'])('real의 같은 방명록 실패 패턴에도 %s 진단 링크를 표시하지 않는다', (lang) => {
     const view = realGuestbookView();
     const before = structuredClone(view);
     const markup = renderReal(view, lang);
-    expect(markup).toContain(`href="/diagnosis/guestbook.html?lang=${lang}"`);
-    expect(markup).toContain('target="_blank"');
-    expect(markup).toContain(lang === 'ja' ? '同じ失敗パターンのLLM診断例を見る' : '같은 실패 패턴의 LLM 진단 사례 보기');
-    expect(markup).toContain(lang === 'ja' ? '現在のデプロイの診断ではありません。' : '현재 배포의 진단은 아닙니다.');
+    expect(markup).not.toContain('/diagnosis/guestbook.html');
+    expect(markup).not.toContain(lang === 'ja' ? '現在のデプロイの診断ではありません。' : '현재 배포의 진단은 아닙니다.');
     expect(view).toEqual(before);
   });
 
