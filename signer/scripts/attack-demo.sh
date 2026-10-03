@@ -49,7 +49,7 @@ check() {
   [ ${#why} -gt 220 ] && why="${why:0:217}..."
   # audit 가 문제를 여러 건 찾으면 건마다 한 줄씩 더 나옴
   local more
-  more="$(printf '%s\n' "$out" | grep -E '^  ([0-9]+번째 줄 )?\([a-z_]+\): ' | head -3 | cut -c1-200)"
+  more="$(printf '%s\n' "$out" | grep -E '^  ([0-9]+번째 줄 )?\([a-z_]+\): ' | head -3 | while IFS= read -r l; do [ ${#l} -gt 200 ] && l="${l:0:197}..."; printf '%s\n' "$l"; done)"
   if [ "$code" = "$want" ]; then
     printf '  \033[32m✔\033[0m %s\n      exit %s  %s\n' "$title" "$code" "$why"
     [ -n "$more" ] && printf '%s\n' "$more" | sed 's/^/      /'
@@ -243,6 +243,21 @@ check 1 "철회 줄을 지운 감사 로그 (끝 고정값과 맞춰 봄)" \
   signer audit --audit "$W/audit-unrevoke.jsonl" --anchors "$W/anchors.jsonl" "${VERIFY[@]}"
 check 2 "철회한 이미지를 다시 서명 요청" \
   env SIGNER_COSIGN_KEY="$KEY" "${SIGNER[@]}" sign --plan "$W/plan2.json" "${SIGN[@]}" --out "$W/x.json"
+
+# --- 실제 배포 상태 ---
+step "공격 7. 고친 sign_result 로 배포한 뒤 실제 상태 대조"
+observed() { printf '{"kind":"observed","target":"%s","image":"%s","observed_at":"2026-10-03T00:00:00Z","source":"demo"}\n' "$1" "$2"; }
+observed onprem "$REG@$D1" >"$W/observed-ok.jsonl"
+{
+  observed onprem "$REG@$D1"
+  observed cloud_run "$REG@$D1"
+  observed onprem "$REG@$D2"
+  observed onprem "$REG2@$B3"
+} >"$W/observed.jsonl"
+check 0 "정상 배포만 있는 관측 (v1 이 온프레에)" \
+  signer reconcile --observed "$W/observed-ok.jsonl" --audit "$W/audit.jsonl" "${VERIFY[@]}"
+check 1 "운영자가 targets 를 고쳐 v1 을 Cloud Run 에도, 철회한 v2, 로그에 없는 b3 가 떠 있음" \
+  signer reconcile --observed "$W/observed.jsonl" --audit "$W/audit.jsonl" "${VERIFY[@]}"
 
 # --- 결과 ---
 step "결과"

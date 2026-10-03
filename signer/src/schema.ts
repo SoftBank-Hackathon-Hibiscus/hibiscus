@@ -129,6 +129,17 @@ export const RevokeSchema = z
   .describe("이미 한 서명을 더는 배포에 쓰지 않게 막는 기록. 감사 로그에만 남김 (decisions.jsonl 계약은 그대로)");
 export type Revoke = z.infer<typeof RevokeSchema>;
 
+export const ObservedSchema = z
+  .strictObject({
+    kind: z.literal("observed"),
+    target: z.string().regex(/^[a-z][a-z0-9_]{0,31}$/).describe("배포 위치 (onprem, cloud_run 등)"),
+    image: z.string().regex(/^[^@\s]+@sha256:[0-9a-f]{64}$/).describe("실제로 떠 있는 이미지 <저장소>@sha256:<hex>"),
+    observed_at: TimeSchema,
+    source: z.string().max(200).describe("어디서 봤는지 (gcloud run revisions describe, docker inspect 등)"),
+  })
+  .describe("실제 배포 상태 관측 한 줄. 운영자가 아닌 사람(감사자)이 만들어야 의미 있음. signer reconcile 입력");
+export type Observed = z.infer<typeof ObservedSchema>;
+
 // cosign -a 값으로 쓸 수 있는 문자. cosign 은 쉼표로 값을 나누고 = 가 두 번이면 거절해서, encodeURIComponent 결과와 구분자 + 만 허용
 export const ANNOTATION_VALUE_RE = /^[A-Za-z0-9._~%!'()*+-]*$/;
 export const ANNOTATION_KEY_RE = /^[a-z][a-z0-9_]{0,39}$/;

@@ -8,6 +8,7 @@ import { CosignSigner, CosignVerifier, DryRunSigner, isKmsKey, MultiKeyVerifier,
 import { runAnchor } from "./anchor.js";
 import { runRevoke } from "./revoke.js";
 import { CraneLister } from "./registry.js";
+import { runReconcile } from "./reconcile.js";
 import { SignerError, writeJson } from "./io.js";
 import { DEFAULT_PLAN_SCHEMA, loadPlan } from "./plan.js";
 import { checkPublicKeyPins, looseKeyPermissions, publicKeyFingerprint, readPolicy } from "./keys.js";
@@ -29,6 +30,7 @@ const USAGE = `사용법
                            [--sweep [--sweep-max <N>]] [--digests-file <파일>]] [--json] [--pub <cosign.pub>] [--no-tlog]
   npx tsx src/cli.ts fingerprint [--pub <cosign.pub>] [--pubkey-sha256 <지문>] | --policy <정책.rego> [--policy-sha256 <지문>]
   npx tsx src/cli.ts anchor --audit <감사 로그> [--anchors <고정값 파일>] (--key <cosign.key>) [--no-tlog]
+  npx tsx src/cli.ts reconcile --observed <observed.jsonl> --audit <감사 로그> [--anchors <고정값 파일>] [--json] [--pub <cosign.pub>] [--no-tlog]
   npx tsx src/cli.ts revoke --audit <감사 로그> --digest <sha256:…> [--run-id <id>] --reason <vulnerability|policy_changed|key_compromise|mistake>
                             --by <id> [--note <메모>] [--anchors <고정값 파일> --key <cosign.key>]
 
@@ -53,6 +55,8 @@ const USAGE = `사용법
   --latest      --audit 와 같이: 이 결과 뒤에 같은 저장소·겹치는 배포 위치로 더 새로 서명한 결과가 있거나 같은 이미지가 block 됐으면 거부
                 (superseded, 예전 결과 재사용·몰래 롤백). 없으면 SIGNER_VERIFY_LATEST=1
 
+  reconcile     실제 배포 상태(관측 파일, contracts/Observed.schema.json)가 서명된 그대로인지 확인. 이미지마다 감사 로그 기록,
+                기록과 정확히 같은 서명, 철회 여부, 서명한 배포 위치를 봄. 관측 파일은 운영자가 아닌 사람이 만들어야 의미 있음
   revoke        서명 철회 줄을 감사 로그에 추가. 그 서명은 verify --audit 에서 revoked, --run-id 없이 이미지 전체를 철회하면 다시 서명도 안 함
   --attestation 배포 증명서도 확인 (서명·내용이 sign_result 와 같은지 + Rego 정책). 정책 기본값은 policy/deploy.rego
   --policy-sha256 Rego 정책 파일 지문 고정 (여러 번 가능). 정책 파일이 이 목록에 없으면 멈춤. 없으면 SIGNER_POLICY_SHA256(쉼표로 여러 개)
@@ -121,6 +125,7 @@ const OPTIONS = {
   sweep: { type: "boolean", default: false },
   "digests-file": { type: "string" },
   "sweep-max": { type: "string" },
+  observed: { type: "string" },
   json: { type: "boolean", default: false },
 } as const;
 
@@ -402,6 +407,39 @@ async function main(argv: string[]): Promise<number> {
     } else {
       const where = outcome.line > 0 ? `${outcome.line}번째 줄` : "";
       console.error(`[signer] 감사 로그 ${where}${where ? " " : ""}문제 (${outcome.reason}): ${outcome.detail}`);
+    }
+    return outcome.code;
+  }
+
+  if (command === "reconcile") {
+    const json = values.json === true;
+    let outcome: Awaited<ReturnType<typeof runReconcile>>;
+    try {
+      outcome = await runReconcile({
+        observedPath: required(values.observed, "observed"),
+        auditPath: required(auditPath, "audit"),
+        verifier: trustedVerifier(),
+        ...(anchorsPath !== undefined ? { anchors: { path: anchorsPath, verifier: trustedVerifier() } } : {}),
+      });
+    } catch (e) {
+      if (json) {
+        console.log(JSON.stringify({ ok: false, code: 2, error: e instanceof SignerError ? e.code : "INTERNAL", message: e instanceof Error ? e.message : String(e) }));
+        return 2;
+      }
+      throw e;
+    }
+    if (json) {
+      console.log(JSON.stringify({ ok: outcome.code === 0, ...outcome }));
+      return outcome.code;
+    }
+    if (!("failures" in outcome)) {
+      console.error(`[signer] 감사 로그 ${outcome.line > 0 ? `${outcome.line}번째 줄 ` : ""}문제 (${outcome.reason}): ${outcome.detail}`);
+      return outcome.code;
+    }
+    if (outcome.code === 0) console.log(`[signer] 실제 배포 ${outcome.checked}건 모두 서명된 그대로`);
+    else {
+      console.error(`[signer] 실제 배포 ${outcome.checked}건 중 ${outcome.failures.length}건이 서명과 다름`);
+      for (const f of outcome.failures) console.error(`  ${f.line}번째 줄 (${f.reason}): ${f.target} ${f.image} — ${f.detail}`);
     }
     return outcome.code;
   }
