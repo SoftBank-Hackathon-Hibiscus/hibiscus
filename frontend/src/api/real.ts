@@ -8,6 +8,11 @@ import type {
   AgentSummary,
   AgentTokenRotation,
   ApplicationView,
+  UpdateApplicationSettingsInput,
+  TrafficSnapshot,
+  RuntimeLogsResponse,
+  RuntimeLogsQuery,
+  RoutingChange,
   CreateDeploymentInput,
   CurrentUser,
   Deployment,
@@ -16,6 +21,7 @@ import type {
   GithubApplicationInput,
   GithubBranchesPage,
   GithubConnection,
+  GithubCommitsPage,
   GithubInstallationsPage,
   GithubRepositoriesPage,
   HealthCheckConfig,
@@ -122,6 +128,17 @@ export class RealDataSource implements DataSource {
     return this.put<UpdateApplicationEnvironmentResponse>(`/applications/${encodeURIComponent(applicationId)}/test-environment`, input);
   }
 
+  updateApplicationSettings(id: string, input: UpdateApplicationSettingsInput) {
+    return this.patch<ApplicationView>(`/applications/${encodeURIComponent(id)}/settings`, input);
+  }
+  getTraffic(id: string, seconds: number) {
+    return this.get<TrafficSnapshot>(`/applications/${encodeURIComponent(id)}/traffic?seconds=${seconds}`);
+  }
+  getApplicationLogs(id: string, query: RuntimeLogsQuery) {
+    const params = new URLSearchParams(Object.entries(query).filter(([,value])=>value!==undefined).map(([key,value])=>[key,String(value)]));
+    return this.get<RuntimeLogsResponse>(`/applications/${encodeURIComponent(id)}/logs?${params}`);
+  }
+  getRoutingHistory(id: string) { return this.get<RoutingChange[]>(`/applications/${encodeURIComponent(id)}/routing/history`); }
   listDeployments(applicationId: string) {
     return this.get<Deployment[]>(`/applications/${encodeURIComponent(applicationId)}/deployments`);
   }
@@ -134,10 +151,25 @@ export class RealDataSource implements DataSource {
     return this.post<Deployment>(`/deployments/${encodeURIComponent(deploymentId)}/approve`, {});
   }
 
+  cancelDeployment(deploymentId: string) {
+    return this.post<Deployment>(`/deployments/${encodeURIComponent(deploymentId)}/cancel`, {});
+  }
+
+  rollbackDeployment(deploymentId: string) {
+    return this.post<Deployment>(`/deployments/${encodeURIComponent(deploymentId)}/rollback`, {});
+  }
+
   getRouting(applicationId: string) {
     return this.get<RouteSnapshot>(`/applications/${encodeURIComponent(applicationId)}/routing`);
   }
 
+  unassignApplicationAgent(id:string, agentId:string) {return this.delete(`/applications/${encodeURIComponent(id)}/agents/${encodeURIComponent(agentId)}`);}
+  assignApplicationAgent(id: string, agentId: string) {
+    return this.post(`/applications/${encodeURIComponent(id)}/agents/${encodeURIComponent(agentId)}`, {});
+  }
+  changeRouting(id: string, targetId: string, revision: number) {
+    return this.patch<RouteSnapshot>(`/applications/${encodeURIComponent(id)}/routing`, {target_id: targetId, expected_revision: revision, reason: 'Console manual switch'});
+  }
   getTargets(applicationId: string) {
     return this.get<RoutingTargetView[]>(`/applications/${encodeURIComponent(applicationId)}/targets`);
   }
@@ -166,6 +198,9 @@ export class RealDataSource implements DataSource {
     return this.post<AgentSshEnrollment>(`/agents/${encodeURIComponent(agentId)}/ssh/enrollment`, {});
   }
 
+  listApplicationCommits(id: string, page=1, revision?: string) {
+    return this.get<GithubCommitsPage>(`/github/applications/${encodeURIComponent(id)}/commits?page=${page}${revision ? `&revision=${encodeURIComponent(revision)}` : ''}`);
+  }
   getGithubConnection() {
     return this.get<GithubConnection>('/github/connection');
   }

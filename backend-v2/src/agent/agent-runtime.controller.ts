@@ -1,3 +1,5 @@
+import { RuntimeLogsService } from '../observability/runtime-logs.service.js';
+import { SubmitRuntimeLogsDto } from '../observability/dto/console.dto.js';
 import {
   Body,
   Controller,
@@ -25,6 +27,7 @@ import type { AgentRequest } from './types/agent.type.js';
 @UseGuards(AgentTokenGuard)
 export class AgentRuntimeController {
   constructor(
+    private readonly logs: RuntimeLogsService,
     private readonly agents: AgentService,
     private readonly jobs: AgentJobService,
   ) {}
@@ -49,6 +52,16 @@ export class AgentRuntimeController {
     @Body() input: AgentJobResultDto,
   ) {
     return this.jobs.submit(request.agent.id, params.jobId, input);
+  }
+
+  @Post('logs')
+  @Header('Cache-Control', 'no-store')
+  @HttpCode(200)
+  logsSubmit(
+    @Req() request: AgentRequest,
+    @Body() input: SubmitRuntimeLogsDto,
+  ) {
+    return this.logs.submit(request.agent.id, input);
   }
 
   @Post('heartbeat')

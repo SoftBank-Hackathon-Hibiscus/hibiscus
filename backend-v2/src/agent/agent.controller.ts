@@ -81,6 +81,11 @@ export class AgentController {
     return this.jobs.get(params.id, params.jobId);
   }
 
+  @Delete('applications/:id/agents/:agentId')
+  unassign(@Param() params: AssignAgentParamDto) {
+    return this.service.unassign(params.id, params.agentId);
+  }
+
   @Post('applications/:id/agents/:agentId')
   assign(@Param() params: AssignAgentParamDto) {
     return this.service.assign(params.id, params.agentId);

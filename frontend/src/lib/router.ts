@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 
 export type Route =
   | { page: 'deployment'; id: string }
-  | { page: 'application'; id: string }
+  | { page: 'application'; id: string; tab?: import('../pages/ApplicationDetail').ApplicationTab }
   | { page: 'applications' }
   | { page: 'agents' }
   | { page: 'register' }
@@ -17,7 +17,10 @@ export function parseHash(hash: string = window.location.hash): Route {
   if (match?.[1]) return { page: 'deployment', id: decodeURIComponent(match[1]) };
   if (/^\/applications\/new\/?$/.test(path)) return { page: 'register' };
   match = /^\/applications\/([^/?#]+)/.exec(path);
-  if (match?.[1]) return { page: 'application', id: decodeURIComponent(match[1]) };
+  if (match?.[1]) {
+    const tab = path.split('/')[3];
+    return { page: 'application', id: decodeURIComponent(match[1]), ...(['overview','deployments','logs','traffic','settings'].includes(tab??'') ? {tab:tab as import('../pages/ApplicationDetail').ApplicationTab} : {}) };
+  }
   if (/^\/applications\/?$/.test(path)) return { page: 'applications' };
   if (/^\/agents\/?$/.test(path)) return { page: 'agents' };
   if (/^\/connect\/?$/.test(path)) return { page: 'connect' };

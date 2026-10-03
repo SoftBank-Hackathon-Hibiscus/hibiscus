@@ -149,7 +149,24 @@ export class AgentRepository {
     this.database.db
       .insert(applicationAgents)
       .values(link)
-      .onConflictDoNothing()
+      .onConflictDoUpdate({
+        target: [applicationAgents.applicationId, applicationAgents.agentId],
+        set: { enabled: true },
+      })
+      .run();
+  }
+
+  unassign(applicationId: string, agentId: string): void {
+    // Keep the execution relationship for serving tunnels, jobs and logs.
+    this.database.db
+      .update(applicationAgents)
+      .set({ enabled: false })
+      .where(
+        and(
+          eq(applicationAgents.applicationId, applicationId),
+          eq(applicationAgents.agentId, agentId),
+        ),
+      )
       .run();
   }
 

@@ -107,3 +107,9 @@ export class GithubPushDto {
   @Type(() => GithubIdDto)
   installation: GithubIdDto;
 }
+
+export class GithubCommitsQueryDto extends GithubPageDto {
+  @IsOptional()
+  @Matches(/^[a-f0-9]{40}$/)
+  revision?: string;
+}

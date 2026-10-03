@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { and, asc, desc, eq, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, ne, or, isNull, sql } from 'drizzle-orm';
 import { DatabaseService } from '../database/database.service.js';
 import {
   deployments,
@@ -241,8 +241,31 @@ export class DeploymentRepository {
     this.database.db
       .update(deployments)
       .set({ ...patch, updatedAt: new Date().toISOString() })
-      .where(eq(deployments.id, id))
+      .where(and(eq(deployments.id, id), ne(deployments.status, 'cancelled')))
       .run();
+  }
+
+  cancel(id: string): boolean {
+    return (
+      this.database.db
+        .update(deployments)
+        .set({ status: 'cancelled', updatedAt: new Date().toISOString() })
+        .where(
+          and(
+            eq(deployments.id, id),
+            inArray(deployments.status, [
+              'queued',
+              'awaiting_approval',
+              'running',
+            ]),
+            or(
+              isNull(deployments.currentStage),
+              ne(deployments.currentStage, 'deploy'),
+            ),
+          ),
+        )
+        .run().changes === 1
+    );
   }
 
   approve(id: string, approver: string): boolean {

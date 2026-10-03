@@ -32,11 +32,13 @@ import {
 } from './dto/github.dto.js';
 import type {
   GithubApplicationDto,
+  GithubCommitsQueryDto,
   GithubBranchDto,
   GithubPageDto,
   GithubRepositoriesQueryDto,
 } from './dto/github.dto.js';
 import type {
+  GithubCommitResponse,
   GithubInstallation,
   GithubRepositories,
   GithubRepository,
@@ -113,6 +115,52 @@ export class GithubService {
       default_branch: repo.default_branch,
       page: query.page,
       branches: branches.map((item) => ({ name: item.name })),
+    };
+  }
+
+  async commits(
+    userId: string,
+    applicationId: string,
+    query: GithubCommitsQueryDto,
+  ) {
+    const link = this.database.db
+      .select()
+      .from(githubApplicationLinks)
+      .where(
+        and(
+          eq(githubApplicationLinks.applicationId, applicationId),
+          eq(githubApplicationLinks.userId, userId),
+        ),
+      )
+      .get();
+    if (!link) throw new NotFoundException('Linked application not found');
+    const repo = await this.authorizedRepository(
+      userId,
+      link.installationId,
+      link.repositoryId,
+    );
+    const commits = query.revision
+      ? [
+          await this.api<GithubCommitResponse>(
+            userId,
+            `/repos/${repo.full_name}/commits/${query.revision}`,
+          ),
+        ]
+      : await this.api<GithubCommitResponse[]>(
+          userId,
+          `/repos/${repo.full_name}/commits?sha=${encodeURIComponent(link.branch)}&per_page=${query.per_page}&page=${query.page}`,
+        );
+    return {
+      branch: link.branch,
+      page: query.page,
+      hasMore: !query.revision && commits.length === query.per_page,
+      commits: commits.map((c) => ({
+        sha: c.sha,
+        message: c.commit.message,
+        author: c.commit.author?.name ?? '',
+        date: c.commit.author?.date ?? null,
+        url: c.html_url,
+      })),
     };
   }
 

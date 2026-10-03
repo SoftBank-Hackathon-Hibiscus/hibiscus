@@ -52,7 +52,7 @@ function Shell() {
       <TopBar isReal={isReal} connection={connection.state} route={route} onTokenChange={onTokenChange} onReconnect={connection.recheck} />
       <main ref={mainRef}>
         {route.page === 'deployment' && <DeploymentDetail key={`${route.id}-${tokenVersion}`} id={route.id} source={source} />}
-        {route.page === 'application' && <ApplicationDetail key={`${route.id}-${tokenVersion}`} id={route.id} source={source} />}
+        {route.page === 'application' && <ApplicationDetail key={`${route.id}-${tokenVersion}`} id={route.id} source={source} tab={route.tab} />}
         {route.page === 'applications' && <ApplicationList key={`apps-${tokenVersion}`} source={source} />}
         {route.page === 'agents' && <AgentList key={`agents-${tokenVersion}`} source={source} />}
         {route.page === 'register' && <RegisterApplication key={`register-${tokenVersion}`} source={source} />}

@@ -1,3 +1,4 @@
+import { TrafficService } from '../observability/traffic.service.js';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -28,6 +29,7 @@ const hopByHopHeaders = new Set([
 export class GatewayProxyService {
   constructor(
     private readonly tunnel: SshTunnelService,
+    private readonly traffic: TrafficService,
     private readonly config: ConfigService<BackendConfig, true>,
   ) {}
 
@@ -36,6 +38,15 @@ export class GatewayProxyService {
     response: Response,
     resolution: GatewayResolution,
   ): Promise<void> {
+    const startedAt = performance.now();
+    response.once('finish', () =>
+      this.traffic.record(
+        resolution.application.id,
+        resolution.target.id,
+        response.statusCode,
+        performance.now() - startedAt,
+      ),
+    );
     const headers = this.requestHeaders(request);
     const target = resolution.target;
     const timeout = this.config.get('backend.gatewayIdleTimeoutMs', {

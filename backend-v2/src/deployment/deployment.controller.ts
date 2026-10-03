@@ -47,6 +47,23 @@ export class DeploymentController {
     return this.service.approve(params.id, request.user.id);
   }
 
+  @Post('deployments/:id/cancel')
+  cancel(
+    @Param() params: DeploymentIdParamDto,
+    @Body() _input: ApproveDeploymentDto,
+  ) {
+    return this.service.cancel(params.id);
+  }
+
+  @Post('deployments/:id/rollback')
+  rollback(
+    @Param() params: DeploymentIdParamDto,
+    @Body() _input: ApproveDeploymentDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.service.rollback(params.id, request.user.id);
+  }
+
   @Put('applications/:id/environment')
   updateEnvironment(
     @Param() params: IdParamDto,

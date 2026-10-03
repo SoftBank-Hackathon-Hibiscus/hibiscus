@@ -48,3 +48,41 @@ describe('mock 새 배포 (POST /applications/:id/deployments 흉내)', () => {
     expect((await s.getRouting(APP_ID)).target.id).toBe(routeBefore.target.id);
   });
 });
+
+describe('배포 취소와 롤백', () => {
+  it('취소한 배포는 조회와 반복 취소 후에도 취소 상태를 유지한다', async () => {
+    const s = source();
+    const created = await s.createDeployment(APP_ID, { source_revision: COMMIT });
+    expect((await s.cancelDeployment(created.id)).status).toBe('cancelled');
+    expect((await s.getDeployment(created.id)).deployment.status).toBe('cancelled');
+    expect((await s.cancelDeployment(created.id)).status).toBe('cancelled');
+    await expect(s.cancelDeployment('missing')).rejects.toMatchObject({ status: 404 });
+  });
+  it('배포 단계가 시작됐거나 끝난 버전은 취소하지 않는다', async () => {
+    const scenario = buildScenario(2);
+    const s = new MockDataSource(scenario, () => Date.parse('2026-10-03T00:00:00Z'), 0);
+    const created = await s.createDeployment(APP_ID, { source_revision: COMMIT });
+    const stored = scenario.deployments.find((v) => v.deployment.id === created.id)!.deployment;
+    stored.status = 'running'; stored.currentStage = 'deploy';
+    await expect(s.cancelDeployment(created.id)).rejects.toMatchObject({ status: 409 });
+    stored.status = 'succeeded';
+    await expect(s.cancelDeployment(created.id)).rejects.toMatchObject({ status: 409 });
+  });
+  it('이전 성공 버전으로 새 배포를 만들고 현재 경로는 유지한다', async () => {
+    const scenario = buildScenario(2);
+    const s = new MockDataSource(scenario, () => Date.parse('2026-10-03T00:00:00Z'), 0);
+    const route = await s.getRouting(APP_ID);
+    const active = scenario.deployments.find((v) => v.deployment.id === route.target.deploymentId)!;
+    active.deployment.version = 2;
+    active.deployment.status = 'succeeded';
+    active.deployment.deploymentPerformed = true;
+    const old = structuredClone(active);
+    old.deployment.id = 'old-success'; old.deployment.version = 1; old.deployment.sourceRevision = COMMIT;
+    scenario.deployments.push(old);
+    const rollback = await s.rollbackDeployment(old.deployment.id);
+    expect(rollback).toMatchObject({ trigger: 'rollback', status: 'queued', version: 3, sourceRevision: COMMIT, approver: null, deploymentPerformed: false });
+    expect((await s.getRouting(APP_ID)).target.id).toBe(route.target.id);
+    await expect(s.rollbackDeployment(old.deployment.id)).rejects.toMatchObject({ status: 409 });
+    await expect(s.rollbackDeployment(active.deployment.id)).rejects.toMatchObject({ status: 409 });
+  });
+});

@@ -168,6 +168,8 @@ export class DeploymentWorker
     paths: DeploymentPaths,
     approval?: { approver: string },
   ): Promise<boolean> {
+    if (this.requiredDeployment(deployment.id).status === 'cancelled')
+      return false;
     const sequence = { test: 1, policy: 2, sign: 3, deploy: 4 }[runner.name];
     const execution: StageExecution = {
       id: randomUUID(),
@@ -269,7 +271,10 @@ export class DeploymentWorker
       },
     );
     rmSync(paths.decisionsLog, { force: true });
-    return outcome.status !== 'failed';
+    return (
+      outcome.status !== 'failed' &&
+      this.requiredDeployment(deployment.id).status !== 'cancelled'
+    );
   }
 
   private requiredDeployment(id: string): Deployment {

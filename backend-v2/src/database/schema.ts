@@ -1,6 +1,7 @@
 import { relations } from 'drizzle-orm';
 import {
   integer,
+  index,
   primaryKey,
   sqliteTable,
   text,
@@ -146,7 +147,7 @@ export const deployments = sqliteTable(
       .references(() => applications.id, { onDelete: 'cascade' }),
     version: integer('version').notNull(),
     trigger: text('trigger', {
-      enum: ['manual', 'webhook', 'registration'],
+      enum: ['manual', 'webhook', 'registration', 'rollback'],
     }).notNull(),
     sourceRevision: text('source_revision').notNull(),
     sourceRevisionVerified: integer('source_revision_verified', {
@@ -169,6 +170,7 @@ export const deployments = sqliteTable(
         'blocked',
         'failed',
         'succeeded',
+        'cancelled',
       ],
     }).notNull(),
     currentStage: text('current_stage', {
@@ -302,6 +304,7 @@ export const applicationAgents = sqliteTable(
     agentId: text('agent_id')
       .notNull()
       .references(() => agents.id, { onDelete: 'cascade' }),
+    enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
     createdAt: text('created_at').notNull(),
   },
   (table) => [primaryKey({ columns: [table.applicationId, table.agentId] })],
@@ -697,3 +700,29 @@ export type RoutingChange = typeof routingChanges.$inferSelect;
 export type RoutingTargetHealth = typeof routingTargetHealth.$inferSelect;
 export type StageExecution = typeof stageExecutions.$inferSelect;
 export type PolicyResult = typeof policyResults.$inferSelect;
+
+export const applicationRuntimeLogs = sqliteTable(
+  'application_runtime_logs',
+  {
+    id: text('id').primaryKey(),
+    applicationId: text('application_id')
+      .notNull()
+      .references(() => applications.id, { onDelete: 'cascade' }),
+    deploymentId: text('deployment_id')
+      .notNull()
+      .references(() => deployments.id, { onDelete: 'cascade' }),
+    agentId: text('agent_id')
+      .notNull()
+      .references(() => agents.id, { onDelete: 'cascade' }),
+    timestamp: text('timestamp').notNull(),
+    stream: text('stream', { enum: ['stdout', 'stderr'] }).notNull(),
+    level: text('level', { enum: ['INFO', 'WARN', 'ERROR'] }).notNull(),
+    message: text('message').notNull(),
+  },
+  (table) => [
+    index('runtime_logs_deployment_time').on(
+      table.deploymentId,
+      table.timestamp,
+    ),
+  ],
+);

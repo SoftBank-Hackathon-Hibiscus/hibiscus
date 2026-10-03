@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { and, asc, eq, isNull } from 'drizzle-orm';
+import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { DatabaseService } from '../database/database.service.js';
 import {
@@ -196,6 +196,18 @@ export class RoutingRepository {
           .from(routingTargets)
           .where(eq(routingTargets.id, targetId))
           .get()!;
+        // Retire older versions only after the route revision check succeeds.
+        // Newer candidates and same-version standby targets stay unchanged.
+        tx.update(routingTargets)
+          .set({ enabled: false, updatedAt: now })
+          .where(
+            and(
+              eq(routingTargets.applicationId, applicationId),
+              eq(routingTargets.enabled, true),
+              sql`${routingTargets.deploymentId} IN (SELECT id FROM deployments WHERE application_id = ${applicationId} AND version < (SELECT version FROM deployments WHERE id = ${target.deploymentId}))`,
+            ),
+          )
+          .run();
         const health = tx
           .select()
           .from(routingTargetHealth)
@@ -210,6 +222,16 @@ export class RoutingRepository {
       },
       { behavior: 'immediate' },
     );
+  }
+
+  history(applicationId: string) {
+    return this.database.db
+      .select()
+      .from(routingChanges)
+      .where(eq(routingChanges.applicationId, applicationId))
+      .orderBy(desc(routingChanges.createdAt), desc(routingChanges.revision))
+      .limit(50)
+      .all();
   }
 
   saveHealth(value: RoutingTargetHealth): RoutingTargetHealth {

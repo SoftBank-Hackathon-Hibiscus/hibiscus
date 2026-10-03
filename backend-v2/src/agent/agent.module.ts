@@ -1,3 +1,4 @@
+import { ObservabilityModule } from '../observability/observability.module.js';
 import { Module } from '@nestjs/common';
 import { AgentController } from './agent.controller.js';
 import { AgentService } from './agent.service.js';
@@ -17,6 +18,7 @@ import { SshTunnelCoreModule } from '../ssh-tunnel/ssh-tunnel-core.module.js';
 @Module({
   imports: [
     DatabaseModule,
+    ObservabilityModule,
     ApplicationModule,
     DeploymentModule,
     SshTunnelCoreModule,
