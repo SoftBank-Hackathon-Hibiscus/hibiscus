@@ -575,8 +575,8 @@ function TestDetail({ view, summary }: { view: DeploymentView; summary: Deployme
               return (
                 <div key={c.name} className="condition">
                   <div className="condition-head">
-                    <span>{conditionName(t, c.name)}</span>
-                    <span className={`num ${c.failed ? 'tone-danger' : 'tone-success'}`}>
+                    <span className="condition-label">{conditionName(t, c.name)}</span>
+                    <span className={`num condition-num ${c.failed ? 'tone-danger' : 'tone-success'}`}>
                       <strong>{c.matched}</strong>/{c.total}
                     </span>
                   </div>
