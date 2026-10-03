@@ -8,7 +8,7 @@ import {
 } from "../command-runner.js";
 import { DockerRuntime } from "../docker-runtime.js";
 import { CosignImageVerifier } from "../image-verifier.js";
-import type { AgentJob } from "../types.js";
+import type { AgentJob, ManagedContainer } from "../types.js";
 
 class FakeCommands implements CommandExecutor {
   readonly calls: Array<{ command: string; args: string[] }> = [];
@@ -62,6 +62,36 @@ void test("verifies a signed digest and starts a loopback-only candidate", async
   assert.equal(run.args.at(-1), job.image);
 });
 
+void test("recreates a missing serving container on its saved host port", async () => {
+  const commands = new FakeCommands();
+  const container = managedContainer("serving");
+
+  const recovered = await new DockerRuntime(
+    agentConfig(),
+    commands,
+  ).reconcile([container], container.container);
+
+  assert.deepEqual(recovered, [container]);
+  const run = commands.calls.find((call) => call.args[0] === "run");
+  assert.ok(run);
+  assert.ok(run.args.includes("127.0.0.1:32768:8080"));
+  assert.equal(run.args[run.args.indexOf("--restart") + 1], "unless-stopped");
+  assert.equal(run.args.at(-1), container.image);
+});
+
+void test("does not recreate a missing non-serving container", async () => {
+  const commands = new FakeCommands();
+  const container = managedContainer("standby");
+
+  const recovered = await new DockerRuntime(
+    agentConfig(),
+    commands,
+  ).reconcile([container], null);
+
+  assert.deepEqual(recovered, []);
+  assert.equal(commands.calls.some((call) => call.args[0] === "run"), false);
+});
+
 function candidateJob(): AgentJob {
   const digest = `sha256:${"a".repeat(64)}`;
   return {
@@ -89,6 +119,20 @@ function candidateJob(): AgentJob {
     deadline: new Date(Date.now() + 60_000).toISOString(),
     attempt: 1,
     lease_until: new Date(Date.now() + 30_000).toISOString(),
+  };
+}
+
+function managedContainer(role: ManagedContainer["role"]): ManagedContainer {
+  const digest = `sha256:${"a".repeat(64)}`;
+  return {
+    run_id: "run-1",
+    digest,
+    container: "candidate",
+    image: `registry.example/app@${digest}`,
+    url: "http://127.0.0.1:32768",
+    host_port: 32768,
+    container_port: 8080,
+    role,
   };
 }
 

@@ -105,12 +105,15 @@ cosign verify \
 
 ## 상태 복구
 
-Agent는 상태 파일을 원자적으로 교체합니다. 재시작할 때 다음 작업을 수행합니다.
+Agent는 상태 파일을 원자적으로 교체합니다. 시작할 때와 heartbeat를 보내기 전에 다음 작업을 수행합니다.
 
 1. 저장된 컨테이너가 Hibiscus 관리 컨테이너인지 확인합니다.
-2. 삭제된 컨테이너 기록을 제거합니다.
-3. serving 컨테이너가 정지되어 있으면 다시 시작합니다.
-4. 완료한 `job_id`의 결과를 유지합니다.
+2. serving 컨테이너가 정지되어 있으면 다시 시작합니다.
+3. serving 컨테이너가 삭제되었으면 저장된 이미지와 기존 host port로 다시 생성합니다.
+4. 삭제된 candidate와 standby 컨테이너 기록을 제거합니다.
+5. 완료한 `job_id`의 결과를 유지합니다.
+
+복구한 serving 컨테이너는 기존 host port를 사용합니다. 따라서 Backend Route와 SSH Forward를 변경하지 않습니다. 이미지 digest가 저장된 digest와 다르거나 기존 port를 사용할 수 없으면 복구를 완료하지 않습니다. 상태는 유지하고 다음 heartbeat에서 다시 시도합니다. Backend Health Monitor는 이 시간 동안 Cloud Run Failover를 판단할 수 있습니다.
 
 ## 검증
 
