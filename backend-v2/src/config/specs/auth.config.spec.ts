@@ -13,10 +13,20 @@ describe('auth environment validation', () => {
     expect(authEnvironmentSchema.parse(configured)).toMatchObject({
       ...configured,
       GITHUB_APP_CALLBACK_URL: 'http://localhost:8080/auth/github/callback',
+      AUTH_FRONTEND_URL: '',
       ALLOWED_GITHUB_IDS: ['1000000', '2000000'],
       JWT_ACCESS_TTL_SECONDS: 900,
       JWT_REFRESH_TTL_SECONDS: 604800,
     });
+  });
+
+  it('accepts a frontend callback URL', () => {
+    expect(
+      authEnvironmentSchema.parse({
+        ...configured,
+        AUTH_FRONTEND_URL: 'http://127.0.0.1:5173',
+      }).AUTH_FRONTEND_URL,
+    ).toBe('http://127.0.0.1:5173');
   });
 
   it.each(['GITHUB_APP_CLIENT_ID', 'GITHUB_APP_CLIENT_SECRET'] as const)(

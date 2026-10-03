@@ -19,6 +19,7 @@ export const authEnvironmentSchema = z
     GITHUB_APP_CALLBACK_URL: z
       .url()
       .default('http://localhost:8080/auth/github/callback'),
+    AUTH_FRONTEND_URL: z.union([z.literal(''), z.url()]).default(''),
     ALLOWED_GITHUB_IDS: z
       .string()
       .transform((value) =>
@@ -59,6 +60,7 @@ export const authConfig = registerAs('auth', () => {
       clientId: env.GITHUB_APP_CLIENT_ID,
       clientSecret: env.GITHUB_APP_CLIENT_SECRET,
       callbackUrl: env.GITHUB_APP_CALLBACK_URL,
+      frontendUrl: env.AUTH_FRONTEND_URL,
       slug: env.GITHUB_APP_SLUG,
       webhookSecret: env.GITHUB_WEBHOOK_SECRET,
       tokenEncryptionKey:

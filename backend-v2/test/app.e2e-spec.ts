@@ -26,6 +26,7 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import type { AuthConfig } from '../src/config/configs/auth.config.js';
 import { AuthService } from '../src/auth/auth.service.js';
+import { AuthRedirectService } from '../src/auth/auth-redirect.service.js';
 import { UserService } from '../src/user/user.service.js';
 import { DatabaseService } from '../src/database/database.service.js';
 import { AgentRepository } from '../src/agent/agent.repository.js';
@@ -219,6 +220,36 @@ describe('deployment API (e2e)', () => {
       .expect((response) => {
         expect(response.body.login).toBe('renamed-person');
       });
+  });
+
+  it('starts browser OAuth directly and redirects a successful callback to the frontend', async () => {
+    const start = await request(app.getHttpServer())
+      .get('/auth/github/redirect')
+      .expect(302);
+    expect(start.headers.location).toMatch(
+      /^https:\/\/github\.com\/login\/oauth\/authorize\?/,
+    );
+    expect(start.headers['set-cookie'][0]).toContain('HttpOnly');
+
+    const redirects = vi
+      .spyOn(app.get(AuthRedirectService), 'url')
+      .mockReturnValue(
+        'http://127.0.0.1:5173/#/auth/callback?access_token=access.jwt&refresh_token=refresh.jwt',
+      );
+    try {
+      const callback = await githubLogin(
+        'frontend-callback',
+        'Frontend Callback',
+        2,
+        303,
+      );
+      expect(callback.headers.location).toBe(
+        'http://127.0.0.1:5173/#/auth/callback?access_token=access.jwt&refresh_token=refresh.jwt',
+      );
+      expect(callback.headers['cache-control']).toBe('no-store');
+    } finally {
+      redirects.mockRestore();
+    }
   });
 
   it('rejects a GitHub user outside the configured allowlist', async () => {

@@ -175,6 +175,7 @@ GitHub App 등록 방법:
 GITHUB_APP_CLIENT_ID=your-github-app-client-id
 GITHUB_APP_CLIENT_SECRET=your-github-app-client-secret
 GITHUB_APP_CALLBACK_URL=http://localhost:8080/auth/github/callback
+AUTH_FRONTEND_URL=http://127.0.0.1:5173
 ALLOWED_GITHUB_IDS=12345678,87654321
 ```
 
@@ -187,7 +188,7 @@ ALLOWED_GITHUB_IDS=12345678,87654321
 5. 관리 API에 `Authorization: Bearer <access_token>`을 보냅니다. `GET /users/me`의 `id`가 배포·승인에 쓰는 identifier입니다.
 6. `POST /auth/refresh`에 `{ "refresh_token": "..." }`를 보내 새 토큰을 받습니다.
 
-GitHub App의 Callback URL과 `GITHUB_APP_CALLBACK_URL`을 같게 설정하세요. 기본값은 `http://localhost:8080/auth/github/callback`입니다. 시작 요청도 같은 호스트를 사용해야 Cookie가 콜백으로 전달됩니다. HTTPS Callback URL에서는 Cookie에 `Secure`를 설정합니다. 프론트엔드가 다른 Origin에서 호출하면 Cookie를 포함하도록 `credentials: 'include'`가 필요하며, 해당 Origin의 CORS 설정은 별도로 필요합니다.
+GitHub App의 Callback URL과 `GITHUB_APP_CALLBACK_URL`을 같게 설정하세요. 기본값은 `http://localhost:8080/auth/github/callback`입니다. 브라우저 로그인은 `/auth/github/redirect`에서 시작합니다. Backend는 state Cookie를 설정하고 GitHub로 이동합니다. 인증 성공 후 `AUTH_FRONTEND_URL`이 있으면 Access Token과 Refresh Token을 URL Fragment로 전달하고 프론트로 이동합니다. Fragment는 HTTP 요청에 포함되지 않으며 프론트가 저장 후 즉시 제거합니다. `AUTH_FRONTEND_URL`이 비어 있으면 기존 JSON Callback 응답을 유지합니다.
 
 Access JWT 기본 만료는 15분, Refresh JWT는 7일입니다. 각각 다른 서명 키와 audience로 검증합니다. Refresh JWT를 Access JWT로 사용할 수 없습니다. Refresh JWT는 서버에 저장하지 않습니다. 따라서 갱신 후에도 이전 Refresh JWT는 만료 전까지 유효합니다. 개별 토큰 즉시 폐기와 서버 Logout API는 제공하지 않습니다. 클라이언트는 Logout 시 보관한 토큰을 삭제합니다.
 
