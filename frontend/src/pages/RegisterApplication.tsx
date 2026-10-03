@@ -6,9 +6,8 @@ import { GITHUB_PAGE_SIZE } from '../api/real';
 import { ErrorNotice, describeError } from '../components/ErrorNotice';
 import { Collapsible, Crumbs, Empty, Notice, PageTitle, Pill } from '../components/ui';
 import { EMPTY_REGISTRATION, friendlyBackendError, repoShortName, slugify, toGithubApplicationInput, validateRegistration, type RegistrationDraft, type RegistrationErrors } from '../lib/forms';
-import { usePageTitle } from '../hooks/usePageTitle';
 import { useLang } from '../lib/i18n';
-import { APPLICATIONS_PATH, applicationPath, hrefFor, navigate } from '../lib/router';
+import { APPLICATIONS_PATH, applicationPath, navigate, realHref } from '../lib/router';
 
 type Loadable<T> = { state: 'idle' } | { state: 'loading' } | { state: 'ok'; value: T } | { state: 'error'; error: unknown };
 
@@ -40,7 +39,6 @@ function useLoadable<T>(load: (() => Promise<T>) | null, deps: unknown[]): Loada
  */
 export function RegisterApplication({ source }: { source: DataSource }) {
   const { t, lang } = useLang();
-  usePageTitle(t('registerApp'));
   const [draft, setDraft] = useState<RegistrationDraft>(EMPTY_REGISTRATION);
   const [touched, setTouched] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -101,7 +99,7 @@ export function RegisterApplication({ source }: { source: DataSource }) {
 
   return (
     <div className="page register">
-      <PageTitle crumbs={<Crumbs items={[{ label: t('crumbApps'), href: hrefFor(APPLICATIONS_PATH) }, { label: t('registerApp') }]} />} title={t('registerTitle')} sub={t('registerSub')} />
+      <PageTitle crumbs={<Crumbs items={[{ label: t('crumbApps'), href: realHref(APPLICATIONS_PATH) }, { label: t('registerApp') }]} />} title={t('registerTitle')} sub={t('registerSub')} />
 
       <Notice tone={source.kind === 'real' ? 'warning' : 'muted'}>{source.kind === 'real' ? t('registerRealNote') : t('registerMockNote')}</Notice>
 
@@ -248,7 +246,7 @@ export function RegisterApplication({ source }: { source: DataSource }) {
           <button type="submit" className="btn btn-primary" disabled={submitting || !connected}>
             {submitting ? t('submitting') : t('submitRegister')}
           </button>
-          <a className="btn" href={hrefFor(APPLICATIONS_PATH)}>
+          <a className="btn" href={realHref(APPLICATIONS_PATH)}>
             {t('cancel')}
           </a>
           {touched && Object.keys(errors).length > 0 && <span className="form-error">{t(Object.values(errors)[0]!)}</span>}

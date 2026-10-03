@@ -7,13 +7,12 @@ import { ErrorNotice } from '../components/ErrorNotice';
 import { Modal } from '../components/Modal';
 import { PageError } from '../components/PageError';
 import { Collapsible, Crumbs, DemoBadge, Empty, Hash, Kv, PageSkeleton, PageTitle, Pill, type Tone } from '../components/ui';
-import { usePageTitle } from '../hooks/usePageTitle';
 import { usePolling } from '../hooks/usePolling';
 import { findArtifact, latestStages, parseJsonArtifact } from '../lib/artifacts';
 import { fmtTime, relTime, targetLabel } from '../lib/format';
 import { pickLang, useLang, type DictKey } from '../lib/i18n';
 import { Markdown, prepareExplain } from '../lib/markdown';
-import { APPLICATIONS_PATH, applicationPath, hrefFor } from '../lib/router';
+import { APPLICATIONS_PATH, applicationPath, hrefFor, realHref } from '../lib/router';
 import { summarizeDeployment, type DeploymentSummary, type ProofLink } from '../lib/summary';
 
 const PROGRESSING: DeploymentStatus[] = ['queued', 'running', 'awaiting_approval'];
@@ -74,8 +73,6 @@ export function DeploymentDetail({ id, source }: { id: string; source: DataSourc
 
   const summary = useMemo(() => (view ? summarizeDeployment(view, lang) : null), [view, lang]);
   const appName = app?.application.name ?? view?.deployment.applicationId ?? '';
-  // 앱 이름이 아직 없으면 id 대신 버전만 쓴다 (탭 제목에 긴 id 가 잠깐 보이지 않게)
-  usePageTitle(view ? `${app ? `${app.application.name} ` : ''}v${view.deployment.version}` : null);
 
   if (poll.loading && !view) return <PageSkeleton cards={4} />;
   if (!view || !summary) return <PageError error={poll.error ?? new Error('no data')} />;
@@ -87,7 +84,7 @@ export function DeploymentDetail({ id, source }: { id: string; source: DataSourc
     <div className="page">
       {poll.error ? <PageError error={poll.error} compact /> : null}
       <PageTitle
-        crumbs={<Crumbs items={[{ label: t('crumbApps'), href: hrefFor(APPLICATIONS_PATH) }, { label: appName, href: hrefFor(applicationPath(d.applicationId)) }, { label: `v${d.version}` }]} />}
+        crumbs={<Crumbs items={[{ label: t('crumbApps'), href: realHref(APPLICATIONS_PATH) }, { label: appName, href: hrefFor(applicationPath(d.applicationId)) }, { label: `v${d.version}` }]} />}
         title={
           <>
             {appName} <span className="muted">v{d.version}</span>

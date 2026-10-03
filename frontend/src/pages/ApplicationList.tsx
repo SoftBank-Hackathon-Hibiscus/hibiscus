@@ -3,7 +3,6 @@ import type { DataSource } from '../api/client';
 import type { ApplicationView } from '../api/types';
 import { PageError } from '../components/PageError';
 import { PageTitle, Pill, SkeletonCard } from '../components/ui';
-import { usePageTitle } from '../hooks/usePageTitle';
 import { usePolling } from '../hooks/usePolling';
 import { relTime } from '../lib/format';
 import { useLang } from '../lib/i18n';
@@ -17,7 +16,6 @@ const POLL_MS = 15000;
  */
 export function ApplicationList({ source }: { source: DataSource }) {
   const { t, lang } = useLang();
-  usePageTitle(t('appsTitle'));
   const poll = usePolling<ApplicationView[]>(() => source.listApplications(), POLL_MS, [source]);
   const apps = poll.data;
 

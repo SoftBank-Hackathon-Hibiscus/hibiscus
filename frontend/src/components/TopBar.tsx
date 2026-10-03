@@ -1,11 +1,10 @@
-import { Flower2, Menu, X } from 'lucide-react';
+import { Flower2 } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { configToSearch } from '../api';
 import { readToken, writeToken } from '../api/token';
 import type { ConnectionState } from '../hooks/useConnection';
-import { useLang, type Lang } from '../lib/i18n';
-import { APPLICATIONS_PATH, CONNECT_PATH, HOME_PATH, hrefFor, navigate, type Route } from '../lib/router';
 import type { Tone } from '../lib/deployState';
+import { useLang, type Lang } from '../lib/i18n';
+import { CONNECT_PATH, DEMOS_PATH, HOME_PATH, navigate, realHref, type Route } from '../lib/router';
 
 interface TopBarProps {
   isReal: boolean;
@@ -18,106 +17,47 @@ interface TopBarProps {
 }
 
 /**
- * 상단 바. 왼쪽 로고, 가운데 이동, 오른쪽 상태 pill 하나 + 사용자 메뉴 + KO|JA.
- * 토큰 문자열은 어디에도 보여주지 않는다. 좁은 화면에서는 메뉴 버튼 하나로 접는다.
+ * 상단 바. 왼쪽 로고(= 홈), 오른쪽에 사용자 또는 로그인, KO|JA.
+ * 정상 연결은 서비스의 기본 상태라 아무것도 띄우지 않고, 문제가 있을 때만 상태 pill 을 보인다.
+ * 데모 모드에서는 DEMO pill 이 항상 보인다. 로고와 로그인은 query 를 떼고 real 로 돌아간다.
+ * 토큰 문자열은 어디에도 보여주지 않는다.
  */
 export function TopBar({ isReal, connection, route, onTokenChange, onReconnect }: TopBarProps) {
   const { t, lang, setLang } = useLang();
-  const [open, setOpen] = useState(false);
-  const connected = isReal && connection.level === 'ok';
-  const tokenPresent = isReal && (connection.level === 'ok' || (connection.level === 'login' && connection.tokenPresent)) && Boolean(readToken());
-
-  // 경로가 바뀌면 접힌 메뉴를 닫는다
-  useEffect(() => setOpen(false), [route]);
+  const tokenPresent = isReal && Boolean(readToken());
 
   const logout = () => {
     writeToken(null);
-    setOpen(false);
     onTokenChange();
     navigate(CONNECT_PATH);
   };
 
-  const navLinks = (
-    <>
-      <a className={`nav-link ${route.page === 'home' ? 'nav-link-on' : ''}`} href={hrefFor(HOME_PATH)} aria-current={route.page === 'home' ? 'page' : undefined}>
-        {t('navHome')}
-      </a>
-      {connected && (
-        <a
-          className={`nav-link ${route.page === 'applications' || route.page === 'application' || route.page === 'register' || route.page === 'deployment' ? 'nav-link-on' : ''}`}
-          href={hrefFor(APPLICATIONS_PATH)}
-          aria-current={route.page === 'applications' ? 'page' : undefined}
-        >
-          {t('appsTitle')}
-        </a>
-      )}
-    </>
-  );
-
-  const status = <StatusPill isReal={isReal} connection={connection} />;
-  const langSwitch = <LangSwitch lang={lang} setLang={setLang} />;
-
   return (
     <header className="topbar">
       <div className="topbar-inner">
-        <a className="brand" href={hrefFor(HOME_PATH)}>
+        <a className="brand" href={realHref(HOME_PATH)} aria-label="Hibiscus">
           <span className="brand-mark" aria-hidden>
             <Flower2 size={18} />
           </span>
           Hibiscus
         </a>
-        <nav className="topbar-nav" aria-label={t('navMain')}>
-          {navLinks}
-        </nav>
         <div className="topbar-right">
-          {status}
-          {isReal && tokenPresent ? (
-            <UserMenu connection={connection} onReconnect={onReconnect} onLogout={logout} />
-          ) : isReal ? (
-            <a className="nav-link" href={hrefFor(CONNECT_PATH)}>
-              {t('connectLink')}
-            </a>
-          ) : (
-            <a className="nav-link" href={`${configToSearch({ mode: 'real', scenario: 1 })}#${CONNECT_PATH}`}>
-              {t('connectLink')}
+          {!isReal && (
+            <a className={`status-pill status-warning status-link ${route.page === 'demos' ? 'status-on' : ''}`} href={realHref(DEMOS_PATH)} title={t('statusDemoTitle')}>
+              <span className="status-dot" aria-hidden />
+              DEMO
             </a>
           )}
-          {langSwitch}
+          {isReal && <ProblemPill connection={connection} />}
+          {isReal && tokenPresent && <UserMenu connection={connection} onReconnect={onReconnect} onLogout={logout} />}
+          {isReal && !tokenPresent && route.page !== 'connect' && (
+            <a className="btn btn-primary btn-small" href={realHref(CONNECT_PATH)}>
+              {t('loginAction')}
+            </a>
+          )}
+          <LangSwitch lang={lang} setLang={setLang} />
         </div>
-        <button type="button" className="topbar-burger" aria-expanded={open} aria-controls="topbar-panel" aria-label={open ? t('menuClose') : t('menuOpen')} onClick={() => setOpen((v) => !v)}>
-          {open ? <X size={20} /> : <Menu size={20} />}
-        </button>
       </div>
-      {open && (
-        <div id="topbar-panel" className="topbar-panel">
-          <div className="topbar-panel-row">{status}</div>
-          <nav className="topbar-panel-nav" aria-label={t('navMain')}>
-            {navLinks}
-            {isReal && !tokenPresent && (
-              <a className="nav-link" href={hrefFor(CONNECT_PATH)}>
-                {t('connectLink')}
-              </a>
-            )}
-            {!isReal && (
-              <a className="nav-link" href={`${configToSearch({ mode: 'real', scenario: 1 })}#${CONNECT_PATH}`}>
-                {t('connectLink')}
-              </a>
-            )}
-          </nav>
-          {isReal && tokenPresent && (
-            <div className="topbar-panel-nav">
-              {connection.level === 'ok' && <UserLine connection={connection} />}
-              <button type="button" className="nav-link nav-btn" onClick={onReconnect}>
-                {t('menuReconnect')}
-              </button>
-              <button type="button" className="nav-link nav-btn" onClick={logout}>
-                {t('menuLogout')}
-              </button>
-            </div>
-          )}
-          <div className="topbar-panel-row">{langSwitch}</div>
-        </div>
-      )}
     </header>
   );
 }
@@ -135,20 +75,12 @@ function LangSwitch({ lang, setLang }: { lang: Lang; setLang: (lang: Lang) => vo
   );
 }
 
-/** 상태 pill 하나. mock 은 항상 "데모", real 은 연결 확인 결과 그대로. 실패해도 mock 으로 돌아가지 않는다. */
-function StatusPill({ isReal, connection }: { isReal: boolean; connection: ConnectionState }) {
+/** 문제가 있을 때만 보이는 상태 pill. 확인 중·정상·토큰 없음은 조용히 지나간다. */
+function ProblemPill({ connection }: { connection: ConnectionState }) {
   const { t } = useLang();
-  if (!isReal) return <Status tone="warning" title={t('statusDemoTitle')}>{t('statusDemo')}</Status>;
-  switch (connection.level) {
-    case 'checking':
-      return <Status tone="muted">{t('connChecking')}</Status>;
-    case 'down':
-      return <Status tone="danger" title={connection.detail}>{t('statusDown')}</Status>;
-    case 'login':
-      return <Status tone="warning" title={connection.detail}>{t('statusLogin')}</Status>;
-    case 'ok':
-      return <Status tone="success">{t('statusConnected')}</Status>;
-  }
+  if (connection.level === 'down') return <Status tone="danger" title={connection.detail}>{t('statusDown')}</Status>;
+  if (connection.level === 'login' && connection.tokenPresent) return <Status tone="warning" title={connection.detail}>{t('statusExpired')}</Status>;
+  return null;
 }
 
 function Status({ tone, title, children }: { tone: Tone; title?: string; children: ReactNode }) {
@@ -157,19 +89,6 @@ function Status({ tone, title, children }: { tone: Tone; title?: string; childre
       <span className="status-dot" aria-hidden />
       {children}
     </span>
-  );
-}
-
-function UserLine({ connection }: { connection: Extract<ConnectionState, { level: 'ok' }> }) {
-  const user = connection.user;
-  return (
-    <div className="user-line">
-      <Avatar login={user.login} avatarUrl={user.avatarUrl} size={28} />
-      <span className="user-line-text">
-        <strong>@{user.login}</strong>
-        {user.name && <span className="small muted">{user.name}</span>}
-      </span>
-    </div>
   );
 }
 
@@ -211,19 +130,19 @@ function UserMenu({ connection, onReconnect, onLogout }: { connection: Connectio
       </button>
       {open && (
         <div className="menu-pop" role="menu">
-          {user ? (
-            <div className="menu-head">
-              <Avatar login={user.login} avatarUrl={user.avatarUrl} size={36} />
-              <span className="user-line-text">
-                <strong>@{user.login}</strong>
-                {user.name && <span className="small muted">{user.name}</span>}
-              </span>
-            </div>
-          ) : (
-            <div className="menu-head">
+          <div className="menu-head">
+            {user ? (
+              <>
+                <Avatar login={user.login} avatarUrl={user.avatarUrl} size={36} />
+                <span className="user-line-text">
+                  <strong>@{user.login}</strong>
+                  {user.name && <span className="small muted">{user.name}</span>}
+                </span>
+              </>
+            ) : (
               <span className="small muted">{t('menuNotVerified')}</span>
-            </div>
-          )}
+            )}
+          </div>
           <button
             type="button"
             className="menu-item"

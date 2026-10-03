@@ -4,11 +4,10 @@ import { ApiError, type DataSource } from '../api/client';
 import { parsePastedToken, writeToken, writeTokens } from '../api/token';
 import { Collapsible, PageTitle } from '../components/ui';
 import type { ConnectionState } from '../hooks/useConnection';
-import { usePageTitle } from '../hooks/usePageTitle';
 import { backendBaseUrl, isLocalBackend, oauthStartUrl } from '../lib/backendUrl';
 import type { Tone } from '../lib/deployState';
 import { useLang } from '../lib/i18n';
-import { APPLICATIONS_PATH, REGISTER_PATH, applicationPath, deploymentPath, hrefFor, navigate } from '../lib/router';
+import { APPLICATIONS_PATH, REGISTER_PATH, applicationPath, deploymentPath, navigate, realHref } from '../lib/router';
 
 type StepState = 'idle' | 'checking' | 'ok' | 'warn' | 'fail';
 
@@ -20,7 +19,6 @@ type StepState = 'idle' | 'checking' | 'ok' | 'warn' | 'fail';
  */
 export function Connect({ source, connection, onTokenChange, onRecheck }: { source: DataSource; connection: ConnectionState; onTokenChange: () => void; onRecheck: () => void }) {
   const { t } = useLang();
-  usePageTitle(t('connectTitle'));
   const base = backendBaseUrl();
   const local = isLocalBackend(base);
   const serverOk = connection.level === 'login' || connection.level === 'ok';
@@ -66,10 +64,10 @@ export function Connect({ source, connection, onTokenChange, onRecheck }: { sour
         <StepCard n={3} state={startState} title={t('stepStart')} status={signedIn ? t('ready') : t('authFirst')}>
           {signedIn && (
             <div className="row">
-              <a className="btn btn-primary" href={hrefFor(APPLICATIONS_PATH)}>
+              <a className="btn btn-primary" href={realHref(APPLICATIONS_PATH)}>
                 {t('homeCtaApps')}
               </a>
-              <a className="btn" href={hrefFor(REGISTER_PATH)}>
+              <a className="btn" href={realHref(REGISTER_PATH)}>
                 {t('registerApp')}
               </a>
             </div>

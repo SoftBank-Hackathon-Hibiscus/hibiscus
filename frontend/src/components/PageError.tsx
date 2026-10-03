@@ -1,6 +1,6 @@
 import { ApiError } from '../api/client';
 import { useLang } from '../lib/i18n';
-import { APPLICATIONS_PATH, CONNECT_PATH, HOME_PATH, hrefFor } from '../lib/router';
+import { APPLICATIONS_PATH, CONNECT_PATH, HOME_PATH, realHref } from '../lib/router';
 import { Notice } from './ui';
 
 /**
@@ -18,17 +18,17 @@ export function PageError({ error, compact = false }: { error: unknown; compact?
   if (status === 404) {
     title = t('errNotFoundTitle');
     body = t('errNotFoundBody');
-    action = { href: hrefFor(APPLICATIONS_PATH), label: t('appsTitle') };
+    action = { href: realHref(APPLICATIONS_PATH), label: t('appsTitle') };
   } else if (status === 401 || status === 403) {
     title = status === 403 ? t('authForbidden') : t('errLoginTitle');
     body = status === 403 ? '' : t('errLoginBody');
-    action = { href: hrefFor(CONNECT_PATH), label: t('connectLink') };
+    action = { href: realHref(CONNECT_PATH), label: t('loginAction') };
   } else if (status === 0) {
     title = t('errOfflineTitle');
     body = t('errOfflineBody');
-    action = { href: hrefFor(CONNECT_PATH), label: t('connectLink') };
+    action = { href: realHref(CONNECT_PATH), label: t('checkConnection') };
   } else if (status === null) {
-    action = { href: hrefFor(HOME_PATH), label: t('navHome') };
+    action = { href: realHref(HOME_PATH), label: t('homeAction') };
   }
 
   if (compact) {

@@ -6,8 +6,9 @@ export type Route =
   | { page: 'applications' }
   | { page: 'register' }
   | { page: 'connect' }
-  /** 서비스 첫 화면. section 은 홈 안의 특정 부분으로 스크롤할 때 (예: 데모 시나리오) */
-  | { page: 'home'; section?: 'demos' };
+  /** 데모 시나리오 선택 화면 */
+  | { page: 'demos' }
+  | { page: 'home' };
 
 export function parseHash(hash: string = window.location.hash): Route {
   const path = hash.replace(/^#/, '');
@@ -18,7 +19,7 @@ export function parseHash(hash: string = window.location.hash): Route {
   if (match?.[1]) return { page: 'application', id: decodeURIComponent(match[1]) };
   if (/^\/applications\/?$/.test(path)) return { page: 'applications' };
   if (/^\/connect\/?$/.test(path)) return { page: 'connect' };
-  if (/^\/demos\/?$/.test(path)) return { page: 'home', section: 'demos' };
+  if (/^\/demos\/?$/.test(path)) return { page: 'demos' };
   return { page: 'home' };
 }
 
@@ -38,9 +39,25 @@ export function useHashRoute(): Route {
   return route;
 }
 
-/** 현재 query string(mode, scenario)을 유지한 채 해시만 바꾼 링크 */
+/**
+ * 현재 query string(mode, scenario)을 유지한 채 해시만 바꾼 링크.
+ * 데모 안에서 같은 시나리오의 다른 화면(앱 ↔ 배포)으로 갈 때 쓴다.
+ */
 export function hrefFor(path: string, search: string = window.location.search): string {
   return `${search}#${path}`;
+}
+
+/**
+ * 일반 서비스 영역(홈·앱 목록·로그인·데모 목록)으로 가는 링크. query 를 모두 떼어 real 모드로 돌아간다.
+ * mock query 가 서비스 navigation 에 따라붙지 않게 하는 유일한 통로다.
+ */
+export function realHref(path: string): string {
+  return `${window.location.pathname}#${path}`;
+}
+
+/** 데모 시나리오 N 의 화면을 여는 링크. mode/scenario 를 명시한다. */
+export function mockHref(scenario: number, path: string): string {
+  return `${window.location.pathname}?mode=mock&scenario=${scenario}#${path}`;
 }
 
 export function navigate(path: string): void {

@@ -7,6 +7,7 @@ import { useHashRoute } from './lib/router';
 import { ApplicationDetail } from './pages/ApplicationDetail';
 import { ApplicationList } from './pages/ApplicationList';
 import { Connect } from './pages/Connect';
+import { Demos } from './pages/Demos';
 import { DeploymentDetail } from './pages/DeploymentDetail';
 import { Home } from './pages/Home';
 import { RegisterApplication } from './pages/RegisterApplication';
@@ -21,6 +22,7 @@ export function App() {
 
 function Shell() {
   const { lang } = useLang();
+  // mode 가 없으면 real. 데모는 `?mode=mock&scenario=N` 일 때만, 그 query 를 가진 화면 안에서만 산다.
   const config = useMemo(() => readConfig(), []);
   const [tokenVersion, setTokenVersion] = useState(0);
   const source = useMemo(() => createDataSource(config), [config]);
@@ -42,7 +44,8 @@ function Shell() {
         {route.page === 'application' && <ApplicationDetail key={`${route.id}-${tokenVersion}`} id={route.id} source={source} />}
         {route.page === 'applications' && <ApplicationList key={`apps-${tokenVersion}`} source={source} />}
         {route.page === 'register' && <RegisterApplication key={`register-${tokenVersion}`} source={source} />}
-        {route.page === 'home' && <Home isReal={isReal} connection={connection.state} route={route} />}
+        {route.page === 'home' && <Home key={`home-${tokenVersion}`} source={source} isReal={isReal} connection={connection.state} />}
+        {route.page === 'demos' && <Demos />}
         {route.page === 'connect' && <Connect source={source} connection={connection.state} onTokenChange={onTokenChange} onRecheck={connection.recheck} />}
       </main>
     </div>

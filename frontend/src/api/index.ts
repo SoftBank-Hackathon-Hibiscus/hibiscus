@@ -10,19 +10,24 @@ export interface AppConfig {
   scenario: ScenarioId;
 }
 
-/** `?mode=mock&scenario=1` 형태의 query string 을 읽는다. 기본은 mock 시나리오 1. */
+/**
+ * query string 을 읽는다. mode 가 없으면 real (일반 서비스 진입점).
+ * 데모는 `?mode=mock&scenario=N` 을 명시해야만 열린다. 기존 리허설 북마크는 그대로 동작한다.
+ */
 export function readConfig(search: string = window.location.search): AppConfig {
   const params = new URLSearchParams(search);
-  const mode: Mode = params.get('mode') === 'real' ? 'real' : 'mock';
+  const mode: Mode = params.get('mode') === 'mock' ? 'mock' : 'real';
   const raw = Number(params.get('scenario') ?? '1');
   const scenario: ScenarioId = raw === 2 || raw === 3 || raw === 4 || raw === 5 ? raw : 1;
   return { mode, scenario };
 }
 
+/** real 은 query 없이 (`''`), mock 은 `?mode=mock&scenario=N`. */
 export function configToSearch(config: AppConfig): string {
+  if (config.mode === 'real') return '';
   const params = new URLSearchParams();
-  params.set('mode', config.mode);
-  if (config.mode === 'mock') params.set('scenario', String(config.scenario));
+  params.set('mode', 'mock');
+  params.set('scenario', String(config.scenario));
   return `?${params.toString()}`;
 }
 

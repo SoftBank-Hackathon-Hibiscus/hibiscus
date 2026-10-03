@@ -7,12 +7,11 @@ import { ErrorNotice, describeError } from '../components/ErrorNotice';
 import { NewDeploymentModal } from '../components/NewDeploymentModal';
 import { PageError } from '../components/PageError';
 import { Crumbs, Empty, Hash, PageSkeleton, PageTitle, Pill, type Tone } from '../components/ui';
-import { usePageTitle } from '../hooks/usePageTitle';
 import { usePolling } from '../hooks/usePolling';
 import { detectRouteChange, markOf, type RouteChange, type RouteMark } from '../lib/failover';
 import { fmtTime, relTime, targetLabel } from '../lib/format';
 import { useLang, type DictKey } from '../lib/i18n';
-import { APPLICATIONS_PATH, deploymentPath, hrefFor } from '../lib/router';
+import { APPLICATIONS_PATH, deploymentPath, hrefFor, realHref } from '../lib/router';
 
 const POLL_MS = 5000;
 
@@ -116,7 +115,6 @@ export function ApplicationDetail({ id, source }: { id: string; source: DataSour
   }, [poll.data]);
 
   const snap = poll.data;
-  usePageTitle(snap ? snap.app.application.name : null);
   if (poll.loading && !snap) return <PageSkeleton cards={3} />;
   if (!snap) return <PageError error={poll.error ?? new Error('no data')} />;
 
@@ -135,7 +133,7 @@ export function ApplicationDetail({ id, source }: { id: string; source: DataSour
     <div className="page">
       {poll.error ? <PageError error={poll.error} compact /> : null}
       <PageTitle
-        crumbs={<Crumbs items={[{ label: t('crumbApps'), href: hrefFor(APPLICATIONS_PATH) }, { label: a.name }]} />}
+        crumbs={<Crumbs items={[{ label: t('crumbApps'), href: realHref(APPLICATIONS_PATH) }, { label: a.name }]} />}
         title={a.name}
         sub={
           <span className={`headline headline-${headlineTone}`}>
