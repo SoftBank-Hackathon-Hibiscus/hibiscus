@@ -8,6 +8,7 @@ import { backendBaseUrl, isLocalBackend, oauthStartUrl } from '../lib/backendUrl
 import type { Tone } from '../lib/deployState';
 import { useLang } from '../lib/i18n';
 import { APPLICATIONS_PATH, REGISTER_PATH, applicationPath, deploymentPath, navigate, realHref } from '../lib/router';
+import { finishSignIn } from '../lib/session';
 
 type StepState = 'idle' | 'checking' | 'ok' | 'warn' | 'fail';
 
@@ -124,7 +125,7 @@ function SignIn({ source, connection, base, onTokenChange }: { source: DataSourc
       await source.me();
       setDraft('');
       onTokenChange();
-      navigate(APPLICATIONS_PATH);
+      finishSignIn();
     } catch (e) {
       // 확인에 실패한 토큰은 두지 않는다. 상단 상태도 "로그인 필요"로 돌아간다.
       writeToken(null);

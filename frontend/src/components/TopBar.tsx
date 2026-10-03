@@ -1,10 +1,11 @@
 import { Flower2 } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { readToken, writeToken } from '../api/token';
+import { readToken } from '../api/token';
 import type { ConnectionState } from '../hooks/useConnection';
 import type { Tone } from '../lib/deployState';
 import { useLang, type Lang } from '../lib/i18n';
-import { CONNECT_PATH, DEMOS_PATH, HOME_PATH, navigate, realHref, type Route } from '../lib/router';
+import { CONNECT_PATH, DEMOS_PATH, HOME_PATH, realHref, type Route } from '../lib/router';
+import { signOut } from '../lib/session';
 
 interface TopBarProps {
   isReal: boolean;
@@ -26,10 +27,10 @@ export function TopBar({ isReal, connection, route, onTokenChange, onReconnect }
   const { t, lang, setLang } = useLang();
   const tokenPresent = isReal && Boolean(readToken());
 
+  // 어디서 눌러도 홈으로. 토큰이 바뀌면 Shell 이 화면을 다시 그려 이전 화면 데이터가 남지 않는다.
   const logout = () => {
-    writeToken(null);
+    signOut();
     onTokenChange();
-    navigate(CONNECT_PATH);
   };
 
   return (
