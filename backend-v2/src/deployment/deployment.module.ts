@@ -28,6 +28,6 @@ import { DeployStage } from './stages/deploy.stage.js';
     SignStage,
     DeployStage,
   ],
-  exports: [DeploymentRepository, DeploymentService],
+  exports: [DeploymentRepository, DeploymentService, CommandRunner],
 })
 export class DeploymentModule {}

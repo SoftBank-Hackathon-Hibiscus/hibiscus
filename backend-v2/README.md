@@ -226,16 +226,26 @@ GitHub App 사용자 토큰과 GitHub refresh token은 AES-256-GCM으로 암호�
 }
 ```
 
-실제 저장소와 브랜치 접근을 확인한 뒤 앱과 연결 정보를 함께 저장합니다. 브랜치 변경 본문은 `{ "branch": "develop", "auto_deploy": true }`입니다. `source_path`를 생략하면 저장소 URL을 저장합니다. **원격 저장소 checkout/build는 이 기능에 포함되지 않습니다.** 현재 로컬 실행이 필요한 경우 기존 파이프라인에 맞는 로컬 `source_path`를 지정해야 합니다. 프론트엔드 선택 화면도 별도입니다.
+실제 저장소와 브랜치 접근을 확인한 뒤 앱과 연결 정보를 함께 저장합니다. 브랜치 변경 본문은 `{ "branch": "develop", "auto_deploy": true }`입니다. `source_path`를 생략하면 저장소 URL을 저장합니다.
+
+Registry Parity 실행에서 Deployment에 실제 Registry Digest가 아직 없으면 Backend가 다음 작업을 수행합니다.
+
+1. 저장된 GitHub 연결과 암호화된 사용자 token으로 요청된 40자리 Commit SHA만 임시 폴더에 checkout합니다.
+2. 기존 Parity build가 해당 checkout을 Docker 이미지로 build하고 `image_repo`에 push합니다.
+3. Registry가 반환한 Digest와 Source Revision의 연결을 검사합니다.
+4. Parity 검사가 성공하면 `imageDigest`, `digestSource=registry`, `sourceRevisionVerified=true`를 저장합니다.
+5. Pipeline이 끝나면 checkout과 임시 인증 파일을 제거합니다.
+
+GitHub token은 Git URL, Git 명령 인자, 산출물에 넣지 않습니다. mode `0600`의 임시 파일과 `GIT_ASKPASS`로 fetch에만 전달하고 즉시 제거합니다. Checkout 제한 시간은 `GITHUB_CHECKOUT_TIMEOUT_MS`이며 기본값은 120초입니다. Backend 실행 환경에는 `git`, Docker Buildx, Registry push 권한이 필요합니다. GitHub App에는 Repository Contents 읽기 권한이 필요합니다. 프론트엔드 선택 화면은 별도입니다.
 
 Webhook은 원본 요청 바이트의 HMAC-SHA256을 `X-Hub-Signature-256`과 상수 시간 비교합니다. [GitHub 서명 검증 문서](https://docs.github.com/en/webhooks/using-webhooks/validating-webhook-deliveries).
 
-- 선택한 브랜치의 push만 기존 배포 큐에 넣습니다. trigger는 `webhook`, source revision은 push commit SHA이고 검증 상태는 `true`입니다.
+- 선택한 브랜치의 push만 기존 배포 큐에 넣습니다. trigger는 `webhook`, source revision은 push commit SHA이고 초기 검증 상태는 `false`입니다. Registry build와 Parity 검사가 성공한 뒤에만 `true`가 됩니다.
 - Delivery ID와 payload hash를 DB에 저장합니다. 같은 이벤트 재전송은 배포를 다시 생성하지 않습니다. 같은 ID에 다른 내용이면 409입니다.
 - 수신 기록과 배포 생성은 한 DB 트랜잭션입니다. 실패하면 모두 취소합니다. 이후 재전송할 수 있습니다.
 - 태그 push, 삭제 push, 선택하지 않은 브랜치는 배포하지 않습니다.
 - App 설치 삭제·중단, 저장소 접근 제거, 사용자 인증 취소 이벤트는 해당 연결을 비활성화합니다. 인증 취소 시 GitHub 자격 증명도 삭제합니다.
-- Webhook에는 빌드된 이미지 Digest가 없으므로 현재는 placeholder Digest를 저장합니다. 빌드 단계가 Registry Digest를 저장하기 전에는 실제 서명을 진행하지 않습니다.
+- Webhook에는 빌드된 이미지 Digest가 없으므로 처음에는 placeholder Digest를 저장합니다. Registry Parity 단계가 checkout, build, push를 완료한 뒤 실제 Digest로 교체합니다. 실제 Digest가 저장되기 전에는 서명과 배포를 진행하지 않습니다.
 
 `GITHUB_WEBHOOK_SECRET`은 최소 32자입니다. 없으면 Webhook은 503을 반환합니다. `GITHUB_APP_SLUG`는 설치 URL 생성용입니다. `GITHUB_TOKEN_ENCRYPTION_KEY`는 `openssl rand -hex 32`로 생성하고 운영에서 고정 보관하세요. 생략하면 JWT refresh 서명 키에서 별도 키를 파생합니다. 이때 JWT refresh 서명 키를 변경하면 GitHub 재로그인이 필요합니다. App private key와 installation token은 현재 방식에서 사용하지 않습니다.
 

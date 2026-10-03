@@ -1,4 +1,5 @@
 import { ConfigService } from '@nestjs/config';
+import type { ModuleRef } from '@nestjs/core';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -10,6 +11,7 @@ import {
 } from '../types/deployment.type.js';
 import type { BackendConfig } from '../../config/configs/backend.config.js';
 import type { StageExecution } from '../../database/schema.js';
+import { GithubSourceCheckoutService } from '../../github/github-source-checkout.service.js';
 
 describe('registry parity connection', () => {
   const directories: string[] = [];
@@ -77,18 +79,38 @@ describe('registry parity connection', () => {
           'backend.repoRoot': root,
           'backend.parityPythonCommand': 'python3',
           'backend.parityTimeoutMs': 1000,
+          'backend.parityPlatforms': 'linux/amd64,linux/arm64',
+          'backend.parityBuilder': '',
         })[key],
     } as ConfigService<BackendConfig, true>;
-    return { root, context, config, build, manifestDir, digest };
+    const checkout = { checkout: vi.fn() };
+    const moduleRef = {
+      get: (type: unknown) => {
+        expect(type).toBe(GithubSourceCheckoutService);
+        return checkout;
+      },
+    } as unknown as ModuleRef;
+    return {
+      root,
+      context,
+      config,
+      build,
+      manifestDir,
+      digest,
+      checkout,
+      moduleRef,
+    };
   }
   it('rejects a prebuilt manifest from another run before executing a command', async () => {
-    const { context, config, build, manifestDir } = setup();
+    const { context, config, build, manifestDir, moduleRef } = setup();
     writeFileSync(
       join(manifestDir, 'build_manifest.json'),
       JSON.stringify({ ...build, run_id: 'another-run' }),
     );
     const run = vi.fn();
-    const result = await new ParityTestStage(config, { run }).run(context);
+    const result = await new ParityTestStage(config, { run }, moduleRef).run(
+      context,
+    );
     expect(result.status).toBe('failed');
     expect(result.deploymentPatch).toBeUndefined();
     expect(run).not.toHaveBeenCalled();
@@ -96,7 +118,7 @@ describe('registry parity connection', () => {
   it.each([true, false])(
     'verifies source identity only after completed parity (passed=%s)',
     async (passed) => {
-      const { context, config, digest } = setup();
+      const { context, config, digest, moduleRef } = setup();
       const run = vi.fn().mockImplementation(() => {
         writeFileSync(
           join(context.paths.test, 'stage_result.json'),
@@ -124,7 +146,9 @@ describe('registry parity connection', () => {
           timedOut: false,
         });
       });
-      const result = await new ParityTestStage(config, { run }).run(context);
+      const result = await new ParityTestStage(config, { run }, moduleRef).run(
+        context,
+      );
       expect(result.status).toBe('succeeded');
       expect(result.summary).toMatchObject({
         stub: false,
@@ -138,7 +162,7 @@ describe('registry parity connection', () => {
     },
   );
   it('does not verify the source after a timeout', async () => {
-    const { context, config } = setup();
+    const { context, config, moduleRef } = setup();
     const run = vi.fn().mockResolvedValue({
       code: null,
       signal: null,
@@ -146,9 +170,83 @@ describe('registry parity connection', () => {
       stderr: '',
       timedOut: true,
     });
-    const result = await new ParityTestStage(config, { run }).run(context);
+    const result = await new ParityTestStage(config, { run }, moduleRef).run(
+      context,
+    );
     expect(result.status).toBe('failed');
     expect(result.deploymentPatch).toBeUndefined();
+  });
+
+  it('checks out the exact GitHub revision before build and parity', async () => {
+    const { root, context, config, build, digest, checkout, moduleRef } =
+      setup('placeholder');
+    context.application.id = 'application-1';
+    context.application.sourcePath = 'https://github.com/octo/private.git';
+    const checkedOut = join(root, 'github-checkout');
+    mkdirSync(checkedOut);
+    checkout.checkout.mockResolvedValue(checkedOut);
+    const run = vi
+      .fn()
+      .mockImplementation((spec: { command: string; args: string[] }) => {
+        if (spec.command === 'git') {
+          return Promise.resolve({
+            code: 0,
+            signal: null,
+            stdout: `${context.deployment.sourceRevision}\n`,
+            stderr: '',
+            timedOut: false,
+          });
+        }
+        if (spec.args.includes('build')) {
+          const buildDir = join(context.paths.root, 'build');
+          mkdirSync(buildDir, { recursive: true });
+          writeFileSync(
+            join(buildDir, 'build_manifest.json'),
+            JSON.stringify(build),
+          );
+        } else {
+          writeFileSync(
+            join(context.paths.test, 'stage_result.json'),
+            JSON.stringify({
+              status: 'succeeded',
+              exitCode: 0,
+              summary: { stub: false, test_passed: true },
+            }),
+          );
+          writeFileSync(
+            join(context.paths.test, 'test_result.json'),
+            JSON.stringify({
+              run_id: context.deployment.id,
+              app: context.application.name,
+              source_revision: context.deployment.sourceRevision,
+              digest,
+              passed: true,
+            }),
+          );
+        }
+        return Promise.resolve({
+          code: 0,
+          signal: null,
+          stdout: '',
+          stderr: '',
+          timedOut: false,
+        });
+      });
+
+    const result = await new ParityTestStage(config, { run }, moduleRef).run(
+      context,
+    );
+
+    expect(result.status).toBe('succeeded');
+    expect(checkout.checkout).toHaveBeenCalledWith(
+      context.application.id,
+      context.deployment.sourceRevision,
+      join(context.paths.root, 'source'),
+    );
+    const buildCall = run.mock.calls.find((call) =>
+      call[0].args.includes('build'),
+    )?.[0];
+    expect(buildCall?.args).toContain(checkedOut);
   });
   it('rejects artifacts checked against the old placeholder and accepts the verified image identity', () => {
     const { context, digest } = setup();

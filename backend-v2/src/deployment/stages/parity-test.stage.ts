@@ -1,9 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { ModuleRef } from '@nestjs/core';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { z } from 'zod';
 import type { BackendConfig } from '../../config/configs/backend.config.js';
+import { GithubSourceCheckoutService } from '../../github/github-source-checkout.service.js';
 import {
   CommandRunner,
   type CommandSpec,
@@ -60,6 +62,7 @@ export class ParityTestStage {
   constructor(
     private readonly config: ConfigService<BackendConfig, true>,
     private readonly runner: CommandRunner,
+    private readonly moduleRef: ModuleRef,
   ) {}
 
   async run({
@@ -123,9 +126,15 @@ export class ParityTestStage {
           'build_manifest.json',
         );
       } else {
+        const sourcePath = await this.sourcePath(
+          application.id,
+          application.sourcePath,
+          deployment.sourceRevision,
+          join(paths.root, 'source'),
+        );
         const revision = await run({
           command: 'git',
-          cwd: application.sourcePath,
+          cwd: sourcePath,
           args: ['rev-parse', '--verify', 'HEAD^{commit}'],
           timeoutMs: 30_000,
         });
@@ -140,7 +149,7 @@ export class ParityTestStage {
           'premortem',
           'build',
           '--app',
-          application.sourcePath,
+          sourcePath,
           '--image-repo',
           application.imageRepo,
           '--run-id',
@@ -244,5 +253,23 @@ export class ParityTestStage {
             : 'Unable to run registry parity',
       };
     }
+  }
+
+  private async sourcePath(
+    applicationId: string,
+    configuredPath: string,
+    sourceRevision: string,
+    destination: string,
+  ): Promise<string> {
+    if (
+      !/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\.git$/.test(
+        configuredPath,
+      )
+    ) {
+      return configuredPath;
+    }
+    return this.moduleRef
+      .get(GithubSourceCheckoutService, { strict: false })
+      .checkout(applicationId, sourceRevision, destination);
   }
 }

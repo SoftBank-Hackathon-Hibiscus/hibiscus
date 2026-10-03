@@ -38,6 +38,11 @@ export const environmentSchema = z
       .enum(['linux/amd64', 'linux/arm64', 'linux/amd64,linux/arm64'])
       .default('linux/amd64,linux/arm64'),
     PARITY_TIMEOUT_MS: z.coerce.number().int().min(1_000).default(1_200_000),
+    GITHUB_CHECKOUT_TIMEOUT_MS: z.coerce
+      .number()
+      .int()
+      .min(1_000)
+      .default(120_000),
     POLICY_TIMEOUT_MS: z.coerce.number().int().min(1_000).default(180_000),
     SIGNER_TIMEOUT_MS: z.coerce.number().int().min(1_000).default(180_000),
     AGENT_OFFLINE_AFTER_MS: z.coerce.number().int().min(1_000).default(30_000),
@@ -118,6 +123,7 @@ export const backendConfig = registerAs('backend', () => {
     parityBuilder: env.PARITY_BUILDER,
     parityPlatforms: env.PARITY_PLATFORMS,
     parityTimeoutMs: env.PARITY_TIMEOUT_MS,
+    githubCheckoutTimeoutMs: env.GITHUB_CHECKOUT_TIMEOUT_MS,
     policyTimeoutMs: env.POLICY_TIMEOUT_MS,
     signerTimeoutMs: env.SIGNER_TIMEOUT_MS,
     agentOfflineAfterMs: env.AGENT_OFFLINE_AFTER_MS,
