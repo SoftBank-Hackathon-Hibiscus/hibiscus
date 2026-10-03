@@ -41,4 +41,12 @@ export class ApplicationController {
   ) {
     return this.service.updateEnvironment(params.id, input);
   }
+
+  @Put(':id/test-environment')
+  updateTestEnvironment(
+    @Param() params: IdParamDto,
+    @Body() input: UpdateApplicationEnvironmentDto,
+  ) {
+    return this.service.updateTestEnvironment(params.id, input);
+  }
 }

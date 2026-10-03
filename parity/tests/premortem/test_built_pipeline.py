@@ -212,9 +212,14 @@ class BuiltPipelineTest(unittest.TestCase):
                    'source_revision': 'a' * 40, 'digest': 'sha256:' + 'b' * 64,
                    'build_manifest': str(self.manifest), 'record': str(self.record), 'noise': str(self.noise)}
         self.assertEqual(validate_request(request), request)
+        with_environment = dict(request, environment={'DATABASE_URL': 'postgres://test/database'})
+        self.assertEqual(validate_request(with_environment), with_environment)
         for changes in ({'source_revision': 'unknown'}, {'record': 'session.jsonl'}, {'after': [True]}, {'cmd': 'deploy'}):
             with self.subTest(changes=changes), self.assertRaises(PremortemError):
                 validate_request(dict(request, **changes))
+        for environment in ({'lowercase': 'x'}, {'PORT': '3000'}, {'A': 'x' * 4097}):
+            with self.subTest(environment=environment), self.assertRaises(PremortemError):
+                validate_request(dict(request, environment=environment))
 
         health = {key: value for key, value in request.items() if key not in ('record', 'noise')}
         health['format'] = 'premortem-backend-health-v1'

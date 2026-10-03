@@ -14,7 +14,7 @@ from .snapshot import verify_source_tree
 
 
 def test_build_health(*, manifest_path, run_id, revision, digest, port,
-                      health_path, health_timeout, out_dir):
+                      health_path, health_timeout, environment=None, out_dir):
     manifest_path = Path(manifest_path).resolve()
     output = Path(out_dir).resolve()
     if (not isinstance(health_path, str) or not health_path.startswith('/')
@@ -37,7 +37,7 @@ def test_build_health(*, manifest_path, run_id, revision, digest, port,
     shutil.copy2(manifest_path, parity_output / 'build_manifest.json')
     verify_source_tree(parity_output / 'source', build['source']['tree_sha256'])
 
-    driver = DockerDriver(runner, Settings())
+    driver = DockerDriver(runner, Settings(), environment=environment)
     local_image_id = build['image']['local_image_id']
     container = driver.create(local_image_id, run_id, 'health', port, 1)
     passed = False

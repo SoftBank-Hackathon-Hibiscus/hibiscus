@@ -138,6 +138,7 @@ export class GithubService {
           requires_approval: input.requires_approval,
           health_check: input.health_check,
           environment: input.environment,
+          test_environment: input.test_environment,
           repo: repo.full_name,
           default_branch: input.branch,
           source_path:

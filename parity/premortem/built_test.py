@@ -19,7 +19,7 @@ from .snapshot import copy_file, sha256_file, verify_source_tree
 
 def test_build(*, manifest_path, record, noise, app, out_dir, runner, run_id=None,
                revision=None, digest=None, port=8080, health_path='/healthz', health_timeout=30,
-               after=(), execute=None, docker=None):
+               after=(), environment=None, execute=None, docker=None):
     from parity.execution import Baseline, run_test
     from parity.handoff import write_handoff
 
@@ -53,7 +53,7 @@ def test_build(*, manifest_path, record, noise, app, out_dir, runner, run_id=Non
         copy_file(record, out_dir / 'baseline/session.jsonl', sha256_file(record))
         copy_file(noise, out_dir / 'baseline/noise.json', sha256_file(noise))
         write_json_atomic(out_dir / 'build_manifest.json', build)
-        driver = docker or DockerDriver(runner, Settings())
+        driver = docker or DockerDriver(runner, Settings(), environment=environment)
         condition = 'parity-' + uuid.uuid4().hex[:8]
         name = f'premortem-{run_id}-{condition}-1'
         # parity의 recreate는 같은 호스트 포트를 유지한다. 충돌하면 Docker가 생성 전에 거부한다.

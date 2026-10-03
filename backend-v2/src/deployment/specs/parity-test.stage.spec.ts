@@ -93,7 +93,12 @@ describe('registry parity connection', () => {
         return checkout;
       },
     } as unknown as ModuleRef;
-    const deployments = { findActive: vi.fn().mockReturnValue(undefined) };
+    const deployments = {
+      findActive: vi.fn().mockReturnValue(undefined),
+      environment: vi
+        .fn()
+        .mockReturnValue({ DATABASE_URL: 'postgres://test/database' }),
+    };
     const applications = {
       getView: vi.fn().mockReturnValue({
         healthCheck: { path: '/healthz', timeoutSeconds: 5 },
@@ -163,7 +168,7 @@ describe('registry parity connection', () => {
   );
 
   it('uses health-only verification when the first revision has no parity files', async () => {
-    const { context, create } = setup('registry', false);
+    const { context, deployments, create } = setup('registry', false);
     const run = successfulRunner(context);
     const result = await create(run).run(context);
     const request = JSON.parse(
@@ -175,6 +180,10 @@ describe('registry parity connection', () => {
 
     expect(result.status).toBe('succeeded');
     expect(request.format).toBe('premortem-backend-health-v1');
+    expect(request.environment).toEqual({
+      DATABASE_URL: 'postgres://test/database',
+    });
+    expect(deployments.environment).toHaveBeenCalledWith('test-run', 'test');
     expect(request).not.toHaveProperty('record');
     expect(result.summary).toMatchObject({
       parity_baseline: { mode: 'health', changed: false },

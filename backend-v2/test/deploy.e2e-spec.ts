@@ -32,6 +32,7 @@ describe('deploy stage (e2e)', () => {
   let scripts: string;
   let token: string;
   let userId: string;
+  const candidateEnvironments = new Map<string, Record<string, string>>();
   const imageRepo = 'registry.example/demo';
 
   const write = (name: string, body: string) => {
@@ -129,6 +130,10 @@ describe('deploy stage (e2e)', () => {
       request(app.getHttpServer())
         .post(url)
         .set('Authorization', `Bearer ${token}`),
+    put: (url: string) =>
+      request(app.getHttpServer())
+        .put(url)
+        .set('Authorization', `Bearer ${token}`),
   });
 
   async function setupApplication(slug: string) {
@@ -162,26 +167,34 @@ describe('deploy stage (e2e)', () => {
   ) {
     const now = new Date().toISOString();
     // Worker 가 집어 가지 않게 running 으로 만든다. 단계는 테스트에서 직접 실행한다
-    return app.get(DeploymentRepository).create({
-      id: randomUUID(),
-      applicationId,
-      trigger: 'manual',
-      sourceRevision: '0123456789abcdef0123456789abcdef01234567',
-      sourceRevisionVerified,
-      imageDigest: digest,
-      digestSource: 'registry',
-      requester: userId,
-      approver: null,
-      decision: 'allow',
-      status: 'running',
-      currentStage: 'deploy',
-      error: null,
-      workDir: '',
-      executionMode: 'cli',
-      deploymentPerformed: false,
-      createdAt: now,
-      updatedAt: now,
-    });
+    return app.get(DeploymentRepository).create(
+      {
+        id: randomUUID(),
+        applicationId,
+        trigger: 'manual',
+        sourceRevision: '0123456789abcdef0123456789abcdef01234567',
+        sourceRevisionVerified,
+        imageDigest: digest,
+        digestSource: 'registry',
+        requester: userId,
+        approver: null,
+        decision: 'allow',
+        status: 'running',
+        currentStage: 'deploy',
+        error: null,
+        workDir: '',
+        executionMode: 'cli',
+        deploymentPerformed: false,
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        runtime: app
+          .get(ApplicationRepository)
+          .runtimeEnvironment(applicationId),
+        test: app.get(ApplicationRepository).testEnvironment(applicationId),
+      },
+    );
   }
 
   function prepare(deploymentId: string, digest: string) {
@@ -262,6 +275,11 @@ describe('deploy stage (e2e)', () => {
       while (!stopped) {
         const job = jobs.next(agentId);
         if (job) {
+          if (job.action === 'candidate')
+            candidateEnvironments.set(
+              job.run_id,
+              job.runtime.environment ?? {},
+            );
           const base = {
             schema_version: 1,
             agent_id: agentId,
@@ -328,6 +346,14 @@ describe('deploy stage (e2e)', () => {
     const { applicationId, agentId } = await setupApplication('demo');
     const digest = `sha256:${'a'.repeat(64)}`;
     const deployment = createDeployment(applicationId, digest);
+    await api()
+      .put(`/applications/${applicationId}/environment`)
+      .send({
+        environment: [
+          { name: 'DATABASE_URL', value: 'postgres://changed/app' },
+        ],
+      })
+      .expect(200);
     const paths = prepare(deployment.id, digest);
     const stop = fakeAgent(agentId);
     const application = app.get(ApplicationRepository).find(applicationId)!;
@@ -364,6 +390,10 @@ describe('deploy stage (e2e)', () => {
       `candidate.sh ${imageRepo}@${digest}  ${deployment.id} `,
     );
     expect(calls).toContain('"DATABASE_URL":"postgres://shared/app"');
+    expect(calls).not.toContain('postgres://changed/app');
+    expect(candidateEnvironments.get(deployment.id)).toEqual({
+      DATABASE_URL: 'postgres://shared/app',
+    });
     expect(calls).toContain(`"HIB_RUN_ID":"${deployment.id}"`);
     expect(calls).toContain(`-a run_id=${deployment.id}`);
     paths.cleanup();

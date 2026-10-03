@@ -123,6 +123,20 @@ export const applicationEnvironmentVariables = sqliteTable(
   (table) => [primaryKey({ columns: [table.applicationId, table.name] })],
 );
 
+export const applicationTestEnvironmentVariables = sqliteTable(
+  'application_test_environment_variables',
+  {
+    applicationId: text('application_id')
+      .notNull()
+      .references(() => applications.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    value: text('value').notNull(),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.applicationId, table.name] })],
+);
+
 export const deployments = sqliteTable(
   'deployments',
   {
@@ -176,6 +190,21 @@ export const deployments = sqliteTable(
       table.applicationId,
       table.version,
     ),
+  ],
+);
+
+export const deploymentEnvironmentVariables = sqliteTable(
+  'deployment_environment_variables',
+  {
+    deploymentId: text('deployment_id')
+      .notNull()
+      .references(() => deployments.id, { onDelete: 'cascade' }),
+    kind: text('kind', { enum: ['runtime', 'test'] }).notNull(),
+    name: text('name').notNull(),
+    value: text('value').notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.deploymentId, table.kind, table.name] }),
   ],
 );
 

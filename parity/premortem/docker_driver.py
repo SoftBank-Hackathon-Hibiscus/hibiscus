@@ -1,7 +1,7 @@
 """Docker 제어. 자기 라벨(premortem.owner=juyeong)과 run_id가 맞는 자원만 다룬다.
 
 - 명령은 인자 배열로 실행하고(shell 없음) 시간 제한을 둔다.
-- 컨테이너에는 환경변수·볼륨·Docker socket을 넘기지 않는다. 포트는 루프백(127.0.0.1)에만 게시한다.
+- 컨테이너에는 명시한 검증 전용 환경변수만 넘긴다. 볼륨·Docker socket은 넘기지 않는다. 포트는 루프백(127.0.0.1)에만 게시한다.
 - 권한은 최소로 둔다(--cap-drop ALL, no-new-privileges, 메모리·PID·CPU 상한). privileged·host network는 쓰지 않는다.
 - 지울 때는 저장된 정확한 ID와 라벨을 확인한다. 이름만 보고 지우지 않고, 전역 정리 명령은 쓰지 않는다.
 """
@@ -18,6 +18,7 @@ _IMAGE_ID_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _CONTAINER_ID_RE = re.compile(r"^[0-9a-f]{64}$")
 _TAG_RE = re.compile(r"^[a-z0-9][a-z0-9._/-]{0,127}:[A-Za-z0-9_.-]{1,128}$")
 _NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$")
+_ENV_NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]{0,63}$")
 
 
 def _first_line(text: str) -> str:
@@ -25,9 +26,16 @@ def _first_line(text: str) -> str:
 
 
 class DockerDriver:
-    def __init__(self, runner: CommandRunner, settings: Settings):
+    def __init__(self, runner: CommandRunner, settings: Settings, environment=None):
         self.runner = runner
         self.settings = settings
+        self.environment = dict(environment or {})
+        if (len(self.environment) > 50
+                or any(not isinstance(name, str) or not _ENV_NAME_RE.fullmatch(name)
+                       or name in {'PORT', 'HIB_RUN_ID', 'HIB_DIGEST'}
+                       or not isinstance(value, str) or len(value) > 4096
+                       for name, value in self.environment.items())):
+            raise PremortemError("INPUT_INVALID", "검증용 환경변수 형식이 잘못됨")
 
     def _run(self, args: list, timeout: Optional[float] = None, check: bool = True) -> CommandResult:
         result = self.runner.run(["docker", *args], timeout or self.settings.docker_command_timeout_sec)
@@ -81,8 +89,10 @@ class DockerDriver:
             "--publish", f"127.0.0.1:{host_port or ''}:{int(container_port)}",
             "--memory", "256m", "--pids-limit", "128", "--cpus", "1",
             "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
-            image_id,
         ]
+        for key in sorted(self.environment):
+            args += ["--env", f"{key}={self.environment[key]}"]
+        args.append(image_id)
         container_id = self._run(args).stdout.strip()
         if not _CONTAINER_ID_RE.fullmatch(container_id):
             raise PremortemError("DOCKER_COMMAND_FAILED", "컨테이너 ID를 받지 못함")

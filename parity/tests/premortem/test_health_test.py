@@ -58,6 +58,26 @@ class HealthBuildTest(unittest.TestCase):
         self.assertEqual(result['match'], {'total': 1, 'matched': 0})
         self.assertEqual(result['failures'][0]['request'], 'GET /healthz')
 
+    def test_passes_test_environment_to_the_docker_driver(self):
+        docker = self.docker()
+        with patch('premortem.health_test.verify_build', return_value=self.build), \
+                patch('premortem.health_test.verify_source_tree'), \
+                patch('premortem.health_test.DockerDriver', return_value=docker) as driver, \
+                patch('premortem.health_test.http_ok', return_value=True):
+            test_build_health(
+                manifest_path=self.manifest,
+                run_id='run-1',
+                revision=self.revision,
+                digest=self.digest,
+                port=8080,
+                health_path='/healthz',
+                health_timeout=1,
+                environment={'DATABASE_URL': 'postgres://test/database'},
+                out_dir=self.output,
+            )
+        driver.assert_called_once()
+        self.assertEqual(driver.call_args.kwargs['environment'], {'DATABASE_URL': 'postgres://test/database'})
+
     def docker(self):
         docker = MagicMock()
         docker.create.return_value = 'container-1'

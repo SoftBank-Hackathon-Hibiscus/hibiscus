@@ -5,6 +5,7 @@ import type { BackendConfig } from '../../config/configs/backend.config.js';
 import type { DeployConfig } from '../../config/configs/deploy.config.js';
 import { CommandRunner } from '../../infrastructure/command-runner.js';
 import { DeployStage } from '../stages/deploy.stage.js';
+import { DeploymentRepository } from '../deployment.repository.js';
 import type { StageContext } from '../types/deployment.type.js';
 
 describe('DeployStage source identity gate', () => {
@@ -19,6 +20,7 @@ describe('DeployStage source identity gate', () => {
       config,
       { run } as unknown as CommandRunner,
       { getView } as unknown as ApplicationRepository,
+      { environment: vi.fn() } as unknown as DeploymentRepository,
       { get } as unknown as ModuleRef,
     );
     const result = await stage.run({

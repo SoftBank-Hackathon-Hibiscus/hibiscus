@@ -240,6 +240,14 @@ export class CreateApplicationDto {
   @ValidateNested({ each: true })
   @Type(() => ApplicationEnvironmentVariableDto)
   environment: ApplicationEnvironmentVariableDto[] = [];
+
+  /** Parity replay/health 전용 값. 운영 DB 자격 증명을 사용하지 않는다. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @ValidateNested({ each: true })
+  @Type(() => ApplicationEnvironmentVariableDto)
+  test_environment: ApplicationEnvironmentVariableDto[] = [];
 }
 
 export class UpdateApplicationEnvironmentDto {

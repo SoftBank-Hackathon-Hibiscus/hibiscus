@@ -25,6 +25,7 @@ export class ApplicationService {
 
   create(input: CreateApplicationDto) {
     this.validateEnvironment(input.environment);
+    this.validateEnvironment(input.test_environment);
     const publicHost = `${input.slug}.${this.config.get('backend.gatewayBaseDomain', { infer: true })}`;
     if (this.repository.findByPublicHost(publicHost)) {
       throw new ConflictException('Application public host already exists');
@@ -64,6 +65,13 @@ export class ApplicationService {
       application,
       healthCheck,
       input.environment.map(({ name, value }) => ({
+        applicationId: application.id,
+        name,
+        value,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      })),
+      input.test_environment.map(({ name, value }) => ({
         applicationId: application.id,
         name,
         value,
@@ -120,6 +128,25 @@ export class ApplicationService {
     const timestamp = new Date().toISOString();
     return {
       environment: this.repository.replaceEnvironment(
+        id,
+        input.environment.map(({ name, value }) => ({
+          applicationId: id,
+          name,
+          value,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        })),
+      ),
+    };
+  }
+
+  updateTestEnvironment(id: string, input: UpdateApplicationEnvironmentDto) {
+    if (!this.repository.find(id))
+      throw new NotFoundException('Application not found');
+    this.validateEnvironment(input.environment);
+    const timestamp = new Date().toISOString();
+    return {
+      environment: this.repository.replaceTestEnvironment(
         id,
         input.environment.map(({ name, value }) => ({
           applicationId: id,

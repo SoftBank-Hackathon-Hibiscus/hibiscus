@@ -43,6 +43,18 @@ class DockerDriverTest(unittest.TestCase):
             DockerDriver(runner, Settings()).create("my-app:latest", "run-1", "none", 8000, 1)
         self.assertEqual(runner.calls, [])
 
+    def test_create_passes_only_explicit_test_environment(self):
+        runner = FakeRunner(lambda args: ok(CONTAINER))
+        DockerDriver(
+            runner,
+            Settings(),
+            environment={'DATABASE_URL': 'postgres://test/database'},
+        ).create(IMAGE_ID, 'run-1', 'health', 8080, 1)
+        args = runner.calls[0]
+        index = args.index('--env')
+        self.assertEqual(args[index + 1], 'DATABASE_URL=postgres://test/database')
+        self.assertEqual(args[-1], IMAGE_ID)
+
     def test_b14_foreign_container_is_not_removed(self):
         runner = FakeRunner(lambda args: ok(inspect_json({OWNER_LABEL_KEY: "someone-else", RUN_LABEL_KEY: "run-1"})))
         with self.assertRaises(PremortemError) as caught:

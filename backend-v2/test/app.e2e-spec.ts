@@ -551,6 +551,7 @@ describe('deployment API (e2e)', () => {
 
   it('stores application environment values without returning them', async () => {
     const secret = 'postgres://user:password@db.example/app';
+    const testSecret = 'postgres://test:test@db.example/app_test';
     const created = await api()
       .post('/applications')
       .send({
@@ -562,10 +563,18 @@ describe('deployment API (e2e)', () => {
           { name: 'DATABASE_URL', value: secret },
           { name: 'APP_MODE', value: 'demo' },
         ],
+        test_environment: [{ name: 'DATABASE_URL', value: testSecret }],
       })
       .expect(201);
     expect(created.body.environment).toEqual(['APP_MODE', 'DATABASE_URL']);
+    expect(created.body.testEnvironment).toEqual(['DATABASE_URL']);
     expect(JSON.stringify(created.body)).not.toContain(secret);
+    expect(JSON.stringify(created.body)).not.toContain(testSecret);
+
+    const deployment = await createDeployment(
+      created.body.application.id,
+      'environment-requester',
+    );
 
     const updated = await api()
       .put(`/applications/${created.body.application.id}/environment`)
@@ -573,6 +582,25 @@ describe('deployment API (e2e)', () => {
       .expect(200);
     expect(updated.body).toEqual({ environment: ['DATABASE_URL'] });
     expect(JSON.stringify(updated.body)).not.toContain(secret);
+
+    const updatedTest = await api()
+      .put(`/applications/${created.body.application.id}/test-environment`)
+      .send({
+        environment: [
+          { name: 'DATABASE_URL', value: 'postgres://new-test/database' },
+        ],
+      })
+      .expect(200);
+    expect(updatedTest.body).toEqual({ environment: ['DATABASE_URL'] });
+
+    const deployments = app.get(DeploymentRepository);
+    expect(deployments.environment(deployment.id, 'runtime')).toEqual({
+      APP_MODE: 'demo',
+      DATABASE_URL: secret,
+    });
+    expect(deployments.environment(deployment.id, 'test')).toEqual({
+      DATABASE_URL: testSecret,
+    });
 
     await api()
       .put(`/applications/${created.body.application.id}/environment`)

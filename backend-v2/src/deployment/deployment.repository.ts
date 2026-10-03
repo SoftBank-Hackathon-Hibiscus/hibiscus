@@ -3,6 +3,7 @@ import { and, asc, desc, eq, sql } from 'drizzle-orm';
 import { DatabaseService } from '../database/database.service.js';
 import {
   deployments,
+  deploymentEnvironmentVariables,
   policyResults,
   stageExecutions,
   deploymentArtifacts,
@@ -20,7 +21,13 @@ import {
 export class DeploymentRepository {
   constructor(private readonly database: DatabaseService) {}
 
-  create(values: Omit<Deployment, 'version'>): Deployment {
+  create(
+    values: Omit<Deployment, 'version'>,
+    environment: {
+      runtime: Record<string, string>;
+      test: Record<string, string>;
+    },
+  ): Deployment {
     return this.database.db.transaction((tx) => {
       const latest = tx
         .select({ version: deployments.version })
@@ -31,8 +38,41 @@ export class DeploymentRepository {
         .get();
       const deployment = { ...values, version: (latest?.version ?? 0) + 1 };
       tx.insert(deployments).values(deployment).run();
+      const snapshot = (['runtime', 'test'] as const).flatMap((kind) =>
+        Object.entries(environment[kind]).map(([name, value]) => ({
+          deploymentId: deployment.id,
+          kind,
+          name,
+          value,
+        })),
+      );
+      if (snapshot.length)
+        tx.insert(deploymentEnvironmentVariables).values(snapshot).run();
       return deployment;
     });
+  }
+
+  environment(
+    deploymentId: string,
+    kind: 'runtime' | 'test',
+  ): Record<string, string> {
+    return Object.fromEntries(
+      this.database.db
+        .select({
+          name: deploymentEnvironmentVariables.name,
+          value: deploymentEnvironmentVariables.value,
+        })
+        .from(deploymentEnvironmentVariables)
+        .where(
+          and(
+            eq(deploymentEnvironmentVariables.deploymentId, deploymentId),
+            eq(deploymentEnvironmentVariables.kind, kind),
+          ),
+        )
+        .orderBy(asc(deploymentEnvironmentVariables.name))
+        .all()
+        .map(({ name, value }) => [name, value]),
+    );
   }
 
   find(id: string): Deployment | undefined {
