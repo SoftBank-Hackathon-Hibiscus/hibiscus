@@ -35,19 +35,46 @@ export function checkPublicKeyPin(pubKeyPath: string, expected: string): string 
   return checkPublicKeyPins(pubKeyPath, [expected]);
 }
 
-/** 키 교체 중처럼 지문을 여러 개 고정했을 때. 공개키 지문이 그중 하나여야 함 */
-export function checkPublicKeyPins(pubKeyPath: string, expected: readonly string[]): string {
+/** 고정값 목록(sha256: 접두어·대문자 허용)을 소문자 hex 로. 형식이 틀리면 ARG_INVALID */
+export function parsePins(expected: readonly string[], what: string): string[] {
   const pinned = expected.map((e) => {
     const hex = FINGERPRINT_RE.exec(e.trim())?.[1]?.toLowerCase();
-    if (!hex) throw new SignerError("ARG_INVALID", `공개키 지문 형식 오류 (sha256 hex 64자): ${e}`);
+    if (!hex) throw new SignerError("ARG_INVALID", `${what} 지문 형식 오류 (sha256 hex 64자): ${e}`);
     return hex;
   });
-  if (pinned.length === 0) throw new SignerError("ARG_INVALID", "고정한 공개키 지문이 없음");
+  if (pinned.length === 0) throw new SignerError("ARG_INVALID", `고정한 ${what} 지문이 없음`);
+  return pinned;
+}
+
+/** 키 교체 중처럼 지문을 여러 개 고정했을 때. 공개키 지문이 그중 하나여야 함 */
+export function checkPublicKeyPins(pubKeyPath: string, expected: readonly string[]): string {
+  const pinned = parsePins(expected, "공개키");
   const actual = publicKeyFingerprint(pubKeyPath);
   if (!pinned.includes(actual)) {
     throw new SignerError("PUBKEY_MISMATCH", `공개키가 고정한 지문과 다름 (고정 ${pinned.map((p) => p.slice(0, 12) + "…").join(", ")} / 실제 ${actual.slice(0, 12)}…): ${pubKeyPath}`);
   }
   return actual;
+}
+
+/**
+ * Rego 정책 파일 내용과 sha256. 고정값을 주면 그중 하나와 같아야 함 (POLICY_PIN_MISMATCH).
+ * 레포 쓰기 권한자가 strict.rego 에 `tested { true }` 한 줄만 붙여도 정책이 무력해지는 것을 막음
+ */
+export function readPolicy(path: string, pins?: readonly string[]): { bytes: Buffer; sha256: string } {
+  let bytes: Buffer;
+  try {
+    bytes = readFileSync(path);
+  } catch {
+    throw new SignerError("POLICY_MISSING", `Rego 정책 파일이 없음: ${path}`);
+  }
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
+  if (pins !== undefined && pins.length > 0) {
+    const pinned = parsePins(pins, "정책");
+    if (!pinned.includes(sha256)) {
+      throw new SignerError("POLICY_PIN_MISMATCH", `정책 파일이 고정한 지문과 다름 (고정 ${pinned.map((p) => p.slice(0, 12) + "…").join(", ")} / 실제 ${sha256.slice(0, 12)}…): ${path}`);
+    }
+  }
+  return { bytes, sha256 };
 }
 
 /** 개인키 파일을 다른 사용자도 읽을 수 있으면 그 권한(8진수), 괜찮으면 undefined. KMS 주소·Windows 는 안 봄 */

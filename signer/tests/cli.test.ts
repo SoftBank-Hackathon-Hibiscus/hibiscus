@@ -14,7 +14,7 @@ function cli(args: string[], env: Record<string, string> = {}) {
   const r = spawnSync(TSX, ["src/cli.ts", ...args], {
     cwd: ROOT,
     encoding: "utf8",
-    env: { ...process.env, SIGNER_COSIGN_KEY: "", IMAGE_REPO: "", SIGNER_AUDIT_LOG: "", COSIGN_PUBLIC_KEY: "", SIGNER_PUBKEY_SHA256: "", ...env },
+    env: { ...process.env, SIGNER_COSIGN_KEY: "", IMAGE_REPO: "", SIGNER_AUDIT_LOG: "", COSIGN_PUBLIC_KEY: "", SIGNER_PUBKEY_SHA256: "", SIGNER_POLICY_SHA256: "", ...env },
   });
   return { code: r.status, stdout: r.stdout, stderr: r.stderr };
 }
@@ -231,5 +231,69 @@ describe("cli audit", () => {
 
   it("--audit 도 SIGNER_AUDIT_LOG 도 없으면 2", () => {
     expect(cli(["audit"]).code).toBe(2);
+  });
+});
+
+describe("cli verify --policy-sha256", () => {
+  const RESULT = {
+    run_id: "r-1", digest: `sha256:${"a".repeat(64)}`, plan_hash: "b".repeat(64), targets: ["onprem"], failover_allowed: false,
+    requester: "alice", approver: "auto", signature_ref: `cosign:localhost:5001/hib/app@sha256:${"a".repeat(64)}`, signed_at: "2026-10-01T03:00:00.000Z",
+  };
+  /** 받은 인자와 --policy 파일 내용을 남기는 가짜 cosign. verify-attestation 은 증명서 없이 성공 */
+  function recordingCosign(dir: string): string {
+    writeFileSync(join(dir, "cosign"), `#!/bin/sh
+if [ "$1" = "version" ]; then echo '{"gitVersion":"v3.1.3"}'; exit 0; fi
+printf '%s\\n' "$@" >> "${dir}/args.txt"
+prev=""; for a in "$@"; do [ "$prev" = "--policy" ] && cp "$a" "${dir}/seen.rego" && echo "$a" > "${dir}/policy-path.txt"; prev="$a"; done
+if [ "$1" = "verify" ]; then echo '[]'; fi
+exit 0
+`);
+    chmodSync(join(dir, "cosign"), 0o755);
+    return dir;
+  }
+
+  function setup() {
+    const dir = tmp();
+    const result = join(dir, "sr.json");
+    writeFileSync(result, JSON.stringify(RESULT));
+    const policy = join(dir, "strict.rego");
+    writeFileSync(policy, readFileSync(join(ROOT, "policy/strict.rego"), "utf8"));
+    const pin = `sha256:${cli(["fingerprint", "--policy", policy]).stdout.split(" ")[0]!.slice("sha256:".length)}`;
+    return { dir, result, policy, pin, env: { PATH: `${recordingCosign(dir)}:${process.env.PATH}` } };
+  }
+
+  it("fingerprint --policy 는 정책 파일 지문 한 줄", () => {
+    const { policy, pin } = setup();
+    expect(pin).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(cli(["fingerprint", "--policy", policy, "--policy-sha256", pin]).stdout).toContain("(고정값에 있음)");
+  });
+
+  it("정책 파일이 고정값과 다르면 cosign 을 부르지 않고 POLICY_PIN_MISMATCH (2)", () => {
+    const { dir, result, policy, pin, env } = setup();
+    writeFileSync(policy, readFileSync(policy, "utf8") + "tested { true }\n");
+    const r = cli(["verify", "--result", result, "--attestation", "--policy", policy, "--policy-sha256", pin, "--json"], env);
+    expect(r.code).toBe(2);
+    expect(JSON.parse(r.stdout)).toMatchObject({ ok: false, code: 2, error: "POLICY_PIN_MISMATCH" });
+    expect(existsSync(join(dir, "args.txt"))).toBe(false);
+  });
+
+  it("고정값이 맞으면 확인한 바이트를 임시 파일로 넘기고, 끝나면 지움", () => {
+    const { dir, result, policy, pin, env } = setup();
+    const r = cli(["verify", "--result", result, "--attestation", "--policy", policy, "--policy-sha256", pin, "--json"], env);
+    // 가짜 cosign 이 증명서를 안 돌려줘서 attestation_invalid 로 끝남. 정책 전달까지만 확인
+    expect(JSON.parse(r.stdout)).toMatchObject({ code: 1, reason: "attestation_invalid" });
+    const passed = readFileSync(join(dir, "policy-path.txt"), "utf8").trim();
+    expect(passed).not.toBe(policy);
+    expect(passed.endsWith(".rego")).toBe(true);
+    expect(existsSync(passed)).toBe(false);
+    expect(readFileSync(join(dir, "seen.rego"), "utf8")).toBe(readFileSync(policy, "utf8"));
+  });
+
+  it("SIGNER_POLICY_SHA256 도 같고, 빈 값은 꺼진 것으로 봄. --attestation 없이 플래그만 주면 ARG_INVALID", () => {
+    const { result, policy, pin, env } = setup();
+    writeFileSync(policy, readFileSync(policy, "utf8") + "# 바꿈\n");
+    expect(JSON.parse(cli(["verify", "--result", result, "--attestation", "--policy", policy, "--json"], { ...env, SIGNER_POLICY_SHA256: pin }).stdout)).toMatchObject({ error: "POLICY_PIN_MISMATCH" });
+    expect(JSON.parse(cli(["verify", "--result", result, "--attestation", "--policy", policy, "--json"], { ...env, SIGNER_POLICY_SHA256: "" }).stdout)).toMatchObject({ code: 1 });
+    expect(JSON.parse(cli(["verify", "--result", result, "--policy-sha256", pin, "--json"], env).stdout)).toMatchObject({ error: "ARG_INVALID" });
   });
 });

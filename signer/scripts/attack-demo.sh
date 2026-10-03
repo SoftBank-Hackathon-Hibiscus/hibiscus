@@ -166,6 +166,15 @@ check 1 "v2: 서명은 맞지만 증명서의 시험 결과가 strict.rego 에 �
   signer verify --result "$W/sr2.json" --attestation --policy policy/strict.rego "${VERIFY[@]}"
 check 1 "v2: 시험 결과 파일을 통과한 것(v1 것)으로 바꿔 제출" \
   signer verify --result "$W/sr2.json" --attestation --test-result "$W/test.json" "${VERIFY[@]}"
+# 레포 쓰기 권한자가 정책 끝에 한 줄만 붙임 (Rego 는 같은 이름 규칙을 OR 로 합쳐서 시험 조건이 무력해짐)
+{ cat policy/strict.rego; echo 'tested { true }'; } >"$W/strict-weak.rego"
+check 0 "(약점) strict.rego 끝에 'tested { true }' 한 줄: 시험 실패 v2 통과" \
+  signer verify --result "$W/sr2.json" --attestation --policy "$W/strict-weak.rego" "${VERIFY[@]}"
+PFP="$(signer fingerprint --policy policy/strict.rego | grep -o 'sha256:[0-9a-f]*')"
+check 2 "같은 정책을 지문 고정(--policy-sha256)으로 확인" \
+  signer verify --result "$W/sr2.json" --attestation --policy "$W/strict-weak.rego" --policy-sha256 "$PFP" "${VERIFY[@]}"
+check 1 "원본 정책 + 지문 고정: 원래대로 거절" \
+  signer verify --result "$W/sr2.json" --attestation --policy policy/strict.rego --policy-sha256 "$PFP" "${VERIFY[@]}"
 
 # --- 기록 조작 ---
 step "공격 5. 감사 로그 조작"

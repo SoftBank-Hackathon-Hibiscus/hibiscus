@@ -1,12 +1,14 @@
 // approve / sign / verify / audit 명령. 종료 코드 0 서명·확인 / 1 거절·확인 실패 / 2 오류
-import { rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, join } from "node:path";
 import { parseArgs } from "node:util";
 import { createApproval } from "./approval.js";
 import { CosignSigner, CosignVerifier, DryRunSigner, isKmsKey, MultiKeyVerifier, type BlobVerifier, type ImageVerifier } from "./cosign.js";
 import { runAnchor } from "./anchor.js";
 import { SignerError, writeJson } from "./io.js";
 import { DEFAULT_PLAN_SCHEMA, loadPlan } from "./plan.js";
-import { checkPublicKeyPins, looseKeyPermissions, publicKeyFingerprint } from "./keys.js";
+import { checkPublicKeyPins, looseKeyPermissions, publicKeyFingerprint, readPolicy } from "./keys.js";
 import { DEFAULT_POLICY } from "./attestation.js";
 import { runSign } from "./sign.js";
 import { DEFAULT_PUBLIC_KEY, runAuditVerify, runVerify } from "./verify.js";
@@ -19,10 +21,10 @@ const USAGE = `사용법
                           [--self-verify] [--attest [--test-result <test_result.json>]] [--minimal-env]
                           [--pub <cosign.pub>] [--pubkey-sha256 <지문>] [--plan-schema <Plan.schema.json>]
   npx tsx src/cli.ts verify --result <sign_result.json> [--plan <plan.json>] [--approval <approval.json>] [--audit <감사 로그>] [--image-repo <저장소>]
-                            [--attestation [--policy <deploy.rego>] [--test-result <test_result.json>]] [--max-age <분>] [--json]
+                            [--attestation [--policy <deploy.rego>] [--policy-sha256 <지문>] [--test-result <test_result.json>]] [--max-age <분>] [--json]
                             [--pub <cosign.pub>] [--pubkey-sha256 <지문>] [--no-tlog] [--plan-schema <Plan.schema.json>]
   npx tsx src/cli.ts audit --audit <감사 로그> [--anchors <고정값 파일>] [--images [--strict-images] [--image-repo <저장소>]] [--pub <cosign.pub>] [--no-tlog]
-  npx tsx src/cli.ts fingerprint [--pub <cosign.pub>] [--pubkey-sha256 <지문>]
+  npx tsx src/cli.ts fingerprint [--pub <cosign.pub>] [--pubkey-sha256 <지문>] | --policy <정책.rego> [--policy-sha256 <지문>]
   npx tsx src/cli.ts anchor --audit <감사 로그> [--anchors <고정값 파일>] (--key <cosign.key>) [--no-tlog]
 
   --image-repo  태그 없는 이미지 저장소 (예: asia-northeast3-docker.pkg.dev/<프로젝트>/<저장소>/<이미지>). 없으면 IMAGE_REPO 환경변수
@@ -44,6 +46,7 @@ const USAGE = `사용법
   --max-age     서명한 지 이 시간(분)이 지난 결과는 거부 (expired). 없으면 SIGNER_MAX_AGE_MIN
   --json        결과를 JSON 한 줄로 출력 (실행 오류도)
   --attestation 배포 증명서도 확인 (서명·내용이 sign_result 와 같은지 + Rego 정책). 정책 기본값은 policy/deploy.rego
+  --policy-sha256 Rego 정책 파일 지문 고정 (여러 번 가능). 정책 파일이 이 목록에 없으면 멈춤. 없으면 SIGNER_POLICY_SHA256(쉼표로 여러 개)
   --pub         cosign 공개키 경로 또는 KMS 키 주소. 키 교체 중이면 여러 번 (아무 키로나 확인되면 통과).
                 없으면 COSIGN_PUBLIC_KEY 환경변수(쉼표로 여러 개), 그것도 없으면 keys/cosign.pub
   --no-tlog     Rekor 없이 서명한 이미지 확인 (cosign verify --insecure-ignore-tlog=true)
@@ -92,6 +95,7 @@ const OPTIONS = {
   attest: { type: "boolean", default: false },
   attestation: { type: "boolean", default: false },
   policy: { type: "string" },
+  "policy-sha256": { type: "string", multiple: true },
   "max-age": { type: "string" },
   "minimal-env": { type: "boolean", default: false },
   "test-result": { type: "string" },
@@ -127,6 +131,8 @@ async function main(argv: string[]): Promise<number> {
   if (pubs.length === 0) pubs.push(DEFAULT_PUBLIC_KEY);
   const pins = list(values["pubkey-sha256"], process.env.SIGNER_PUBKEY_SHA256);
   const pinnedPub = pins.length > 0 ? pins : undefined;
+  // Rego 정책 지문 고정 (verify --attestation 에서만 씀)
+  const policyPins = list(values["policy-sha256"], process.env.SIGNER_POLICY_SHA256);
   // 확인에 쓸 확인기. 지문을 고정했으면 고정 목록에 없는 공개키로는 확인하지 않음
   const trustedVerifier = (): ImageVerifier & BlobVerifier => {
     if (pinnedPub !== undefined) for (const p of pubs) checkPublicKeyPins(p, pinnedPub);
@@ -202,9 +208,21 @@ async function main(argv: string[]): Promise<number> {
     let maxAgeMs: number | undefined;
     let outcome: Awaited<ReturnType<typeof runVerify>>;
     let keys: ReturnType<typeof fingerprints>;
+    let policySha256: string | undefined;
+    let policyDir: string | undefined;
     try {
       if (values["test-result"] !== undefined && values.attestation !== true) throw new SignerError("ARG_INVALID", "--test-result 는 --attestation 과 같이 써야 함 (시험 결과는 증명서에 들어 있음)");
       if (values.policy !== undefined && values.attestation !== true) throw new SignerError("ARG_INVALID", "--policy 는 --attestation 과 같이 써야 함 (정책은 배포 증명서에 적용, 없으면 정책 검사를 안 함)");
+      if (values["policy-sha256"] !== undefined && values.attestation !== true) throw new SignerError("ARG_INVALID", "--policy-sha256 은 --attestation 과 같이 써야 함");
+      // 정책은 확인한 바이트를 임시 파일로 써서 그 파일을 cosign 에 넘김 (확인한 뒤 원래 파일을 바꿔치기해도 소용없게)
+      let checkedPolicy = policyPath;
+      if (values.attestation === true) {
+        const policy = readPolicy(policyPath, policyPins);
+        policySha256 = policy.sha256;
+        policyDir = mkdtempSync(join(tmpdir(), "signer-policy-"));
+        checkedPolicy = join(policyDir, basename(policyPath).endsWith(".rego") ? basename(policyPath) : "policy.rego");
+        writeFileSync(checkedPolicy, policy.bytes, { mode: 0o600 });
+      }
       maxAgeMs = minutes(values["max-age"] || process.env.SIGNER_MAX_AGE_MIN, "max-age");
       outcome = await runVerify({
         resultPath: required(values.result, "result"),
@@ -213,7 +231,7 @@ async function main(argv: string[]): Promise<number> {
         ...(values.plan !== undefined ? { planPath: values.plan } : {}),
         ...(values.approval ? { approvalPath: values.approval } : {}),
         ...(values.attestation === true
-          ? { attestation: { policyPath, ...(values["test-result"] !== undefined ? { testResultPath: values["test-result"] } : {}) } }
+          ? { attestation: { policyPath: checkedPolicy, ...(values["test-result"] !== undefined ? { testResultPath: values["test-result"] } : {}) } }
           : {}),
         ...(maxAgeMs !== undefined ? { maxAgeMs } : {}),
         planSchemaPath: planSchema,
@@ -228,6 +246,8 @@ async function main(argv: string[]): Promise<number> {
         return 2;
       }
       throw e;
+    } finally {
+      if (policyDir !== undefined) rmSync(policyDir, { recursive: true, force: true });
     }
     if (json) {
       console.log(
@@ -249,7 +269,7 @@ async function main(argv: string[]): Promise<number> {
                   plan: values.plan !== undefined,
                   approval: Boolean(values.approval),
                   audit: auditPath !== undefined,
-                  attestation: values.attestation === true ? { policy: policyPath } : false,
+                  attestation: values.attestation === true ? { policy: policyPath, policy_sha256: `sha256:${policySha256}`, policy_pinned: policyPins.length > 0 } : false,
                   max_age_min: maxAgeMs !== undefined ? maxAgeMs / 60_000 : null,
                 },
                 pubkeys: keys,
@@ -266,7 +286,10 @@ async function main(argv: string[]): Promise<number> {
       console.log(`  targets  : ${r.targets.join(", ")}`);
       console.log(`  approver : ${r.approver}`);
       console.log(`  확인한 주석: ${Object.keys(outcome.annotations).join(", ")}`);
-      if (values.attestation === true) console.log(`  배포 증명서: 서명·내용 일치, 정책 통과 (${policyPath})`);
+      if (values.attestation === true) {
+        console.log(`  배포 증명서: 서명·내용 일치, 정책 통과 (${policyPath})`);
+        console.log(`  정책 지문: sha256:${policySha256}${policyPins.length > 0 ? " (고정값에 있음)" : ""}`);
+      }
       if (maxAgeMs !== undefined) console.log(`  유효기간: ${maxAgeMs / 60_000}분 안에 서명함`);
       for (const k of keys) console.log(`  공개키 지문: ${k.sha256}${pinnedPub !== undefined ? " (고정값에 있음)" : ""}  ${k.path}`);
     } else {
@@ -307,6 +330,12 @@ async function main(argv: string[]): Promise<number> {
   }
 
   if (command === "fingerprint") {
+    // --policy 면 Rego 정책 파일 지문 (--policy-sha256 고정값으로 쓸 값)
+    if (values.policy) {
+      const policy = readPolicy(values.policy, policyPins);
+      console.log(`sha256:${policy.sha256}  ${values.policy}${policyPins.length > 0 ? "  (고정값에 있음)" : ""}`);
+      return 0;
+    }
     for (const p of pubs) {
       const fingerprint = pinnedPub !== undefined ? checkPublicKeyPins(p, pinnedPub) : publicKeyFingerprint(p);
       console.log(`sha256:${fingerprint}  ${p}${pinnedPub !== undefined ? "  (고정값에 있음)" : ""}`);

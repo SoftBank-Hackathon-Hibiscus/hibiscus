@@ -2,7 +2,8 @@ import { generateKeyPairSync } from "node:crypto";
 import { chmodSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { checkPublicKeyPin, checkPublicKeyPins, looseKeyPermissions, publicKeyFingerprint } from "../src/keys.js";
+import { execFileSync } from "node:child_process";
+import { checkPublicKeyPin, checkPublicKeyPins, looseKeyPermissions, publicKeyFingerprint, readPolicy } from "../src/keys.js";
 import { MultiKeyVerifier, type ImageVerifier } from "../src/cosign.js";
 import { SignerError } from "../src/io.js";
 import { DEFAULT_PUBLIC_KEY } from "../src/verify.js";
@@ -141,5 +142,32 @@ describe("키 교체: 여러 공개키로 확인 (MultiKeyVerifier)", () => {
 
   it("믿는 키로 서명된 증명서가 정책을 어기면 다른 키 결과와 상관없이 POLICY_DENIED", async () => {
     await expect(new MultiKeyVerifier([ok, denied]).attestations("r", "t")).rejects.toMatchObject({ code: "POLICY_DENIED" });
+  });
+});
+
+describe("Rego 정책 지문 고정", () => {
+  const STRICT = new URL("../policy/strict.rego", import.meta.url).pathname;
+
+  it("파일 바이트 그대로 sha256 (shasum -a 256 과 같음)", () => {
+    const expected = execFileSync("shasum", ["-a", "256", STRICT], { encoding: "utf8" }).split(" ")[0];
+    expect(readPolicy(STRICT).sha256).toBe(expected);
+  });
+
+  it("한 줄 붙인 정책 (tested { true }) 은 POLICY_PIN_MISMATCH, 원본은 통과", () => {
+    const pin = readPolicy(STRICT).sha256;
+    const weak = join(tmp(), "strict.rego");
+    writeFileSync(weak, readFileSync(STRICT, "utf8") + "tested { true }\n");
+    expect(() => readPolicy(weak, [pin])).toThrow(expect.objectContaining({ code: "POLICY_PIN_MISMATCH" }));
+    expect(readPolicy(STRICT, [`sha256:${pin.toUpperCase()}`]).sha256).toBe(pin);
+    // 여러 개 중 하나만 맞아도 통과 (정책 교체 중)
+    expect(readPolicy(STRICT, ["a".repeat(64), pin]).sha256).toBe(pin);
+  });
+
+  it.each([["63자", "a".repeat(63)], ["hex 아님", "z".repeat(64)]])("지문 형식이 틀리면 ARG_INVALID (%s)", (_name, pin) => {
+    expect(() => readPolicy(STRICT, [pin])).toThrow(expect.objectContaining({ code: "ARG_INVALID" }));
+  });
+
+  it("없는 파일은 POLICY_MISSING", () => {
+    expect(() => readPolicy(join(tmp(), "none.rego"))).toThrow(expect.objectContaining({ code: "POLICY_MISSING" }));
   });
 });
