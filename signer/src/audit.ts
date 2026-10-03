@@ -2,6 +2,7 @@
 import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import { logAnnotations } from "./annotations.js";
 import { canonicalize, sha256Hex, SignerError } from "./io.js";
 import { AuditLineSchema, type AuditLine, type SignError, type SignLog, type SignResult } from "./schema.js";
 
@@ -15,15 +16,22 @@ export interface AuditOptions {
   staleMs?: number;
 }
 
-export type AuditBreak = "line_invalid" | "seq_gap" | "prev_mismatch" | "hash_mismatch" | "anchor_invalid";
+export type AuditBreak = "line_invalid" | "seq_gap" | "prev_mismatch" | "hash_mismatch" | "anchor_invalid" | "annotations_invalid" | "cancel_invalid";
 
 export type AuditCheck =
   | { ok: true; lines: AuditLine[]; head: string }
   | { ok: false; line: number; reason: AuditBreak; detail: string };
 
 export function auditHash(line: Omit<AuditLine, "hash">): string {
-  // anchor 가 없으면 canonicalize 가 키를 뺌
-  return sha256Hex(canonicalize({ seq: line.seq, prev_hash: line.prev_hash, entry: line.entry, anchor: line.anchor }));
+  // 없는 필드는 canonicalize 가 키를 빼서, 이 필드들이 없던 예전 줄 hash 는 그대로
+  return sha256Hex(canonicalize({ seq: line.seq, prev_hash: line.prev_hash, entry: line.entry, anchor: line.anchor, annotations: line.annotations, cancels: line.cancels }));
+}
+
+export interface AuditExtra {
+  /** signed 줄: 이미지 서명에 실제로 붙인 주석 전체 */
+  annotations?: Record<string, string>;
+  /** 서명 뒤 단계가 실패한 refused 줄: 취소하는 signed 줄 hash */
+  cancels?: string;
 }
 
 /** 서명 직전 체인 끝 hash. 파일이 없거나 비었으면 GENESIS */
@@ -32,10 +40,17 @@ export async function readAuditHead(path: string, o: AuditOptions = {}): Promise
 }
 
 /** 한 줄 추가. 마지막 줄 읽기와 추가를 잠금 안에서 한 번에 함 */
-export async function appendAudit(path: string, entry: SignLog | SignError, anchor: string | undefined, o: AuditOptions = {}): Promise<AuditLine> {
+export async function appendAudit(path: string, entry: SignLog | SignError, anchor: string | undefined, o: AuditOptions = {}, extra: AuditExtra = {}): Promise<AuditLine> {
   return withLock(path, o, () => {
     const last = lastLine(path);
-    const body = { seq: (last?.seq ?? 0) + 1, prev_hash: last?.hash ?? GENESIS, entry, ...(anchor !== undefined ? { anchor } : {}) };
+    const body = {
+      seq: (last?.seq ?? 0) + 1,
+      prev_hash: last?.hash ?? GENESIS,
+      entry,
+      ...(anchor !== undefined ? { anchor } : {}),
+      ...(extra.annotations !== undefined ? { annotations: extra.annotations } : {}),
+      ...(extra.cancels !== undefined ? { cancels: extra.cancels } : {}),
+    };
     const line = AuditLineSchema.parse({ ...body, hash: auditHash(body) });
     appendFileSync(path, JSON.stringify(line) + "\n", "utf8");
     return line;
@@ -59,6 +74,10 @@ export function checkAuditChain(text: string): AuditCheck {
 
   const lines: AuditLine[] = [];
   const seen = new Set([GENESIS]);
+  const signedByHash = new Map<string, AuditLine>();
+  const cancelled = new Set<string>();
+  // 주석 기록을 시작한 뒤의 signed 줄은 전부 기록이 있어야 함 (마지막 줄 기록만 지워 예전 형식 비교로 낮추지 못하게)
+  let recording = false;
   let prev = GENESIS;
   for (const [i, text] of raw.entries()) {
     const n = i + 1;
@@ -79,17 +98,47 @@ export function checkAuditChain(text: string): AuditCheck {
     if (line.seq !== n) return broken("seq_gap", `seq 가 ${line.seq} 임 (${n} 이어야 함). 줄이 빠졌거나 순서가 바뀜`);
     if (line.prev_hash !== prev) return broken("prev_mismatch", "prev_hash 가 앞 줄 hash 와 다름");
     if (auditHash(line) !== line.hash) return broken("hash_mismatch", "내용과 hash 가 안 맞음 (줄이 고쳐짐)");
-    if (line.entry.kind === "sign" && line.entry.result === "signed") {
+    const entry = line.entry;
+    if (entry.kind === "sign" && entry.result === "signed") {
       if (line.anchor === undefined) return broken("anchor_invalid", "signed 줄에 anchor 가 없음");
       if (!seen.has(line.anchor)) return broken("anchor_invalid", "anchor 가 앞 줄 hash 가 아님 (체인을 다시 계산한 흔적)");
-    } else if (line.anchor !== undefined) {
-      return broken("anchor_invalid", "서명 안 한 줄(거절·오류)에 anchor 가 있음");
+      // 기록한 주석은 이 줄 내용·anchor 와 같아야 함 (주석만 따로 고쳐 쌍둥이 서명에 맞추지 못하게)
+      if (line.annotations === undefined && recording) return broken("annotations_invalid", "앞 signed 줄부터 서명 주석을 기록했는데 이 줄에는 없음 (지운 흔적)");
+      if (line.annotations !== undefined) {
+        recording = true;
+        let expected: Record<string, string>;
+        try {
+          expected = logAnnotations(entry, line.anchor);
+        } catch {
+          return broken("annotations_invalid", "기록한 주석을 이 줄 내용으로 만들 수 없음");
+        }
+        const differs = Object.keys(expected).find((k) => line.annotations?.[k] !== expected[k]);
+        if (differs) return broken("annotations_invalid", `기록한 주석 ${differs} 가 이 줄 내용·anchor 와 다름`);
+      }
+      if (line.cancels !== undefined) return broken("cancel_invalid", "signed 줄에 cancels 가 있음");
+      signedByHash.set(line.hash, line);
+    } else {
+      if (line.anchor !== undefined) return broken("anchor_invalid", "서명 안 한 줄(거절·오류)에 anchor 가 있음");
+      if (line.annotations !== undefined) return broken("annotations_invalid", "서명 안 한 줄(거절·오류)에 서명 주석이 있음");
+      if (line.cancels !== undefined) {
+        const target = signedByHash.get(line.cancels);
+        if (entry.kind !== "sign" || entry.reason !== "sign_failed") return broken("cancel_invalid", "cancels 는 sign_failed 거절 줄에만");
+        if (target === undefined || target.entry.kind !== "sign") return broken("cancel_invalid", "cancels 가 앞의 signed 줄 hash 가 아님");
+        if (target.entry.run_id !== entry.run_id || target.entry.digest !== entry.digest) return broken("cancel_invalid", "취소하는 signed 줄과 run_id·digest 가 다름");
+        if (cancelled.has(line.cancels)) return broken("cancel_invalid", "이미 취소한 signed 줄을 다시 취소함");
+        cancelled.add(line.cancels);
+      }
     }
     seen.add(line.hash);
     prev = line.hash;
     lines.push(line);
   }
   return { ok: true, lines, head: prev };
+}
+
+/** 서명 뒤 단계(자기 확인·증명서)가 실패해서 취소된 signed 줄 hash */
+export function cancelledHashes(lines: readonly AuditLine[]): Set<string> {
+  return new Set(lines.flatMap((l) => (l.cancels !== undefined ? [l.cancels] : [])));
 }
 
 /** sign_result 에 해당하는 signed 줄. 같은 게 여러 개면 가장 뒤 */

@@ -120,13 +120,23 @@ async function signOnce(o: SignOptions, seen: { runId?: string }): Promise<SignO
     return { code: 2, reason: "sign_failed", detail };
   }
 
+  // 서명이 레지스트리에 올라간 순간 감사 로그에 먼저 남김 (붙인 주석 전체와 같이).
+  // 뒤 단계가 실패하면 이 줄을 취소하는 거절 줄을 붙임 → 레지스트리에 남은 서명이 "기록에 없는 서명"이 되지 않게
+  const line = signLogLine({ ...base, result: "signed", approver: decision.approver, reason: null, signature_ref: signatureRef }, signedAt);
+  const signedLine = o.auditPath ? await appendAudit(o.auditPath, line, auditHead, o.audit, { annotations }) : undefined;
+  const cancel = async (detail: string): Promise<SignOutcome> => {
+    const failed = signLogLine({ ...base, result: "refused", approver: decision.approver, reason: "sign_failed", signature_ref: null }, now());
+    appendSignLog(o.logPath, failed);
+    if (o.auditPath && signedLine) await appendAudit(o.auditPath, failed, undefined, o.audit, { cancels: signedLine.hash });
+    return { code: 2, reason: "sign_failed", detail };
+  };
+
   // 서명 직후 자기 확인. 키가 공개키와 안 맞거나 주석이 안 붙었으면 여기서 멈춤 (배포 때가 아니라 서명 순간에 잡게)
   if (o.selfVerifier) {
     try {
       await o.selfVerifier.verify(imageRef, annotations);
     } catch (e) {
-      await refused(signLogLine({ ...base, result: "refused", approver: decision.approver, reason: "sign_failed", signature_ref: null }, now()));
-      return { code: 2, reason: "sign_failed", detail: `서명 직후 확인 실패: ${e instanceof SignerError ? e.message : String(e)}` };
+      return cancel(`서명 직후 확인 실패: ${e instanceof SignerError ? e.message : String(e)}`);
     }
   }
 
@@ -142,13 +152,10 @@ async function signOnce(o: SignOptions, seen: { runId?: string }): Promise<SignO
       const predicate = buildPredicate({ result, plan, planSha256: loaded.planSha256, approval: decision.approver === AUTO_APPROVER ? undefined : approval, approvalSha256, auditHead, test });
       await o.signer.attest(imageRef, DEPLOY_PREDICATE_TYPE, predicate);
     } catch (e) {
-      await refused(signLogLine({ ...base, result: "refused", approver: decision.approver, reason: "sign_failed", signature_ref: null }, now()));
-      return { code: 2, reason: "sign_failed", detail: `배포 증명서를 붙이지 못함: ${e instanceof SignerError ? e.message : String(e)}` };
+      return cancel(`배포 증명서를 붙이지 못함: ${e instanceof SignerError ? e.message : String(e)}`);
     }
   }
-  const line = signLogLine({ ...base, result: "signed", approver: decision.approver, reason: null, signature_ref: signatureRef }, signedAt);
-  // 감사 로그를 못 쓰면 sign_result 도 안 남김 (기록 없는 서명 결과로 배포되지 않게)
-  if (o.auditPath) await appendAudit(o.auditPath, line, auditHead, o.audit);
+  // 감사 로그를 못 썼으면 위에서 멈춰서 sign_result 도 안 남김 (기록 없는 서명 결과로 배포되지 않게)
   writeJson(o.outPath, result);
   appendSignLog(o.logPath, line);
   return { code: 0, result };

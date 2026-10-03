@@ -166,10 +166,27 @@
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
     },
+    "annotations": {
+      "description": "signed 줄에만. 이미지 서명에 실제로 붙인 주석 전체. 주석만 바꾼 쌍둥이 서명과 구분하는 데 씀",
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_]{0,39}$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9._~%!'()*+-]*$"
+      }
+    },
+    "cancels": {
+      "description": "서명 뒤 단계(자기 확인·증명서)가 실패한 refused 줄에만. 취소하는 signed 줄의 hash",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
     "hash": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$",
-      "description": "이 줄 hash. sha256(키 정렬 JSON {seq, prev_hash, entry, anchor})"
+      "description": "이 줄 hash. sha256(키 정렬 JSON {seq, prev_hash, entry, anchor, annotations, cancels})"
     }
   },
   "required": [

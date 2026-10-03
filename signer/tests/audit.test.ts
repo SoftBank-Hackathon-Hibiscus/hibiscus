@@ -60,6 +60,11 @@ function recompute(lines: SignLine[], anchor: "keep" | "drop" | "remap"): SignLi
       entry: l.entry,
       ...(l.anchor !== undefined && anchor === "keep" ? { anchor: l.anchor } : {}),
       ...(l.anchor !== undefined && anchor === "remap" ? { anchor: renamed.get(l.anchor) ?? l.anchor } : {}),
+      // 기록한 주석의 audit_head 도 anchor 에 맞춰 같이 고침 (꼼꼼한 공격자)
+      ...(l.annotations !== undefined && l.anchor !== undefined && anchor !== "drop"
+        ? { annotations: { ...l.annotations, audit_head: anchor === "remap" ? (renamed.get(l.anchor) ?? l.anchor) : l.anchor } }
+        : {}),
+      ...(l.cancels !== undefined ? { cancels: renamed.get(l.cancels) ?? l.cancels } : {}),
     };
     const hash = auditHash(body);
     renamed.set(l.hash, hash);
@@ -116,7 +121,9 @@ describe("감사 로그 체인", () => {
 
   it.each([
     ["2번째 줄 requester 수정", (ls: SignLine[]) => { ls[1]!.entry.requester = "mallory"; return ls; }, 2, "hash_mismatch"],
-    ["2번째 줄 수정하고 그 줄 hash 만 다시 계산", (ls: SignLine[]) => { ls[1]!.entry.requester = "mallory"; ls[1]!.hash = auditHash(ls[1]!); return ls; }, 3, "prev_mismatch"],
+    ["1번째(거절) 줄 수정하고 그 줄 hash 만 다시 계산", (ls: SignLine[]) => { ls[0]!.entry.requester = "mallory"; ls[0]!.hash = auditHash(ls[0]!); return ls; }, 2, "prev_mismatch"],
+    // signed 줄은 기록한 서명 주석과도 안 맞아서 그 줄에서 바로 걸림
+    ["2번째(signed) 줄 수정하고 그 줄 hash 만 다시 계산", (ls: SignLine[]) => { ls[1]!.entry.requester = "mallory"; ls[1]!.hash = auditHash(ls[1]!); return ls; }, 2, "annotations_invalid"],
     ["3번째 줄 삭제", (ls: SignLine[]) => ls.filter((_, i) => i !== 2), 3, "seq_gap"],
     ["2·3번째 줄 순서 바꿈", (ls: SignLine[]) => [ls[0], ls[2], ls[1], ls[3]], 2, "seq_gap"],
     ["1번째 줄 거절 기록 삭제하고 번호 다시 매김", (ls: SignLine[]) => ls.slice(1).map((l, i) => ({ ...l, seq: i + 1 })), 1, "prev_mismatch"],
@@ -213,7 +220,7 @@ describe("runAuditVerify", () => {
 
   /** signed 줄을 sign_failed 거절로 바꿔치기 (anchor·signature_ref 제거) */
   const downgrade = (l: SignLine): SignLine => {
-    const { anchor: _anchor, ...rest } = l;
+    const { anchor: _anchor, annotations: _annotations, ...rest } = l;
     return { ...rest, entry: { ...l.entry, result: "refused", reason: "sign_failed", signature_ref: null } };
   };
 

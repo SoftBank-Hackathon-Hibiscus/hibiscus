@@ -114,13 +114,22 @@ export const SignErrorSchema = z
   .describe("plan·승인 기록 형식 오류처럼 서명 결정 전에 멈춘 시도. 감사 로그에만 남김 (decisions.jsonl 계약은 그대로)");
 export type SignError = z.infer<typeof SignErrorSchema>;
 
+// cosign -a 값으로 쓸 수 있는 문자. cosign 은 쉼표로 값을 나누고 = 가 두 번이면 거절해서, encodeURIComponent 결과와 구분자 + 만 허용
+export const ANNOTATION_VALUE_RE = /^[A-Za-z0-9._~%!'()*+-]*$/;
+export const ANNOTATION_KEY_RE = /^[a-z][a-z0-9_]{0,39}$/;
+
 export const AuditLineSchema = z
   .strictObject({
     seq: z.int().min(1).describe("줄 번호. 1 부터 빈 번호 없이"),
     prev_hash: Sha256HexSchema.describe("앞 줄 hash. 첫 줄은 0 이 64개"),
     entry: z.discriminatedUnion("kind", [SignLogSchema, SignErrorSchema]),
     anchor: Sha256HexSchema.optional().describe("signed 줄에만. 서명 직전 체인 끝 hash (이미지 서명 주석 audit_head 와 같은 값)"),
-    hash: Sha256HexSchema.describe("이 줄 hash. sha256(키 정렬 JSON {seq, prev_hash, entry, anchor})"),
+    annotations: z
+      .record(z.string().regex(ANNOTATION_KEY_RE), z.string().regex(ANNOTATION_VALUE_RE))
+      .optional()
+      .describe("signed 줄에만. 이미지 서명에 실제로 붙인 주석 전체. 주석만 바꾼 쌍둥이 서명과 구분하는 데 씀"),
+    cancels: Sha256HexSchema.optional().describe("서명 뒤 단계(자기 확인·증명서)가 실패한 refused 줄에만. 취소하는 signed 줄의 hash"),
+    hash: Sha256HexSchema.describe("이 줄 hash. sha256(키 정렬 JSON {seq, prev_hash, entry, anchor, annotations, cancels})"),
   })
   .describe("서명 감사 로그(해시 체인) 한 줄. signer 안에서만 씀");
 export type AuditLine = z.infer<typeof AuditLineSchema>;

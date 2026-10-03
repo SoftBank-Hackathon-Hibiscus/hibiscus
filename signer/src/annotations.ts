@@ -1,6 +1,6 @@
 // cosign 서명 주석. sign 과 verify 가 이 함수만 써서 서로 어긋나지 않게 함
 import { SignerError } from "./io.js";
-import type { SignLog, SignResult } from "./schema.js";
+import { ANNOTATION_VALUE_RE, type SignLog, type SignResult } from "./schema.js";
 
 /** 서명으로 보장하는 sign_result 필드 */
 export type SignedFields = Pick<SignResult, "run_id" | "plan_hash" | "source_revision" | "targets" | "failover_allowed" | "requester" | "approver" | "signed_at">;
@@ -17,8 +17,7 @@ export interface AnnotationExtras {
 /** 승인 기록이 없을 때(allow, approver auto) 주석 값 */
 export const NO_APPROVAL = "none";
 
-// cosign -a 는 쉼표로 값을 나누고 = 가 두 번이면 거절함. encodeURIComponent 결과와 구분자 + 만 허용
-const SAFE_VALUE = /^[A-Za-z0-9._~%!'()*+-]*$/;
+const SAFE_VALUE = ANNOTATION_VALUE_RE;
 
 /** targets 를 항목마다 인코딩해서 + 로 연결. 순서 그대로 */
 export function encodeTargets(targets: readonly string[]): string {
@@ -27,6 +26,15 @@ export function encodeTargets(targets: readonly string[]): string {
   } catch {
     // 짝 없는 서로게이트 문자 등은 encodeURIComponent 가 URIError
     throw new SignerError("ANNOTATION_INVALID", `targets 에 인코딩할 수 없는 문자가 있음: ${JSON.stringify(targets)}`);
+  }
+}
+
+/** 시각 같은 값 하나를 인코딩. 짝 없는 서로게이트는 SignerError 로 */
+function encodeValue(name: string, value: string): string {
+  try {
+    return encodeURIComponent(value);
+  } catch {
+    throw new SignerError("ANNOTATION_INVALID", `${name} 에 인코딩할 수 없는 문자가 있음: ${JSON.stringify(value)}`);
   }
 }
 
@@ -45,7 +53,7 @@ export function signAnnotations(f: SignedFields, x: AnnotationExtras = {}): Reco
     approver: f.approver,
     ...(x.approvalSha256 !== undefined ? { approval_sha256: x.approvalSha256 } : {}),
     // 서명 시각도 묶음 (sign_result 의 signed_at 만 고쳐서 유효기간 검사를 피하지 못하게). ISO 시각의 : 는 인코딩
-    signed_at: encodeURIComponent(f.signed_at),
+    signed_at: encodeValue("signed_at", f.signed_at),
     ...(x.planSha256 !== undefined ? { plan_sha256: x.planSha256 } : {}),
     ...(x.auditHead !== undefined ? { audit_head: x.auditHead } : {}),
   });
@@ -60,7 +68,7 @@ export function logAnnotations(entry: SignLog, anchor: string): Record<string, s
     source_revision: entry.source_revision ?? NO_SOURCE_REVISION,
     requester: entry.requester,
     approver: entry.approver,
-    signed_at: encodeURIComponent(entry.time),
+    signed_at: encodeValue("time", entry.time),
     audit_head: anchor,
   });
 }

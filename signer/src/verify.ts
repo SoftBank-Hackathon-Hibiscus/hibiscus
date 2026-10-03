@@ -4,7 +4,7 @@ import { logAnnotations, NO_APPROVAL, signAnnotations } from "./annotations.js";
 import { loadApproval } from "./approval.js";
 import { checkAnchors, type AnchorBreak } from "./anchor.js";
 import { DEPLOY_PREDICATE_TYPE, findDeployStatement } from "./attestation.js";
-import { checkAuditChain, findSignedLine, GENESIS, readAuditFile, type AuditBreak } from "./audit.js";
+import { cancelledHashes, checkAuditChain, findSignedLine, GENESIS, readAuditFile, type AuditBreak } from "./audit.js";
 import { imageRefOf, type BlobVerifier, type ImageVerifier } from "./cosign.js";
 import { canonicalize, parseWith, readJson, sha256Hex, SignerError } from "./io.js";
 import { DEFAULT_PLAN_SCHEMA, loadPlan } from "./plan.js";
@@ -95,15 +95,25 @@ export async function runVerify(o: VerifyOptions): Promise<VerifyOutcome> {
   }
 
   let auditHead: string | undefined;
+  let recorded: Record<string, string> | undefined;
   if (o.auditPath !== undefined) {
     const check = checkAuditChain(readAuditFile(o.auditPath));
     if (!check.ok) return fail("audit_mismatch", `감사 로그 ${check.line}번째 줄 (${check.reason}): ${check.detail}`);
     const line = findSignedLine(check.lines, result);
     if (!line) return fail("audit_mismatch", "감사 로그에 이 서명 결과(signed 줄)가 없음");
+    if (cancelledHashes(check.lines).has(line.hash)) return fail("audit_mismatch", `서명 뒤 단계(자기 확인·증명서)가 실패해서 취소된 서명 (${line.seq}번째 줄)`);
     auditHead = line.anchor;
+    recorded = line.annotations;
   }
 
-  const annotations = signAnnotations(result, { planSha256, auditHead, approvalSha256 });
+  let annotations = signAnnotations(result, { planSha256, auditHead, approvalSha256 });
+  if (recorded !== undefined) {
+    // 서명 당시 기록한 주석과 sign_result 가 같아야 하고, 레지스트리에는 기록한 그 서명(주석 전체)이 있어야 함.
+    // 키를 가진 사람이 targets 만 바꾼 쌍둥이 서명을 붙이고 sign_result 를 고쳐도 걸림
+    const differs = Object.keys(annotations).find((k) => recorded?.[k] !== annotations[k]);
+    if (differs) return fail("audit_mismatch", `sign_result 의 ${differs} 가 서명 당시 감사 로그 기록과 다름`);
+    annotations = recorded;
+  }
   try {
     await o.verifier.verify(imageRef, annotations);
   } catch (e) {
@@ -144,7 +154,25 @@ export interface AuditVerifyOptions {
   anchors?: { path: string; verifier: BlobVerifier };
 }
 
-export type AuditImageReason = "ref_invalid" | "signature_invalid" | "unlogged_signature";
+export type AuditImageReason = "ref_invalid" | "signature_invalid" | "unlogged_signature" | "twin_signature";
+
+/**
+ * 레지스트리 서명이 이 signed 줄의 서명인지. 주석 전체를 기록한 줄은 정확히 같아야 하고(쌍둥이 서명 거부),
+ * 예전 줄은 줄 내용으로 만들 수 있는 주석만 비교
+ */
+export function sigMatchesLine(sig: Record<string, string>, line: AuditLine): boolean {
+  if (line.anchor === undefined || line.entry.kind !== "sign") return false;
+  if (line.annotations !== undefined) return canonicalize(sig) === canonicalize(line.annotations);
+  return Object.entries(logAnnotations(line.entry, line.anchor)).every(([k, v]) => sig[k] === v);
+}
+
+/** 기록과 서명 주석 차이 (detail 용) */
+function annotationDiff(expected: Record<string, string>, sig: Record<string, string>): string {
+  const keys = [...new Set([...Object.keys(expected), ...Object.keys(sig)])].sort();
+  return keys
+    .flatMap((k) => (expected[k] === sig[k] ? [] : expected[k] === undefined ? [`+${k}=${sig[k]}`] : sig[k] === undefined ? [`-${k}`] : [`${k} ${expected[k]} → ${sig[k]}`]))
+    .join(", ");
+}
 
 export type AuditVerifyOutcome =
   | { code: 0; lines: number; head: string; signed: number; images: number; anchors?: number }
@@ -197,8 +225,7 @@ export async function runAuditVerify(o: AuditVerifyOptions): Promise<AuditVerify
   const refs = new Set(signedAt.keys());
   for (const line of lines) if (line.entry.kind === "sign") for (const repo of repos) refs.add(imageRefOf(repo, line.entry.digest));
   const lineOfHash = new Map<string, number>([[GENESIS, 0], ...lines.map((l) => [l.hash, l.seq] as const)]);
-  const matches = (sig: Record<string, string>, line: AuditLine) =>
-    line.anchor !== undefined && line.entry.kind === "sign" && Object.entries(logAnnotations(line.entry, line.anchor)).every(([k, v]) => sig[k] === v);
+  const matches = sigMatchesLine;
 
   let images = 0;
   for (const imageRef of [...refs].sort()) {
@@ -224,6 +251,12 @@ export async function runAuditVerify(o: AuditVerifyOptions): Promise<AuditVerify
         return { code: 1, line: 0, reason: "unlogged_signature", detail: `감사 로그 없이 한 서명 (audit_head 없음, run_id=${sig.run_id ?? "?"}): ${imageRef}` };
       }
       if (!logged.some((line) => matches(sig, line))) {
+        // 같은 실행·같은 anchor 의 기록이 있는데 주석이 다르면, 정상 서명을 복사해서 일부만 바꾼 쌍둥이 서명
+        const twin = logged.find((line) => line.anchor === anchor && line.entry.kind === "sign" && line.entry.run_id === sig.run_id);
+        if (twin !== undefined && twin.anchor !== undefined && twin.entry.kind === "sign") {
+          const expected = twin.annotations ?? logAnnotations(twin.entry, twin.anchor);
+          return { code: 1, line: twin.seq, reason: "twin_signature", detail: `기록된 서명과 주석만 다른 서명 (${annotationDiff(expected, sig) || "주석 같음"}): ${imageRef}` };
+        }
         const at = lineOfHash.get(anchor);
         return {
           code: 1,
