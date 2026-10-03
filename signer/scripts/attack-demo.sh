@@ -2,14 +2,14 @@
 # 공격 시연: 서명한 뒤에 결과·기록·키를 몰래 바꾸면 signer 가 어디서 잡는지 차례로 보여줌
 # 로컬 레지스트리(crane)와 임시 키만 씀. 팀 키·GCP·공개 Rekor 는 안 씀 (Rekor 끈 모드)
 #
-# 필요: cosign v3, crane, node (signer 에서 npm ci 끝난 상태)
+# 필요: cosign v3, crane, node (signer 에서 npm ci 끝난 상태), ssh-keygen (OpenSSH 8.1 이상)
 # 실행: cd signer && bash scripts/attack-demo.sh
 #   DEMO_PORT=5055  로컬 레지스트리 포트
 #   DEMO_KEEP=1     끝나도 작업 폴더를 지우지 않음 (파일 직접 보고 싶을 때)
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-for bin in cosign crane node; do
+for bin in cosign crane node ssh-keygen; do
   command -v "$bin" >/dev/null || { echo "필요한 도구가 없음: $bin"; exit 2; }
 done
 [ -x node_modules/.bin/tsx ] || { echo "signer 에서 npm ci 를 먼저 실행"; exit 2; }
@@ -17,7 +17,7 @@ done
 # 사용자 환경변수가 시연 결과를 바꾸지 않게 비움
 unset SIGNER_COSIGN_KEY SIGNER_AUDIT_LOG SIGNER_AUDIT_ANCHORS SIGNER_PUBKEY_SHA256 COSIGN_PUBLIC_KEY IMAGE_REPO \
   SIGNER_SELF_VERIFY SIGNER_ATTEST SIGNER_MINIMAL_ENV SIGNER_STRICT_KEY_PERMS SIGNER_MAX_AGE_MIN SIGNER_APPROVAL_TTL_MIN \
-  SIGNER_NO_TLOG SIGNER_VERIFY_LATEST SIGNER_POLICY_SHA256 SIGNER_AUDIT_SWEEP
+  SIGNER_NO_TLOG SIGNER_VERIFY_LATEST SIGNER_POLICY_SHA256 SIGNER_AUDIT_SWEEP SIGNER_APPROVERS SIGNER_APPROVERS_SHA256 COSIGN_REPOSITORY
 
 PORT="${DEMO_PORT:-5055}"
 REG="localhost:$PORT/hib/todo"
@@ -139,6 +139,23 @@ signer approve --plan "$W/plan-na.json" --requester alice --approver bob --out "
 edit "$W/approval.json" "$W/approval-self.json" "o.approver='ALICE'"
 check 1 "승인 기록의 승인자를 요청자 본인(대소문자만 바꿈)으로 고침" \
   env SIGNER_COSIGN_KEY="$KEY" "${SIGNER[@]}" sign --plan "$W/plan-na.json" --approval "$W/approval-self.json" "${SIGN[@]}" --out "$W/x.json"
+# 승인자 SSH 서명: 명부(allowed_signers)에는 bob 만. 확인용 서명은 시험 실행(--dry-run)으로 해서 레지스트리·감사 로그는 안 건드림
+mkdir -p "$W/ssh"
+for who in bob mallory; do ssh-keygen -q -t ed25519 -N "" -C "$who" -f "$W/ssh/$who"; done
+echo "bob namespaces=\"hibiscus-approval\" $(cat "$W/ssh/bob.pub")" >"$W/allowed_signers"
+SIGN_NA=(--plan "$W/plan-na.json" --requester alice --image-repo "$REG" --log "$W/x.jsonl" --dry-run --approvers "$W/allowed_signers" --out "$W/x.json")
+check 1 "승인자 명부를 켰는데 서명 없이 손으로 만든 bob 승인 기록" \
+  signer sign "${SIGN_NA[@]}" --approval "$W/approval.json"
+ssh-keygen -Y sign -f "$W/ssh/mallory" -n hibiscus-approval <"$W/approval.json" >"$W/approval.json.sig" 2>/dev/null
+check 1 "mallory 가 자기 SSH 키로 bob 이름 승인 기록에 서명" \
+  signer sign "${SIGN_NA[@]}" --approval "$W/approval.json"
+signer approve --plan "$W/plan-na.json" --requester alice --approver bob --ssh-key "$W/ssh/bob" --out "$W/approval-bob.json" >/dev/null 2>&1
+check 0 "bob 이 자기 SSH 키로 서명한 승인 기록" \
+  signer sign "${SIGN_NA[@]}" --approval "$W/approval-bob.json"
+edit "$W/approval-bob.json" "$W/approval-bob2.json" "o.approved_at=new Date().toISOString()"
+cp "$W/approval-bob.json.sig" "$W/approval-bob2.json.sig"
+check 1 "bob 서명 뒤 승인 시각을 고친 승인 기록" \
+  signer sign "${SIGN_NA[@]}" --approval "$W/approval-bob2.json"
 chmod 644 "$KEY"
 check 2 "다른 사용자도 읽을 수 있는 개인키로 서명 (SIGNER_STRICT_KEY_PERMS=1)" \
   env SIGNER_COSIGN_KEY="$KEY" SIGNER_STRICT_KEY_PERMS=1 "${SIGNER[@]}" sign --plan "$W/plan.json" "${SIGN[@]}" --out "$W/x.json"

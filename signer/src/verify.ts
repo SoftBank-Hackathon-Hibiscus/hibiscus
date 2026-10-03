@@ -1,7 +1,7 @@
 // sign_result.json 이 signer 가 서명한 그대로인지(verify), 감사 로그가 끊기지 않았는지(audit) 확인
 import { fileURLToPath } from "node:url";
 import { decodeTargets, encodeImageRepo, logAnnotations, NO_APPROVAL, signAnnotations } from "./annotations.js";
-import { loadApproval } from "./approval.js";
+import { readApproval, verifyApprovalSignature } from "./approval.js";
 import { checkAnchors, type AnchorBreak } from "./anchor.js";
 import { DEPLOY_PREDICATE_TYPE, findDeployStatement } from "./attestation.js";
 import { cancelledHashes, checkAuditChain, findSignedLine, GENESIS, readAuditFile, revocationOf, type AuditBreak } from "./audit.js";
@@ -44,6 +44,8 @@ export interface VerifyOptions {
   anchors?: { path: string; verifier: BlobVerifier };
   /** 있으면 이 승인 기록으로 서명했는지까지 확인 (사람 승인일 때) */
   approvalPath?: string;
+  /** approvalPath 와 같이: 승인 기록이 승인자 본인 SSH 키로 서명됐는지, 서명 때도 그 키로 확인했는지(approval_key 주석)까지 */
+  approvers?: { allowedSignersPath: string; signaturePath?: string };
   /** 있으면 배포 증명서(in-toto)도 확인. policyPath 를 주면 Rego 정책까지, testResultPath 를 주면 그 시험 결과로 서명했는지까지 */
   attestation?: { policyPath?: string; testResultPath?: string };
   /** 있으면 서명한 지 이 시간(ms)이 지난 결과는 거부. signed_at 도 서명 주석에 묶여 있어서 고쳐도 걸림 */
@@ -101,12 +103,19 @@ export async function runVerify(o: VerifyOptions): Promise<VerifyOutcome> {
 
   // 자동 승인 결과는 항상 "승인 기록 없음(none)"으로 서명돼 있어야 함. 사람 승인은 승인 기록을 주면 그 해시까지 확인
   let approvalSha256: string | undefined = result.approver === AUTO_APPROVER ? NO_APPROVAL : undefined;
+  let approvalKey: string | undefined;
+  if (o.approvers !== undefined && o.approvalPath === undefined) throw new SignerError("ARG_INVALID", "--approvers 는 --approval 과 같이 써야 함 (그 승인 기록의 서명을 확인함)");
   if (o.approvalPath !== undefined) {
     if (result.approver === AUTO_APPROVER) return fail("approval_mismatch", "자동 승인(auto) 결과인데 승인 기록을 줌");
-    const approval = loadApproval(o.approvalPath);
+    const { approval, bytes } = readApproval(o.approvalPath);
     const differs = (["run_id", "digest", "plan_hash", "requester", "approver"] as const).find((k) => approval[k] !== result[k]);
     if (differs) return fail("approval_mismatch", `승인 기록과 sign_result 의 ${differs} 가 다름`);
     approvalSha256 = sha256Hex(canonicalize(approval));
+    if (o.approvers !== undefined) {
+      const sig = await verifyApprovalSignature(bytes, o.approvers.signaturePath ?? `${o.approvalPath}.sig`, approval.approver, o.approvers.allowedSignersPath);
+      if (!sig.ok) return fail("approval_mismatch", sig.detail);
+      approvalKey = sig.key;
+    }
   }
 
   let auditHead: string | undefined;
@@ -134,7 +143,7 @@ export async function runVerify(o: VerifyOptions): Promise<VerifyOutcome> {
     recorded = line.annotations;
   }
 
-  let annotations = signAnnotations(result, { planSha256, auditHead, approvalSha256, imageRepo: repo });
+  let annotations = signAnnotations(result, { planSha256, auditHead, approvalSha256, imageRepo: repo, approvalKey });
   if (recorded !== undefined) {
     // 서명 당시 기록한 주석과 sign_result 가 같아야 하고, 레지스트리에는 기록한 그 서명(주석 전체)이 있어야 함.
     // 키를 가진 사람이 targets 만 바꾼 쌍둥이 서명을 붙이고 sign_result 를 고쳐도 걸림

@@ -81,6 +81,11 @@
       ],
       "description": "승인 기록(키 정렬 JSON) 해시. 자동 승인이면 none"
     },
+    "approval_key": {
+      "description": "승인 기록에 서명한 승인자 SSH 키 지문. 승인자 서명을 확인했을 때만",
+      "type": "string",
+      "pattern": "^SHA256:[A-Za-z0-9+/=]+$"
+    },
     "audit_head": {
       "description": "감사 로그를 켰을 때 서명 직전 체인 끝",
       "type": "string",

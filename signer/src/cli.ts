@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { parseArgs } from "node:util";
-import { createApproval } from "./approval.js";
+import { createApproval, signApprovalFile } from "./approval.js";
 import { CosignSigner, CosignVerifier, DryRunSigner, isKmsKey, MultiKeyVerifier, type BlobVerifier, type ImageVerifier } from "./cosign.js";
 import { runAnchor } from "./anchor.js";
 import { runRevoke } from "./revoke.js";
@@ -11,24 +11,27 @@ import { CraneLister } from "./registry.js";
 import { runReconcile } from "./reconcile.js";
 import { SignerError, writeJson } from "./io.js";
 import { DEFAULT_PLAN_SCHEMA, loadPlan } from "./plan.js";
-import { checkPublicKeyPins, looseKeyPermissions, publicKeyFingerprint, readPolicy } from "./keys.js";
+import { checkPublicKeyPins, looseKeyPermissions, publicKeyFingerprint, readApprovers, readPolicy } from "./keys.js";
 import { DEFAULT_POLICY } from "./attestation.js";
 import { runSign } from "./sign.js";
 import { DEFAULT_PUBLIC_KEY, runAuditVerify, runVerify } from "./verify.js";
 
 const USAGE = `사용법
-  npx tsx src/cli.ts approve --plan <plan.json> --requester <id> --approver <id> [--out approval.json]
+  npx tsx src/cli.ts approve --plan <plan.json> --requester <id> --approver <id> [--out approval.json] [--ssh-key <승인자 SSH 키>]
   npx tsx src/cli.ts sign --plan <plan.json> --requester <id> [--approval <approval.json>]
                           --image-repo <저장소> (--key <cosign.key> [--no-tlog] | --dry-run)
                           [--out sign_result.json] [--log decisions.jsonl] [--audit <감사 로그>] [--approval-ttl <분>]
                           [--self-verify] [--attest [--test-result <test_result.json>]] [--minimal-env]
+                          [--approvers <allowed_signers> [--approvers-sha256 <지문>] [--approval-sig <승인 서명>]]
                           [--pub <cosign.pub>] [--pubkey-sha256 <지문>] [--plan-schema <Plan.schema.json>]
   npx tsx src/cli.ts verify --result <sign_result.json> [--plan <plan.json>] [--approval <approval.json>] [--audit <감사 로그>] [--image-repo <저장소>]
                             [--attestation [--policy <deploy.rego>] [--policy-sha256 <지문>] [--test-result <test_result.json>]] [--max-age <분>] [--json]
+                            [--approvers <allowed_signers> [--approvers-sha256 <지문>] [--approval-sig <승인 서명>]]
                             [--latest] [--pub <cosign.pub>] [--pubkey-sha256 <지문>] [--no-tlog] [--plan-schema <Plan.schema.json>]
   npx tsx src/cli.ts audit --audit <감사 로그> [--anchors <고정값 파일>] [--images [--strict-images] [--image-repo <저장소>]
                            [--sweep [--sweep-max <N>]] [--digests-file <파일>]] [--json] [--pub <cosign.pub>] [--no-tlog]
   npx tsx src/cli.ts fingerprint [--pub <cosign.pub>] [--pubkey-sha256 <지문>] | --policy <정책.rego> [--policy-sha256 <지문>]
+                                 | --approvers <allowed_signers> [--approvers-sha256 <지문>]
   npx tsx src/cli.ts anchor --audit <감사 로그> [--anchors <고정값 파일>] (--key <cosign.key>) [--no-tlog]
   npx tsx src/cli.ts reconcile --observed <observed.jsonl> --audit <감사 로그> [--anchors <고정값 파일>] [--json] [--pub <cosign.pub>] [--no-tlog]
   npx tsx src/cli.ts revoke --audit <감사 로그> --digest <sha256:…> [--run-id <id>] --reason <vulnerability|policy_changed|key_compromise|mistake>
@@ -45,6 +48,10 @@ const USAGE = `사용법
   --minimal-env cosign 에 필요한 환경변수만 넘김 (backend 의 다른 비밀값이 cosign 으로 안 가게). 없으면 SIGNER_MINIMAL_ENV=1
   --self-verify 서명 직후 공개키(--pub)로 바로 다시 확인. 실패하면 sign_result 안 남김. 없으면 SIGNER_SELF_VERIFY=1
   --pubkey-sha256 공개키 지문 고정 (여러 번 가능). 확인에 쓰는 공개키가 이 목록에 없으면 멈춤. 없으면 SIGNER_PUBKEY_SHA256(쉼표로 여러 개)
+  --ssh-key     approve: 승인 기록에 승인자 SSH 키(개인키 또는 ssh-agent 에 올린 키의 공개키)로 서명해서 <승인 기록>.sig 로 저장
+  --approvers   승인자 명부(ssh allowed_signers 형식). 사람 승인은 명부에 그 id 로 적힌 키로 서명한 승인 기록만 받음.
+                없으면 SIGNER_APPROVERS (승인 기록을 줄 때만). 서명 파일은 --approval-sig, 없으면 <승인 기록>.sig
+  --approvers-sha256 승인자 명부 지문 고정 (여러 번 가능). 없으면 SIGNER_APPROVERS_SHA256(쉼표로 여러 개)
   --approval-ttl 승인 유효시간(분). 승인한 지 이보다 오래되면 서명 안 함 (approval_expired). 없으면 SIGNER_APPROVAL_TTL_MIN 환경변수, 둘 다 없으면 시간은 안 봄
 
   verify        sign_result.json 의 targets·approver 등이 서명된 값 그대로인지 cosign verify 로 확인
@@ -78,6 +85,14 @@ const USAGE = `사용법
 function required(value: string | undefined, name: string): string {
   if (!value) throw new SignerError("ARG_MISSING", `--${name} 가 필요함\n\n${USAGE}`);
   return value;
+}
+
+/** 확인한 바이트를 임시 파일(0600)로 써서 그 경로를 넘김. 확인한 뒤 원래 파일을 바꿔치기해도 소용없게 */
+function pinnedCopy(bytes: Buffer, name: string): { path: string; cleanup: () => void } {
+  const dir = mkdtempSync(join(tmpdir(), "signer-pinned-"));
+  const path = join(dir, name);
+  writeFileSync(path, bytes, { mode: 0o600 });
+  return { path, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
 /** 분 단위 양수 → ms. 없으면 undefined */
@@ -126,6 +141,10 @@ const OPTIONS = {
   "digests-file": { type: "string" },
   "sweep-max": { type: "string" },
   observed: { type: "string" },
+  "ssh-key": { type: "string" },
+  approvers: { type: "string" },
+  "approval-sig": { type: "string" },
+  "approvers-sha256": { type: "string", multiple: true },
   json: { type: "boolean", default: false },
 } as const;
 
@@ -164,6 +183,13 @@ async function main(argv: string[]): Promise<number> {
   const pinnedPub = pins.length > 0 ? pins : undefined;
   // Rego 정책 지문 고정 (verify --attestation 에서만 씀)
   const policyPins = list(values["policy-sha256"], process.env.SIGNER_POLICY_SHA256);
+  // 승인자 명부(ssh allowed_signers) 지문 고정. 명부를 바꿔 자기 키를 넣지 못하게
+  const approversPins = list(values["approvers-sha256"], process.env.SIGNER_APPROVERS_SHA256);
+  const checkedApprovers = (path: string, cleanups: Array<() => void>): string => {
+    const copy = pinnedCopy(readApprovers(path, approversPins).bytes, "allowed_signers");
+    cleanups.push(copy.cleanup);
+    return copy.path;
+  };
   // 확인에 쓸 확인기. 지문을 고정했으면 고정 목록에 없는 공개키로는 확인하지 않음
   const trustedVerifier = (): ImageVerifier & BlobVerifier => {
     if (pinnedPub !== undefined) for (const p of pubs) checkPublicKeyPins(p, pinnedPub);
@@ -179,6 +205,9 @@ async function main(argv: string[]): Promise<number> {
     const out = values.out ?? "approval.json";
     writeJson(out, approval);
     console.log(`[signer] 승인 기록 저장: ${out} (run_id=${approval.run_id}, approver=${approval.approver})`);
+    // 승인자 SSH 키로 서명 (sign --approvers 로 확인). 이전 서명 파일은 먼저 지움
+    rmSync(`${out}.sig`, { force: true });
+    if (values["ssh-key"]) console.log(`  승인자 서명: ${await signApprovalFile(out, values["ssh-key"])}`);
     return 0;
   }
 
@@ -200,25 +229,34 @@ async function main(argv: string[]): Promise<number> {
     // 시험 실행은 실제 서명이 없어서 자기 확인을 안 함. 지문 확인은 서명 전에 끝냄
     const selfVerify = !dryRun && (values["self-verify"] === true || process.env.SIGNER_SELF_VERIFY === "1");
     const selfVerifier = selfVerify ? trustedVerifier() : undefined;
+    const signCleanups: Array<() => void> = [];
+    const signApproversFile = values.approvers || (values.approval ? process.env.SIGNER_APPROVERS || undefined : undefined);
     const attestRequested = values.attest === true || process.env.SIGNER_ATTEST === "1";
     // 시험 결과는 증명서에만 들어감. --attest 없이 주면 확인만 하고 버려지는 걸 막음
     if (values["test-result"] !== undefined && !attestRequested) throw new SignerError("ARG_INVALID", "--test-result 는 --attest(SIGNER_ATTEST=1)와 같이 써야 함 (시험 결과는 배포 증명서에 들어감)");
     const attest = !dryRun && attestRequested;
-    const outcome = await runSign({
-      planPath: required(values.plan, "plan"),
-      requester: required(values.requester, "requester"),
-      ...(values.approval ? { approvalPath: values.approval } : {}),
-      imageRepo: required(values["image-repo"] ?? process.env.IMAGE_REPO, "image-repo"),
-      outPath: out,
-      logPath: values.log ?? "decisions.jsonl",
-      signer,
-      planSchemaPath: planSchema,
-      ...(auditPath !== undefined ? { auditPath } : {}),
-      ...(approvalTtlMs !== undefined ? { approvalTtlMs } : {}),
-      ...(selfVerifier !== undefined ? { selfVerifier } : {}),
-      ...(attest ? { attest } : {}),
-      ...(values["test-result"] !== undefined ? { testResultPath: values["test-result"] } : {}),
-    });
+    let outcome: Awaited<ReturnType<typeof runSign>>;
+    try {
+      const signApprovers = signApproversFile !== undefined ? checkedApprovers(signApproversFile, signCleanups) : undefined;
+      outcome = await runSign({
+        planPath: required(values.plan, "plan"),
+        requester: required(values.requester, "requester"),
+        ...(values.approval ? { approvalPath: values.approval } : {}),
+        imageRepo: required(values["image-repo"] ?? process.env.IMAGE_REPO, "image-repo"),
+        outPath: out,
+        logPath: values.log ?? "decisions.jsonl",
+        signer,
+        planSchemaPath: planSchema,
+        ...(auditPath !== undefined ? { auditPath } : {}),
+        ...(approvalTtlMs !== undefined ? { approvalTtlMs } : {}),
+        ...(selfVerifier !== undefined ? { selfVerifier } : {}),
+        ...(attest ? { attest } : {}),
+        ...(values["test-result"] !== undefined ? { testResultPath: values["test-result"] } : {}),
+        ...(signApprovers !== undefined ? { approvers: { allowedSignersPath: signApprovers, ...(values["approval-sig"] ? { signaturePath: values["approval-sig"] } : {}) } } : {}),
+      });
+    } finally {
+      for (const c of signCleanups) c();
+    }
     if (outcome.code === 0) {
       const r = outcome.result;
       console.log(`[signer] 서명함 run_id=${r.run_id} digest=${r.digest}`);
@@ -243,7 +281,7 @@ async function main(argv: string[]): Promise<number> {
     let outcome: Awaited<ReturnType<typeof runVerify>>;
     let keys: ReturnType<typeof fingerprints>;
     let policySha256: string | undefined;
-    let policyDir: string | undefined;
+    const cleanups: Array<() => void> = [];
     const verifyAnchors = auditPath !== undefined ? anchorsPath : values.anchors || undefined;
     try {
       if (values["test-result"] !== undefined && values.attestation !== true) throw new SignerError("ARG_INVALID", "--test-result 는 --attestation 과 같이 써야 함 (시험 결과는 증명서에 들어 있음)");
@@ -254,10 +292,13 @@ async function main(argv: string[]): Promise<number> {
       if (values.attestation === true) {
         const policy = readPolicy(policyPath, policyPins);
         policySha256 = policy.sha256;
-        policyDir = mkdtempSync(join(tmpdir(), "signer-policy-"));
-        checkedPolicy = join(policyDir, basename(policyPath).endsWith(".rego") ? basename(policyPath) : "policy.rego");
-        writeFileSync(checkedPolicy, policy.bytes, { mode: 0o600 });
+        const copy = pinnedCopy(policy.bytes, basename(policyPath).endsWith(".rego") ? basename(policyPath) : "policy.rego");
+        cleanups.push(copy.cleanup);
+        checkedPolicy = copy.path;
       }
+      // 승인자 명부: 플래그는 항상, 환경변수(SIGNER_APPROVERS)는 승인 기록을 줄 때만
+      const approversFile = values.approvers || (values.approval ? process.env.SIGNER_APPROVERS || undefined : undefined);
+      const approvers = approversFile !== undefined ? checkedApprovers(approversFile, cleanups) : undefined;
       maxAgeMs = minutes(values["max-age"] || process.env.SIGNER_MAX_AGE_MIN, "max-age");
       outcome = await runVerify({
         resultPath: required(values.result, "result"),
@@ -265,6 +306,7 @@ async function main(argv: string[]): Promise<number> {
         ...(imageRepo !== undefined ? { imageRepo } : {}),
         ...(values.plan !== undefined ? { planPath: values.plan } : {}),
         ...(values.approval ? { approvalPath: values.approval } : {}),
+        ...(approvers !== undefined ? { approvers: { allowedSignersPath: approvers, ...(values["approval-sig"] ? { signaturePath: values["approval-sig"] } : {}) } } : {}),
         ...(values.attestation === true
           ? { attestation: { policyPath: checkedPolicy, ...(values["test-result"] !== undefined ? { testResultPath: values["test-result"] } : {}) } }
           : {}),
@@ -285,7 +327,7 @@ async function main(argv: string[]): Promise<number> {
       }
       throw e;
     } finally {
-      if (policyDir !== undefined) rmSync(policyDir, { recursive: true, force: true });
+      for (const c of cleanups) c();
     }
     if (json) {
       console.log(
@@ -467,6 +509,12 @@ async function main(argv: string[]): Promise<number> {
   }
 
   if (command === "fingerprint") {
+    // --approvers 면 승인자 명부 지문 (--approvers-sha256 고정값으로 쓸 값)
+    if (values.approvers) {
+      const approvers = readApprovers(values.approvers, approversPins);
+      console.log(`sha256:${approvers.sha256}  ${values.approvers}${approversPins.length > 0 ? "  (고정값에 있음)" : ""}`);
+      return 0;
+    }
     // --policy 면 Rego 정책 파일 지문 (--policy-sha256 고정값으로 쓸 값)
     if (values.policy) {
       const policy = readPolicy(values.policy, policyPins);

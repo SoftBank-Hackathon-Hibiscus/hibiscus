@@ -14,6 +14,8 @@ export interface AnnotationExtras {
   approvalSha256?: string | undefined;
   /** 서명한 저장소 (태그 없는 주소). 이미지와 서명을 다른 저장소로 복사해 쓰지 못하게 */
   imageRepo?: string | undefined;
+  /** 승인 기록에 서명한 승인자 SSH 키 지문 (SHA256:…). 승인자 서명을 확인했을 때만 */
+  approvalKey?: string | undefined;
 }
 
 /** 승인 기록이 없을 때(allow, approver auto) 주석 값 */
@@ -69,6 +71,7 @@ export function signAnnotations(f: SignedFields, x: AnnotationExtras = {}): Reco
     ...(x.planSha256 !== undefined ? { plan_sha256: x.planSha256 } : {}),
     ...(x.auditHead !== undefined ? { audit_head: x.auditHead } : {}),
     ...(x.imageRepo !== undefined ? { image_repo: encodeImageRepo(x.imageRepo) } : {}),
+    ...(x.approvalKey !== undefined ? { approval_key: encodeValue("approval_key", x.approvalKey) } : {}),
   });
 }
 

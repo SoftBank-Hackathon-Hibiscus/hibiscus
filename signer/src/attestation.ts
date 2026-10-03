@@ -78,6 +78,7 @@ export const DeployPredicateSchema = z
     approver: PersonSchema.describe("승인자. allow 면 auto"),
     approved_at: z.string().optional().describe("사람 승인일 때 승인 시각"),
     approval_sha256: Sha256OrNone.describe("승인 기록(키 정렬 JSON) 해시. 자동 승인이면 none"),
+    approval_key: z.string().regex(/^SHA256:[A-Za-z0-9+/=]+$/).optional().describe("승인 기록에 서명한 승인자 SSH 키 지문. 승인자 서명을 확인했을 때만"),
     audit_head: z.string().regex(/^[0-9a-f]{64}$/).optional().describe("감사 로그를 켰을 때 서명 직전 체인 끝"),
     test: TestEvidenceSchema.optional().describe("시험 결과를 줬을 때만"),
     signature_ref: z.string().min(1),
@@ -93,6 +94,7 @@ export interface PredicateInput {
   planSha256: string;
   approval?: Approval | undefined;
   approvalSha256: string;
+  approvalKey?: string | undefined;
   auditHead?: string | undefined;
   test?: TestEvidence | undefined;
 }
@@ -117,6 +119,7 @@ export function buildPredicate(i: PredicateInput): DeployPredicate {
     approver: i.result.approver,
     ...(i.approval ? { approved_at: i.approval.approved_at } : {}),
     approval_sha256: i.approvalSha256,
+    ...(i.approvalKey !== undefined ? { approval_key: i.approvalKey } : {}),
     ...(i.auditHead !== undefined ? { audit_head: i.auditHead } : {}),
     ...(i.test !== undefined ? { test: i.test } : {}),
     signature_ref: i.result.signature_ref,

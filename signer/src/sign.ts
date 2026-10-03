@@ -3,7 +3,7 @@
 import { existsSync, rmSync } from "node:fs";
 import { NO_APPROVAL, signAnnotations } from "./annotations.js";
 import { buildPredicate, DEPLOY_PREDICATE_TYPE, loadTestEvidence } from "./attestation.js";
-import { loadApproval } from "./approval.js";
+import { readApproval, verifyApprovalSignature } from "./approval.js";
 import { appendAudit, readAuditState, signRevocation, type AuditOptions } from "./audit.js";
 import { imageRefOf, type ImageSigner, type ImageVerifier } from "./cosign.js";
 import { decideSign } from "./decide.js";
@@ -29,6 +29,11 @@ export interface SignOptions {
   selfVerifier?: ImageVerifier;
   /** true 면 배포 증명서(in-toto attestation)도 붙임. 못 붙이면 sign_result 를 안 남김 */
   attest?: boolean;
+  /**
+   * 있으면 사람 승인은 승인자가 SSH 키로 서명한 승인 기록만 받음. allowedSignersPath 는 ssh allowed_signers 형식 승인자 명부,
+   * signaturePath 가 없으면 <승인 기록>.sig
+   */
+  approvers?: { allowedSignersPath: string; signaturePath?: string };
   /** 있으면 이 시험 결과(test_result.json)를 증명서에 넣음. run_id·digest 가 plan 과 같아야 함 */
   testResultPath?: string;
   testSchemaPath?: string;
@@ -74,7 +79,8 @@ async function signOnce(o: SignOptions, seen: { runId?: string }): Promise<SignO
   const loaded = loadPlan(o.planPath, o.planSchemaPath ?? DEFAULT_PLAN_SCHEMA);
   const { plan } = loaded;
   seen.runId = plan.run_id;
-  const approval = o.approvalPath ? loadApproval(o.approvalPath) : undefined;
+  const approvalRead = o.approvalPath ? readApproval(o.approvalPath) : undefined;
+  const approval = approvalRead?.approval;
   const imageRef = imageRefOf(o.imageRepo, plan.digest);
   // 시험 결과는 서명 전에 확인 (형식·실행이 틀리면 서명하지 않음)
   const test = o.testResultPath !== undefined ? loadTestEvidence(o.testResultPath, plan, o.testSchemaPath) : undefined;
@@ -101,6 +107,17 @@ async function signOnce(o: SignOptions, seen: { runId?: string }): Promise<SignO
     return { code: 1, reason: decision.reason, detail: decision.detail };
   }
 
+  // 승인자 서명: 사람 승인이면 그 승인 기록이 승인자 본인 SSH 키로 서명된 것인지 (승인 기록 파일만 쓸 수 있으면 누구 이름으로든 만들 수 있어서)
+  let approvalKey: string | undefined;
+  if (o.approvers !== undefined && decision.approver !== AUTO_APPROVER && approvalRead !== undefined && o.approvalPath !== undefined) {
+    const sig = await verifyApprovalSignature(approvalRead.bytes, o.approvers.signaturePath ?? `${o.approvalPath}.sig`, approvalRead.approval.approver, o.approvers.allowedSignersPath);
+    if (!sig.ok) {
+      await refused(signLogLine({ ...base, result: "refused", approver: approval?.approver ?? null, reason: "approval_mismatch", signature_ref: null }, now()));
+      return { code: 1, reason: "approval_mismatch", detail: sig.detail };
+    }
+    approvalKey = sig.key;
+  }
+
   // sign_result 의 서명 대상 필드 전부 + plan 파일 해시를 주석으로 붙임. 서명 뒤 targets 등을 바꾸면 verify 에서 걸림
   const claims = { ...base, targets: plan.targets, failover_allowed: plan.failover_allowed, approver: decision.approver };
   // 감사 로그를 켰으면 서명 직전 체인 끝을 서명에도 남김 (체인을 통째로 다시 계산하면 서명과 안 맞게)
@@ -117,7 +134,7 @@ async function signOnce(o: SignOptions, seen: { runId?: string }): Promise<SignO
   const approvalSha256 = decision.approver === AUTO_APPROVER || !approval ? NO_APPROVAL : sha256Hex(canonicalize(approval));
   // 서명 시각은 서명 전에 정해서 주석·sign_result·감사 로그에 같은 값으로 씀
   const signedAt = now();
-  const annotations = signAnnotations({ ...claims, signed_at: signedAt.toISOString() }, { planSha256: loaded.planSha256, auditHead, approvalSha256, imageRepo: o.imageRepo });
+  const annotations = signAnnotations({ ...claims, signed_at: signedAt.toISOString() }, { planSha256: loaded.planSha256, auditHead, approvalSha256, imageRepo: o.imageRepo, approvalKey });
 
   let signatureRef: string;
   try {
@@ -157,7 +174,7 @@ async function signOnce(o: SignOptions, seen: { runId?: string }): Promise<SignO
   // 배포 증명서: 결정·승인·감사 기록을 서명된 문서로 이미지에 붙임 (시험 실행 서명기는 붙일 수 없어서 건너뜀)
   if (o.attest && o.signer.attest) {
     try {
-      const predicate = buildPredicate({ result, plan, planSha256: loaded.planSha256, approval: decision.approver === AUTO_APPROVER ? undefined : approval, approvalSha256, auditHead, test });
+      const predicate = buildPredicate({ result, plan, planSha256: loaded.planSha256, approval: decision.approver === AUTO_APPROVER ? undefined : approval, approvalSha256, approvalKey, auditHead, test });
       await o.signer.attest(imageRef, DEPLOY_PREDICATE_TYPE, predicate);
     } catch (e) {
       return cancel(`배포 증명서를 붙이지 못함: ${e instanceof SignerError ? e.message : String(e)}`);

@@ -61,17 +61,27 @@ export function checkPublicKeyPins(pubKeyPath: string, expected: readonly string
  * 레포 쓰기 권한자가 strict.rego 에 `tested { true }` 한 줄만 붙여도 정책이 무력해지는 것을 막음
  */
 export function readPolicy(path: string, pins?: readonly string[]): { bytes: Buffer; sha256: string } {
+  return readPinnedFile(path, pins, { label: "Rego 정책", pinLabel: "정책", missing: "POLICY_MISSING", mismatch: "POLICY_PIN_MISMATCH" });
+}
+
+/** 승인자 명부(ssh allowed_signers) 내용과 sha256. 고정값을 주면 그중 하나와 같아야 함 (APPROVERS_PIN_MISMATCH) */
+export function readApprovers(path: string, pins?: readonly string[]): { bytes: Buffer; sha256: string } {
+  return readPinnedFile(path, pins, { label: "승인자 명부", pinLabel: "승인자 명부", missing: "APPROVERS_MISSING", mismatch: "APPROVERS_PIN_MISMATCH" });
+}
+
+/** 믿는 기준이 되는 파일(정책, 승인자 명부)을 바이트 그대로 읽고 지문 고정을 확인 */
+function readPinnedFile(path: string, pins: readonly string[] | undefined, o: { label: string; pinLabel: string; missing: string; mismatch: string }): { bytes: Buffer; sha256: string } {
   let bytes: Buffer;
   try {
     bytes = readFileSync(path);
   } catch {
-    throw new SignerError("POLICY_MISSING", `Rego 정책 파일이 없음: ${path}`);
+    throw new SignerError(o.missing, `${o.label} 파일이 없음: ${path}`);
   }
   const sha256 = createHash("sha256").update(bytes).digest("hex");
   if (pins !== undefined && pins.length > 0) {
-    const pinned = parsePins(pins, "정책");
+    const pinned = parsePins(pins, o.pinLabel);
     if (!pinned.includes(sha256)) {
-      throw new SignerError("POLICY_PIN_MISMATCH", `정책 파일이 고정한 지문과 다름 (고정 ${pinned.map((p) => p.slice(0, 12) + "…").join(", ")} / 실제 ${sha256.slice(0, 12)}…): ${path}`);
+      throw new SignerError(o.mismatch, `${o.label} 파일이 고정한 지문과 다름 (고정 ${pinned.map((p) => p.slice(0, 12) + "…").join(", ")} / 실제 ${sha256.slice(0, 12)}…): ${path}`);
     }
   }
   return { bytes, sha256 };
