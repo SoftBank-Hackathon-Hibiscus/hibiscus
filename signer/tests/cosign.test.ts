@@ -99,6 +99,7 @@ describe("CosignVerifier", () => {
 
   it.each([
     ["Error: no signatures found", "SIGNATURE_INVALID"],
+    ["error during command execution: no signatures found", "SIGNATURE_INVALID"],
     ["Error: no matching attestations: missing or incorrect annotation", "SIGNATURE_INVALID"],
     ["Error: not enough verified log entries from transparency log: 0 < 1", "SIGNATURE_INVALID"],
     ["Error: loading verifier from key opts: loading public key: new gcp kms client: credentials: could not find default credentials", "KEY_UNAVAILABLE"],
@@ -133,6 +134,10 @@ describe("CosignVerifier", () => {
     const dir = tmp();
     const none = fakeCosign(dir, { code: 1, stderr: "Error: no signatures found" });
     expect(await new CosignVerifier(pubKey(dir), none.bin).signatures(`${REPO}@${DIGEST}`)).toEqual([]);
+    // cosign v3.1.3 실제 문구
+    const dirReal = tmp();
+    const real = fakeCosign(dirReal, { code: 1, stderr: "error during command execution: no signatures found" });
+    expect(await new CosignVerifier(pubKey(dirReal), real.bin).signatures(`${REPO}@${DIGEST}`)).toEqual([]);
     const dir2 = tmp();
     const denied = fakeCosign(dir2, { code: 1, stderr: "Error: GET https://x/v2/: DENIED: Permission denied" });
     await expect(new CosignVerifier(pubKey(dir2), denied.bin).signatures(`${REPO}@${DIGEST}`)).rejects.toMatchObject({ code: "REGISTRY_UNAVAILABLE" });

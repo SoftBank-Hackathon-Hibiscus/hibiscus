@@ -135,7 +135,8 @@ export class CosignVerifier implements ImageVerifier {
 // cosign v3.1.3 오류 문구 기준
 const KEY_ERROR_RE = /loading verifier from key opts|loading public key/;
 const REGISTRY_ERROR_RE = /dial tcp|connection refused|no such host|i\/o timeout|TLS handshake|UNAUTHORIZED|DENIED/;
-const NO_SIGNATURE_RE = /^(?:Error:\s*)?no signatures found(?:\s|$)/i;
+// 실제 cosign 은 "error during command execution: no signatures found" 처럼 앞에 접두어가 붙음
+const NO_SIGNATURE_RE = /(?:^|:\s*)no signatures found(?:\s|$)/i;
 const SIGNATURE_ERROR_RE = /no matching (?:signatures|attestations)|missing or incorrect annotation|not enough verified log entries|signature verification failed/i;
 
 function lastStderrLine(e: unknown): string {
