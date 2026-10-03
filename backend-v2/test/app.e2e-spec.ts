@@ -810,24 +810,10 @@ describe('deployment API (e2e)', () => {
 
   it('persists redacted parity build diagnostics without entering policy or verifying the source', async () => {
     const config = app.get(ConfigService);
-    const keys = [
-      'backend.stageMode',
-      'backend.parityTestMode',
-      'backend.parityInputsFile',
-    ];
+    const keys = ['backend.stageMode', 'backend.parityTestMode'];
     const previous = keys.map((key) => config.get(key));
-    const inputFile = join(testDirectory, 'parity-error-inputs.json');
-    const record = join(testDirectory, 'parity-error-record.jsonl');
-    const noise = join(testDirectory, 'parity-error-noise.json');
-    writeFileSync(record, '{}');
-    writeFileSync(noise, '{}');
-    writeFileSync(
-      inputFile,
-      JSON.stringify({ 'parity-error': { record, noise } }),
-    );
     config.set(keys[0], 'cli');
     config.set(keys[1], 'registry');
-    config.set(keys[2], inputFile);
     const runner = vi
       .spyOn(app.get(CommandRunner), 'run')
       .mockResolvedValueOnce({

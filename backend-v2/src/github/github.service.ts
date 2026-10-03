@@ -122,7 +122,11 @@ export class GithubService {
       input.installation_id,
       input.repository_id,
     );
-    await this.requireBranch(userId, repo.full_name, input.branch);
+    const sourceRevision = await this.requireBranch(
+      userId,
+      repo.full_name,
+      input.branch,
+    );
     try {
       return this.database.db.transaction(() => {
         const view = this.applicationsService.create({
@@ -153,7 +157,17 @@ export class GithubService {
           createdAt: new Date().toISOString(),
         };
         this.database.db.insert(githubApplicationLinks).values(github).run();
-        return { ...view, github };
+        const initialDeployment = this.deployment.create(
+          view.application.id,
+          { source_revision: sourceRevision },
+          userId,
+          'registration',
+        );
+        return {
+          ...view,
+          github,
+          initial_deployment: initialDeployment,
+        };
       });
     } catch (error) {
       if (error instanceof Error && error.message.includes('UNIQUE constraint'))
@@ -433,8 +447,12 @@ export class GithubService {
       userId,
       `/repos/${repo}/branches/${encodeURIComponent(branch)}`,
     );
-    if (found.name !== branch)
+    if (
+      found.name !== branch ||
+      !/^[a-f0-9]{40}$/.test(found.commit?.sha ?? '')
+    )
       throw new BadGatewayException('GitHub branch response does not match');
+    return found.commit.sha;
   }
 
   private async api<T>(userId: string, path: string): Promise<T> {

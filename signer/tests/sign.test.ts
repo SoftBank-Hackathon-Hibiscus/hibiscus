@@ -1,11 +1,11 @@
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { describe, expect, it } from "vitest";
 import { createApproval } from "../src/approval.js";
 import { CONTRACTS, toJsonSchema } from "../src/contracts.js";
 import { writeJson } from "../src/io.js";
-import { loadPlan } from "../src/plan.js";
+import { DEFAULT_PLAN_SCHEMA, loadPlan } from "../src/plan.js";
 import { runSign } from "../src/sign.js";
 import { copyPlan, NOW, plan, readJsonFile, readLog, RecordingSigner, REPO, tmp } from "./helpers.js";
 
@@ -39,9 +39,21 @@ describe("runSign", () => {
     });
     expect(validators.SignResult!(result)).toBe(true);
 
-    // 서명 대상은 <저장소>@digest, 주석에 run_id·plan_hash·source_revision
+    // 서명 대상은 <저장소>@digest, 주석에 sign_result 의 서명 대상 필드 전부 + plan 파일 해시
     expect(signer.calls).toEqual([
-      { imageRef: `${REPO}@${p.digest}`, annotations: { run_id: p.run_id, plan_hash: p.plan_hash, source_revision: p.source_revision } },
+      {
+        imageRef: `${REPO}@${p.digest}`,
+        annotations: {
+          run_id: p.run_id,
+          plan_hash: p.plan_hash,
+          source_revision: p.source_revision,
+          targets: "onprem",
+          failover_allowed: "false",
+          requester: "alice",
+          approver: "auto",
+          plan_sha256: loadPlan(plan("allow-onprem")).planSha256,
+        },
+      },
     ]);
 
     const [line] = readLog(paths(dir).logPath);
@@ -76,10 +88,12 @@ describe("runSign", () => {
     const dir = tmp();
     const approvalPath = join(dir, "approval.json");
     writeJson(approvalPath, createApproval(loadPlan(plan("needs-approval")), "alice", "bob", NOW));
-    const outcome = await runSign({ planPath: plan("needs-approval"), requester: "alice", approvalPath, imageRepo: REPO, signer: new RecordingSigner(), now: () => NOW, ...paths(dir) });
+    const signer = new RecordingSigner();
+    const outcome = await runSign({ planPath: plan("needs-approval"), requester: "alice", approvalPath, imageRepo: REPO, signer, now: () => NOW, ...paths(dir) });
 
     expect(outcome.code).toBe(0);
     expect(readJsonFile(paths(dir).outPath)).toMatchObject({ requester: "alice", approver: "bob" });
+    expect(signer.calls[0]?.annotations).toMatchObject({ requester: "alice", approver: "bob" });
   });
 
   it("needs_approval: 승인 뒤 targets 를 바꾸면 서명 안 함", async () => {
@@ -94,6 +108,21 @@ describe("runSign", () => {
     expect(outcome).toMatchObject({ code: 1, reason: "approval_mismatch" });
     expect(signer.calls).toHaveLength(0);
     expect(readLog(paths(dir).logPath)[0]).toMatchObject({ result: "refused", reason: "approval_mismatch", approver: "bob" });
+  });
+
+  it("needs_approval: 승인 유효시간이 지났으면 서명 안 하고 approval_expired 기록", async () => {
+    const dir = tmp();
+    const approvalPath = join(dir, "approval.json");
+    writeJson(approvalPath, createApproval(loadPlan(plan("needs-approval")), "alice", "bob", NOW));
+    const signer = new RecordingSigner();
+    const later = new Date(NOW.getTime() + 20 * 60_000);
+    const outcome = await runSign({ planPath: plan("needs-approval"), requester: "alice", approvalPath, imageRepo: REPO, signer, approvalTtlMs: 15 * 60_000, now: () => later, ...paths(dir) });
+
+    expect(outcome).toMatchObject({ code: 1, reason: "approval_expired" });
+    expect(signer.calls).toHaveLength(0);
+    const [line] = readLog(paths(dir).logPath);
+    expect(line).toMatchObject({ result: "refused", reason: "approval_expired", approver: "bob" });
+    expect(validators.SignLog!(line)).toBe(true);
   });
 
   it("needs_approval: 승인 기록이 없으면 서명 안 함", async () => {
@@ -117,6 +146,12 @@ describe("runSign", () => {
     await expect(runSign({ planPath: bad, requester: "alice", imageRepo: REPO, signer, ...paths(dir) })).rejects.toMatchObject({ code: "PLAN_INVALID" });
     expect(signer.calls).toHaveLength(0);
     expect(existsSync(paths(dir).logPath)).toBe(false);
+  });
+
+  it("기본 Plan 스키마는 루트 contracts/ 공개본 (정책 폴더 원본과 같은 내용)", () => {
+    expect(DEFAULT_PLAN_SCHEMA.replace(/\\/g, "/")).toMatch(/\/contracts\/Plan\.schema\.json$/);
+    expect(DEFAULT_PLAN_SCHEMA).not.toMatch(/policy/);
+    expect(readFileSync(DEFAULT_PLAN_SCHEMA, "utf8")).toBe(readFileSync(join(DEFAULT_PLAN_SCHEMA, "..", "..", "policy", "contracts", "Plan.schema.json"), "utf8"));
   });
 
   it("Plan 스키마를 못 읽으면 서명하지 않음 (D9)", async () => {

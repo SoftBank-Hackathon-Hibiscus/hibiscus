@@ -24,7 +24,7 @@ export class DeploymentService {
     applicationId: string,
     input: CreateDeploymentDto,
     requesterId: string,
-    trigger: 'manual' | 'webhook' = 'manual',
+    trigger: 'manual' | 'webhook' | 'registration' = 'manual',
   ) {
     const application = this.applications.find(applicationId);
     if (!application) throw new NotFoundException('Application not found');

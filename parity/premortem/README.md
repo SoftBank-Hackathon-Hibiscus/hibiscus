@@ -9,7 +9,7 @@ parity 안에서 배포 환경 조건을 재현하고, AI 수정안을 같은 �
 ## 지금 상태
 
 - 로컬 검토본의 `test-build`는 윤선님 실행기로 같은 이미지의 세 조건을 시험합니다. 기존 `demo`는 샘플 전용 reference 재생기를 사용합니다.
-- 기존 `demo`의 AI 수정·재검증은 예제 앱을 대상으로 합니다. 빌드 이미지와 연결하는 명령은 후속 변경에서 추가합니다.
+- 바인딩 예제에서 실제 AI 호출(`claude-sonnet-5-5`)로 받은 수정안을 복사본에 적용하고 세 조건 모두 4/4를 확인했습니다. 응답은 저장해 반복 검증에 사용하며, 호출하지 못하면 오류를 기록합니다.
 - 정책 입력(test_result)은 원본 result·facts·handoff를 류진님 변환기에 넘겨 만듭니다. env_report는 환경 진단·AI 분석용 내부 결과입니다.
 
 샘플 결과: 메모 앱은 컨테이너를 새로 바꾸면(replace) 6건 중 4건만 맞습니다(restart는 6건 다 맞음). 127.0.0.1 앱은 AI 수정 후 같은 기록으로 다시 돌려서 none, restart, replace 모두 통과합니다.
@@ -121,6 +121,7 @@ handoff 안의 `caller_asserted`는 기존 parity 형식을 유지한 값이며,
 | `test-build` | 0: 앱 검사 통과, 3: 완료했지만 불일치, 1: 입력·실행·정리 오류 |
 | `policy-preview` | 정책 CLI와 같음. 0: allow, 2: needs_approval, 3: block, 1: 실행 오류 |
 | `backend-test` | 0: 원본 시험과 정책 변환 완료. 앱 `passed=false`도 포함. 그 외: 다음 단계로 진행 금지 |
+| `repair-build` | 0: 수정 복사본 재검증 통과, 2: AI 호출·수정 미완료, 3: 패치 거부·재검증 실패, 1: 실행 오류 |
 
 현재 비교 범위는 요청 200건 이하와 빈 컨테이너 쓰기 계층입니다. 기존 볼륨·서비스 컨테이너는 받지 않습니다.
 테스트와 정책 결과 폴더는 새로 만들어야 하며, 완료 결과를 덮어쓰지 않습니다.
@@ -154,3 +155,28 @@ TypeScript 호출부는 이를 Backend의 artifact root 기준으로 바꿉니�
 `test_result.json` 변환은 류진님 adapter CLI가 맡습니다. 끝까지 실행된 불일치를 `status=succeeded`,
 `summary.test_passed=false`로 구분해서 정책이 판단할 수 있게 넘깁니다. 시험 중단·다른 digest·다른 커밋은
 단계 실패입니다. 이 호출부를 Backend에 등록하거나 DB 구조·배포 worker를 바꾸지는 않았습니다.
+
+## 수정안 검토
+
+```sh
+python -m premortem repair-build \
+  --build-manifest <빌드폴더>/build_manifest.json \
+  --record <기록폴더>/session.jsonl --noise <기록폴더>/session.noise.json \
+  --name guestbook --out-dir <새수정검토폴더> --allow-edit app.py \
+  --ai live --plan <정책폴더>/plan.json --after 10 --json
+```
+
+실제 호출에는 `ANTHROPIC_API_KEY`, `PREMORTEM_LLM_MODEL`, Anthropic SDK가 필요합니다.
+이번 확인에는 `claude-sonnet-5-5`와 Anthropic SDK 1.11.0을 썼습니다. 키는 실행 환경으로만 전달하고
+파일에 저장하지 않습니다. 반복 실행은 저장된 `analysis.json`을 `--ai recorded --analysis-file`로 넘깁니다.
+키나 모델이 없으면 호출하지 않았다는 오류를 남기고 종료합니다. 예시 응답으로 자동 대체하지 않습니다.
+`--ai json-file --analysis-file <분석.json>`은 사람이 준비한 응답으로, `--ai recorded`는 저장된 실제 호출의
+응답으로 동작합니다. 실행 결과에 각각의 방식을 표시합니다. `--allow-edit`는 파일마다 반복합니다.
+
+정책 결과를 주면 공용 Plan 스키마와 run_id·digest·소스 커밋을 검사하고 `requires`를 AI 입력에 넣습니다.
+인프라·정책·테스트 기준은 수정 대상에서 제외합니다. 검사한 수정안은 소스 복사본에만 넣고, 새 로컬
+이미지로 같은 기록·노이즈·조건을 다시 실행합니다. 결과와 diff는 `repair_summary.json`과 `review.md`에서
+봅니다. 재검증을 통과해도 `awaiting_human_review`이며 원본 앱은 바꾸지 않습니다.
+빌드 직후와 재생·정리 후에 검사용 소스의 해시와 제외 파일 유입을 다시 확인합니다. 변경은
+`SOURCE_CHANGED`, 재검사 컨테이너 정리 실패는 `CLEANUP_FAILED`로 중단하며 수정 검토 묶음을 만들지 않습니다.
+수정 이미지를 레지스트리에 올리거나 정책을 다시 평가하는 단계는 이 명령에 포함하지 않습니다.

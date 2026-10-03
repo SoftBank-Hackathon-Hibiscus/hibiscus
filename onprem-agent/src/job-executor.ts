@@ -12,6 +12,8 @@ import type {
 } from "./types.js";
 
 export class JobExecutor {
+  private pending: Promise<void> = Promise.resolve();
+
   constructor(
     private readonly agentId: string,
     private readonly stateStore: StateStore,
@@ -21,6 +23,25 @@ export class JobExecutor {
   ) {}
 
   async restore(): Promise<void> {
+    await this.serialized(() => this.reconcile());
+  }
+
+  async serving(): Promise<ServingContainer | null> {
+    return this.serialized(async () => {
+      await this.reconcile();
+      const state = await this.stateStore.read();
+      const container = state.serving_container
+        ? state.containers[state.serving_container]
+        : undefined;
+      return container ? this.servingView(container) : null;
+    });
+  }
+
+  async execute(job: AgentJob): Promise<AgentJobResult> {
+    return this.serialized(() => this.executeJob(job));
+  }
+
+  private async reconcile(): Promise<void> {
     const state = await this.stateStore.read();
     const containers = await this.runtime.reconcile(
       Object.values(state.containers),
@@ -35,15 +56,7 @@ export class JobExecutor {
     await this.stateStore.write(state);
   }
 
-  async serving(): Promise<ServingContainer | null> {
-    const state = await this.stateStore.read();
-    const container = state.serving_container
-      ? state.containers[state.serving_container]
-      : undefined;
-    return container ? this.servingView(container) : null;
-  }
-
-  async execute(job: AgentJob): Promise<AgentJobResult> {
+  private async executeJob(job: AgentJob): Promise<AgentJobResult> {
     const state = await this.stateStore.read();
     const cached = state.completed_jobs[job.job_id];
     if (cached) return { ...cached, attempt: job.attempt };
@@ -58,6 +71,20 @@ export class JobExecutor {
     state.completed_jobs[job.job_id] = cache as CachedJobResult;
     await this.stateStore.write(state);
     return result;
+  }
+
+  private async serialized<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = this.pending;
+    let release!: () => void;
+    this.pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
   }
 
   private async executeAction(

@@ -101,6 +101,54 @@ describe("R2: run_id 불일치", () => {
   });
 });
 
+describe("GitHub parity 기준 변경", () => {
+  it("현재 운영 기준과 후보 기준이 다르면 승인을 요구하고 plan hash에 묶는다", () => {
+    const { test, pii } = loadFixture("01-allow");
+    const activeHash = "a".repeat(64);
+    const candidateHash = "b".repeat(64);
+    const changed = TestResultSchema.parse({
+      ...test,
+      facts: {
+        ...test.facts,
+        parity_baseline: {
+          mode: "replay",
+          changed: true,
+          active_source_revision: "c".repeat(40),
+          active_hash: activeHash,
+          candidate_hash: candidateHash,
+          replay_hash: activeHash,
+        },
+      },
+    });
+    const plan = decide(changed, pii, policy);
+
+    expect(plan.decision).toBe("needs_approval");
+    expect(matchedIds(plan)).toContain("platform.parity_baseline_changed");
+    expect(plan.requires).toContainEqual(
+      expect.objectContaining({ id: "approve_parity_baseline" }),
+    );
+    expect(plan.plan_hash).not.toBe(decide(test, pii, policy).plan_hash);
+  });
+
+  it("최초 배포의 후보 기준은 변경으로 처리하지 않는다", () => {
+    const { test, pii } = loadFixture("01-allow");
+    const initial = TestResultSchema.parse({
+      ...test,
+      facts: {
+        ...test.facts,
+        parity_baseline: {
+          mode: "replay",
+          changed: false,
+          candidate_hash: "a".repeat(64),
+          replay_hash: "a".repeat(64),
+        },
+      },
+    });
+
+    expect(decide(initial, pii, policy).decision).toBe("allow");
+  });
+});
+
 describe("결정성 (plan_hash)", () => {
   it("같은 입력이면 같은 plan_hash", () => {
     const { test, pii } = loadFixture("03-pii-confident");

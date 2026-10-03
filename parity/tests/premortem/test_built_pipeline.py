@@ -10,6 +10,7 @@ from premortem.built_image import verify_build
 from premortem.built_test import test_build
 from premortem.errors import PremortemError
 from premortem.jsonio import load_json, write_json_atomic
+from premortem.policy_context import load_requires
 from premortem.policy_preview import verify_test_bundle
 from premortem.process import CommandResult
 from premortem.snapshot import sha256_file
@@ -237,3 +238,17 @@ class BuiltPipelineTest(unittest.TestCase):
         for changes in ({'source_revision': 'unknown'}, {'record': 'session.jsonl'}, {'after': [True]}, {'cmd': 'deploy'}):
             with self.subTest(changes=changes), self.assertRaises(PremortemError):
                 validate_request(dict(request, **changes))
+
+        health = {key: value for key, value in request.items() if key not in ('record', 'noise')}
+        health['format'] = 'premortem-backend-health-v1'
+        self.assertEqual(validate_request(health), health)
+
+    def test_registry_bound_plan_cannot_omit_digest_or_change_revision(self):
+        plan = self.root / 'plan.json'
+        write_json_atomic(plan, {'run_id': 'run-1', 'requires': []})
+        with self.assertRaises(PremortemError):
+            load_requires(plan, 'run-1', 'sha256:' + 'a' * 64)
+        write_json_atomic(plan, {'run_id': 'run-1', 'digest': 'sha256:' + 'a' * 64,
+                                'source_revision': 'b' * 40, 'requires': []})
+        with self.assertRaises(PremortemError):
+            load_requires(plan, 'run-1', 'sha256:' + 'a' * 64, 'c' * 40)
