@@ -22,7 +22,7 @@ export default defineConfig(({ mode }) => {
   const proxy = Object.fromEntries(
     proxiedPrefixes.map((prefix) => [
       prefix,
-      { target, changeOrigin: !local, secure: false },
+      { target, changeOrigin: !local, secure: true },
     ]),
   );
   return {
