@@ -1498,29 +1498,49 @@ textarea.input {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
 }
+/* 조건 카드 세 개는 라벨(윗줄) → 숫자(아랫줄) → 막대 구조로 고정. 라벨 길이·자릿수와 무관하게 같은 높이 */
 .condition {
+  display: flex;
+  flex-direction: column;
   padding: 10px 12px;
   border-radius: var(--radius-sm);
   background: var(--surface-2);
+  min-width: 0;
 }
 .condition-head {
   display: flex;
-  flex-wrap: wrap;
-  gap: 2px 8px;
-  justify-content: space-between;
-  align-items: baseline;
-  margin-bottom: 6px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  margin-bottom: 8px;
   font-size: 13px;
 }
-/* 좁은 칸에서 "13/2 0" 처럼 쪼개지지 않게 숫자는 통째로 내려간다 */
-.condition-head .num {
+.condition-label {
+  color: var(--ink-2);
+  line-height: 1.4;
+  height: 1.4em;
+  max-width: 100%;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.condition-num {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 1px;
+  line-height: 1;
+  height: 24px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 .condition-head strong {
   font-size: 22px;
   font-weight: 750;
   letter-spacing: -0.02em;
   line-height: 1;
+}
+.condition .bar {
+  margin-top: auto;
 }
 .bar {
   height: 8px;
