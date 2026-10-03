@@ -13,6 +13,12 @@ export function publicKeyFingerprint(pubKeyPath: string): string {
   } catch {
     throw new SignerError("KEY_MISSING", `cosign 공개키 파일이 없음: ${pubKeyPath}`);
   }
+  // PEM 블록이 하나뿐이어야 함. 여러 개면 Node 는 "PUBLIC KEY" 블록을, cosign(Go pem.Decode)은 첫 블록을 읽어서
+  // 지문을 낸 키와 실제로 서명을 확인하는 키가 달라질 수 있음 (앞에 공격자 RSA PUBLIC KEY 블록을 끼워 넣기)
+  const blocks = pem.match(/-----BEGIN [^-]+-----/g) ?? [];
+  if (blocks.length !== 1 || blocks[0] !== "-----BEGIN PUBLIC KEY-----") {
+    throw new SignerError("PUBKEY_INVALID", `공개키 파일에는 "PUBLIC KEY" PEM 블록 하나만 있어야 함 (지금 ${blocks.length}개${blocks.length > 0 ? `: ${blocks.join(", ")}` : ""}): ${pubKeyPath}`);
+  }
   let der: Buffer;
   try {
     der = createPublicKey(pem).export({ type: "spki", format: "der" });

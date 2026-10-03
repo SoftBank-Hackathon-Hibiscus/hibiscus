@@ -23,6 +23,20 @@ describe("공개키 지문", () => {
     expect(publicKeyFingerprint(DEFAULT_PUBLIC_KEY)).toBe(TEAM_KEY);
   });
 
+  it.each([
+    ["앞에 공격자 RSA PUBLIC KEY 블록 (cosign 은 첫 블록을 씀)", "rsa-first"],
+    ["PUBLIC KEY 블록 두 개", "two-spki"],
+    ["PUBLIC KEY 가 아닌 라벨 하나", "rsa-only"],
+  ])("PEM 블록이 \"PUBLIC KEY\" 하나가 아니면 PUBKEY_INVALID (%s)", (_name, kind) => {
+    const dir = tmp();
+    const team = readFileSync(DEFAULT_PUBLIC_KEY, "utf8");
+    const rsa = generateKeyPairSync("rsa", { modulusLength: 2048 }).publicKey.export({ type: "pkcs1", format: "pem" }).toString();
+    const doctored = join(dir, "doctored.pub");
+    writeFileSync(doctored, kind === "rsa-first" ? rsa + team : kind === "two-spki" ? readFileSync(otherKey(dir), "utf8") + team : rsa);
+    expect(() => publicKeyFingerprint(doctored)).toThrow(expect.objectContaining({ code: "PUBKEY_INVALID" }));
+    expect(() => checkPublicKeyPins(doctored, [TEAM_KEY])).toThrow(expect.objectContaining({ code: "PUBKEY_INVALID" }));
+  });
+
   it("PEM 줄바꿈이 달라도 같은 키면 같은 지문", () => {
     const dir = tmp();
     const crlf = join(dir, "crlf.pub");
