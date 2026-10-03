@@ -56,6 +56,40 @@ describe("decideSign", () => {
       const approval = createApproval(loaded, "alice", "bob", NOW);
       expect(decideSign(p, "e".repeat(64), "alice", approval)).toMatchObject({ ok: false, reason: "approval_mismatch" });
     });
+
+    describe("승인 유효시간", () => {
+      const TTL = 15 * 60_000;
+      const at = (ms: number) => new Date(NOW.getTime() + ms);
+      const approval = createApproval(loaded, "alice", "bob", NOW);
+
+      it("유효시간을 안 주면 오래된 승인도 받음 (기존 동작)", () => {
+        expect(decideSign(p, planSha256, "alice", approval, { now: at(24 * 60 * 60_000) })).toEqual({ ok: true, approver: "bob" });
+      });
+
+      it.each([
+        ["승인 직후", 0],
+        ["14분 뒤", 14 * 60_000],
+        ["딱 15분", TTL],
+        ["시계가 30초 늦음", -30_000],
+      ])("%s 면 서명", (_, ms) => {
+        expect(decideSign(p, planSha256, "alice", approval, { approvalTtlMs: TTL, now: at(ms) })).toEqual({ ok: true, approver: "bob" });
+      });
+
+      it.each([
+        ["16분 뒤", 16 * 60_000, /16분 지남 \(유효 15분\)/],
+        ["승인 시각이 5분 미래", -5 * 60_000, /미래/],
+      ])("%s 면 approval_expired", (_, ms, detail) => {
+        expect(decideSign(p, planSha256, "alice", approval, { approvalTtlMs: TTL, now: at(ms) })).toMatchObject({ ok: false, reason: "approval_expired", detail: expect.stringMatching(detail) });
+      });
+
+      it("승인 시각을 읽을 수 없으면 approval_expired", () => {
+        expect(decideSign(p, planSha256, "alice", { ...approval, approved_at: "어제" }, { approvalTtlMs: TTL, now: NOW })).toMatchObject({ ok: false, reason: "approval_expired" });
+      });
+
+      it("바꿔치기·본인 승인 검사가 시간 검사보다 먼저", () => {
+        expect(decideSign(p, "e".repeat(64), "alice", approval, { approvalTtlMs: TTL, now: at(TTL * 2) })).toMatchObject({ reason: "approval_mismatch" });
+      });
+    });
   });
 });
 

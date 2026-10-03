@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <title>Hibiscus</title>
+  <circle cx="32" cy="32" r="30" fill="#5e8b7e"/>
+  <g fill="none" stroke="#ffffff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round">
+    <!-- 다섯 장 꽃잎 -->
+    <path d="M32 18c4-6 11-5 12 1 6-1 9 6 4 10 5 4 2 11-4 10 1 6-6 9-10 4-4 5-11 2-10-4-6 1-9-6-4-10-5-4-2-11 4-10-1-6 6-9 8-1z"/>
+    <circle cx="32" cy="32" r="4.5"/>
+  </g>
+</svg>

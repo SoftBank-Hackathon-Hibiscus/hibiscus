@@ -1,0 +1,191 @@
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { encodeTargets, signAnnotations } from "../src/annotations.js";
+import { CosignVerifier } from "../src/cosign.js";
+import { loadPlan } from "../src/plan.js";
+import { runSign } from "../src/sign.js";
+import { runVerify } from "../src/verify.js";
+import { copyPlan, fakeCosign, NOW, plan, readJsonFile, RecordingSigner, REPO, tmp } from "./helpers.js";
+
+const FIELDS = {
+  run_id: "r-1",
+  plan_hash: "b".repeat(64),
+  targets: ["onprem"],
+  failover_allowed: false,
+  requester: "alice",
+  approver: "auto",
+};
+
+describe("signAnnotations", () => {
+  it("sign_result 의 서명 대상 필드를 순서대로 주석으로 만듦", () => {
+    expect(Object.entries(signAnnotations({ ...FIELDS, source_revision: "abc1234" }))).toEqual([
+      ["run_id", "r-1"],
+      ["plan_hash", "b".repeat(64)],
+      ["source_revision", "abc1234"],
+      ["targets", "onprem"],
+      ["failover_allowed", "false"],
+      ["requester", "alice"],
+      ["approver", "auto"],
+    ]);
+  });
+
+  it("source_revision 이 없으면 none, plan_sha256·audit_head 는 줄 때만 붙음", () => {
+    expect(signAnnotations(FIELDS).source_revision).toBe("none");
+    expect(signAnnotations(FIELDS)).not.toHaveProperty("plan_sha256");
+    expect(signAnnotations(FIELDS, { planSha256: "c".repeat(64), auditHead: "d".repeat(64) })).toMatchObject({
+      plan_sha256: "c".repeat(64),
+      audit_head: "d".repeat(64),
+    });
+  });
+
+  it.each([
+    [["onprem", "cloud_run"], "onprem+cloud_run"],
+    [["cloud_run", "onprem"], "cloud_run+onprem"],
+    [["a,b"], "a%2Cb"],
+    [["a+b"], "a%2Bb"],
+    [['x="y"'], "x%3D%22y%22"],
+  ])("targets %j → %s (쉼표·따옴표·= 가 cosign 에 그대로 가지 않음)", (targets, encoded) => {
+    expect(encodeTargets(targets)).toBe(encoded);
+    expect(signAnnotations({ ...FIELDS, targets }).targets).toBe(encoded);
+  });
+
+  it("인코딩할 수 없는 문자(짝 없는 서로게이트)는 ANNOTATION_INVALID", () => {
+    expect(() => signAnnotations({ ...FIELDS, targets: ["\ud800"] })).toThrow(expect.objectContaining({ code: "ANNOTATION_INVALID" }));
+  });
+
+  it("['a','b'] 와 ['a+b'] 는 다르게 인코딩됨", () => {
+    expect(encodeTargets(["a", "b"])).not.toBe(encodeTargets(["a+b"]));
+  });
+});
+
+/** allow-onprem plan 을 가짜 레지스트리에 서명해 두고 sign_result 경로를 돌려줌 */
+async function signed(dir: string, planPath = plan("allow-onprem")) {
+  const signer = new RecordingSigner();
+  const resultPath = join(dir, "sign_result.json");
+  const outcome = await runSign({ planPath, requester: "alice", imageRepo: REPO, signer, outPath: resultPath, logPath: join(dir, "decisions.jsonl"), now: () => NOW });
+  expect(outcome.code).toBe(0);
+  return { signer, resultPath };
+}
+
+/** sign_result 를 일부 바꿔서 다른 파일로 저장 */
+function tamper(resultPath: string, patch: Record<string, unknown>): string {
+  const out = resultPath.replace(/\.json$/, ".tampered.json");
+  writeFileSync(out, JSON.stringify({ ...readJsonFile(resultPath), ...patch }, null, 2));
+  return out;
+}
+
+describe("runVerify", () => {
+  it("서명한 sign_result 는 통과하고, 서명 주석 전부로 확인함", async () => {
+    const dir = tmp();
+    const { signer, resultPath } = await signed(dir);
+    const outcome = await runVerify({ resultPath, verifier: signer });
+
+    expect(outcome.code).toBe(0);
+    expect(signer.verifyCalls[0]?.annotations).toEqual({
+      run_id: "r-003",
+      plan_hash: readJsonFile(resultPath).plan_hash,
+      source_revision: readJsonFile(resultPath).source_revision,
+      targets: "onprem",
+      failover_allowed: "false",
+      requester: "alice",
+      approver: "auto",
+    });
+  });
+
+  it("--plan 을 주면 plan_sha256 까지 확인하고 통과", async () => {
+    const dir = tmp();
+    const { signer, resultPath } = await signed(dir);
+    const outcome = await runVerify({ resultPath, verifier: signer, planPath: plan("allow-onprem") });
+    expect(outcome.code).toBe(0);
+    expect(signer.verifyCalls[0]?.annotations.plan_sha256).toBe(loadPlan(plan("allow-onprem")).planSha256);
+  });
+
+  it.each([
+    ["targets 에 cloud_run 끼워 넣기", { targets: ["onprem", "cloud_run"] }],
+    ["targets 를 cloud_run 으로 교체", { targets: ["cloud_run"] }],
+    ["failover_allowed 켜기", { failover_allowed: true }],
+    ["approver 바꿔치기", { approver: "mallory" }],
+    ["requester 바꿔치기", { requester: "mallory" }],
+    ["plan_hash 바꾸기", { plan_hash: "f".repeat(64) }],
+    ["run_id 바꾸기", { run_id: "r-999" }],
+    ["source_revision 지우기", { source_revision: undefined }],
+  ])("서명 뒤 %s → signature_invalid", async (_, patch) => {
+    const dir = tmp();
+    const { signer, resultPath } = await signed(dir);
+    const outcome = await runVerify({ resultPath: tamper(resultPath, patch), verifier: signer });
+    expect(outcome).toMatchObject({ code: 1, reason: "signature_invalid" });
+  });
+
+  it("digest 만 바꾸면 signature_ref 와 안 맞아서 ref_invalid", async () => {
+    const dir = tmp();
+    const { signer, resultPath } = await signed(dir);
+    const outcome = await runVerify({ resultPath: tamper(resultPath, { digest: `sha256:${"e".repeat(64)}` }), verifier: signer });
+    expect(outcome).toMatchObject({ code: 1, reason: "ref_invalid" });
+    expect(signer.verifyCalls).toHaveLength(0);
+  });
+
+  it("dry-run 결과는 cosign 을 부르지 않고 dry_run", async () => {
+    const dir = tmp();
+    const { signer, resultPath } = await signed(dir);
+    const r = readJsonFile(resultPath);
+    const outcome = await runVerify({ resultPath: tamper(resultPath, { signature_ref: `dry-run:${REPO}@${r.digest}` }), verifier: signer });
+    expect(outcome).toMatchObject({ code: 1, reason: "dry_run" });
+    expect(signer.verifyCalls).toHaveLength(0);
+  });
+
+  it.each([["kms:whatever"], ["cosign:no-digest"], [`cosign:${REPO}:latest`]])("signature_ref 형식이 틀리면 ref_invalid (%s)", async (ref) => {
+    const dir = tmp();
+    const { signer, resultPath } = await signed(dir);
+    const outcome = await runVerify({ resultPath: tamper(resultPath, { signature_ref: ref }), verifier: signer });
+    expect(outcome).toMatchObject({ code: 1, reason: "ref_invalid" });
+  });
+
+  it("--image-repo 와 서명된 저장소가 다르면 repo_mismatch", async () => {
+    const dir = tmp();
+    const { signer, resultPath } = await signed(dir);
+    const outcome = await runVerify({ resultPath, verifier: signer, imageRepo: "asia-northeast3-docker.pkg.dev/hib-test/apps/other" });
+    expect(outcome).toMatchObject({ code: 1, reason: "repo_mismatch" });
+  });
+
+  it("plan 의 targets 가 sign_result 와 다르면 plan_mismatch", async () => {
+    const dir = tmp();
+    const { signer, resultPath } = await signed(dir);
+    const other = copyPlan(plan("allow-onprem"), dir, { targets: ["onprem", "cloud_run"] });
+    const outcome = await runVerify({ resultPath, verifier: signer, planPath: other });
+    expect(outcome).toMatchObject({ code: 1, reason: "plan_mismatch", detail: expect.stringMatching(/targets/) });
+  });
+
+  it("plan 의 rules 만 바꿔도 plan_sha256 이 달라서 signature_invalid", async () => {
+    const dir = tmp();
+    const { signer, resultPath } = await signed(dir);
+    const other = copyPlan(plan("allow-onprem"), dir, { rules: [] });
+    const outcome = await runVerify({ resultPath, verifier: signer, planPath: other });
+    expect(outcome).toMatchObject({ code: 1, reason: "signature_invalid" });
+  });
+
+  it("sign_result 에 모르는 필드가 있으면 실행 오류 SIGN_RESULT_INVALID", async () => {
+    const dir = tmp();
+    const { signer, resultPath } = await signed(dir);
+    await expect(runVerify({ resultPath: tamper(resultPath, { extra: 1 }), verifier: signer })).rejects.toMatchObject({ code: "SIGN_RESULT_INVALID" });
+  });
+
+  it("가짜 cosign: 바꾼 targets 값이 그대로 -a 로 넘어가서 서명과 안 맞음", async () => {
+    const dir = tmp();
+    const { resultPath } = await signed(dir);
+    const r = readJsonFile(resultPath);
+    const pub = join(dir, "cosign.pub");
+    writeFileSync(pub, "dummy");
+    const imageRef = `${REPO}@${r.digest}`;
+    // 서명된 그대로의 인자일 때만 통과하는 cosign
+    const expectArgs = ["verify", "--key", pub, ...Object.entries(signAnnotations(r)).flatMap(([k, v]) => ["-a", `${k}=${v}`]), "--", imageRef];
+    const { bin, argsFile } = fakeCosign(dir, { expectArgs });
+    const verifier = new CosignVerifier(pub, bin);
+
+    expect(await runVerify({ resultPath, verifier })).toMatchObject({ code: 0 });
+
+    const outcome = await runVerify({ resultPath: tamper(resultPath, { targets: ["onprem", "cloud_run"] }), verifier });
+    expect(outcome).toMatchObject({ code: 1, reason: "signature_invalid" });
+    expect(readFileSync(argsFile, "utf8")).toContain("targets=onprem+cloud_run");
+  });
+});

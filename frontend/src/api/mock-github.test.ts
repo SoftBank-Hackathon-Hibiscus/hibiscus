@@ -1,0 +1,78 @@
+import { describe, expect, it } from 'vitest';
+import { ApiError } from './client';
+import { MockDataSource } from './mock';
+import { buildScenario } from '../mocks';
+import { APP_ID } from '../mocks/common';
+import { MOCK_INSTALLATION_ID, MOCK_REPO_CONTACTS_ID, MOCK_REPO_GUESTBOOK_ID } from '../mocks/github';
+import type { GithubApplicationInput } from './types';
+
+const input: GithubApplicationInput = {
+  name: 'Contacts',
+  slug: 'contacts',
+  image_repo: 'asia-northeast3-docker.pkg.dev/hib/apps/contacts',
+  container_port: 3000,
+  test_template: 'allow',
+  requires_approval: true,
+  installation_id: MOCK_INSTALLATION_ID,
+  repository_id: MOCK_REPO_CONTACTS_ID,
+  branch: 'main',
+  auto_deploy: true,
+};
+
+const source = () => new MockDataSource(buildScenario(2), () => Date.parse('2026-10-03T00:00:00Z'), 0);
+
+describe('mock GitHub 조회', () => {
+  it('connection → installations → repositories → branches 를 backend 응답 형태로 돌려준다', async () => {
+    const s = source();
+    expect(await s.getGithubConnection()).toMatchObject({ connected: true });
+    const inst = await s.listGithubInstallations();
+    expect(inst.installations.map((i) => i.id)).toEqual([MOCK_INSTALLATION_ID]);
+    const repos = await s.listGithubRepositories(MOCK_INSTALLATION_ID);
+    expect(repos.repositories.map((r) => r.id)).toEqual([MOCK_REPO_GUESTBOOK_ID, MOCK_REPO_CONTACTS_ID]);
+    const branches = await s.listGithubBranches(MOCK_INSTALLATION_ID, MOCK_REPO_GUESTBOOK_ID);
+    expect(branches.default_branch).toBe('main');
+    expect(branches.branches.map((b) => b.name)).toContain('main');
+  });
+  it('모르는 설치/저장소는 404', async () => {
+    const s = source();
+    await expect(s.listGithubRepositories(1)).rejects.toMatchObject({ status: 404 });
+    await expect(s.listGithubBranches(MOCK_INSTALLATION_ID, 1)).rejects.toMatchObject({ status: 404 });
+  });
+});
+
+describe('mock 애플리케이션 등록 (POST /github/applications 흉내)', () => {
+  it('등록하면 목록·상세에 보이고 route 는 아직 없다(404), target 은 비어 있다', async () => {
+    const s = source();
+    const created = await s.createGithubApplication(input);
+    expect(created.application.slug).toBe('contacts');
+    expect(created.application.publicHost).toBe('contacts.lth.so');
+    expect(created.application.sourcePath).toBe('https://github.com/hibiscus-demo/contacts.git');
+    expect(created.application.repo).toBe('hibiscus-demo/contacts');
+    expect(created.application.defaultBranch).toBe('main');
+    expect(created.application.requiresApproval).toBe(true);
+    expect(created.github).toMatchObject({ applicationId: created.application.id, repositoryId: MOCK_REPO_CONTACTS_ID, branch: 'main', autoDeploy: true, active: true });
+    expect(created.healthCheck).toMatchObject({ path: '/health', intervalSeconds: 5, failureThreshold: 3 });
+
+    const list = await s.listApplications();
+    expect(list.map((v) => v.application.id)).toEqual([APP_ID, created.application.id]);
+    expect((await s.getApplication(created.application.id)).application.name).toBe('Contacts');
+    expect(await s.listDeployments(created.application.id)).toEqual([]);
+    expect(await s.getTargets(created.application.id)).toEqual([]);
+    await expect(s.getRouting(created.application.id)).rejects.toMatchObject({ status: 404, message: 'Application route not found' });
+  });
+  it('기존 앱과 slug 가 겹치면 409, 접근 불가 저장소/브랜치는 404', async () => {
+    const s = source();
+    await expect(s.createGithubApplication({ ...input, slug: 'guestbook' })).rejects.toMatchObject({ status: 409 });
+    await s.createGithubApplication(input);
+    await expect(s.createGithubApplication(input)).rejects.toMatchObject({ status: 409 });
+    await expect(s.createGithubApplication({ ...input, slug: 'other', repository_id: 1 })).rejects.toMatchObject({ status: 404 });
+    await expect(s.createGithubApplication({ ...input, slug: 'other', branch: 'nope' })).rejects.toBeInstanceOf(ApiError);
+  });
+  it('기존 시나리오 조회는 그대로 동작한다', async () => {
+    const s = source();
+    await s.createGithubApplication(input);
+    expect((await s.getApplication(APP_ID)).application.slug).toBe('guestbook');
+    expect((await s.listDeployments(APP_ID)).length).toBeGreaterThan(0);
+    await expect(s.getApplication('nope')).rejects.toMatchObject({ status: 404 });
+  });
+});
