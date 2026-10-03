@@ -7,6 +7,7 @@ import { fadeTextSwap } from './lib/motion';
 import { useHashRoute } from './lib/router';
 import { ApplicationDetail } from './pages/ApplicationDetail';
 import { ApplicationList } from './pages/ApplicationList';
+import { AgentList } from './pages/AgentList';
 import { Connect } from './pages/Connect';
 import { Demos } from './pages/Demos';
 import { DeploymentDetail } from './pages/DeploymentDetail';
@@ -53,10 +54,11 @@ function Shell() {
         {route.page === 'deployment' && <DeploymentDetail key={`${route.id}-${tokenVersion}`} id={route.id} source={source} />}
         {route.page === 'application' && <ApplicationDetail key={`${route.id}-${tokenVersion}`} id={route.id} source={source} />}
         {route.page === 'applications' && <ApplicationList key={`apps-${tokenVersion}`} source={source} />}
+        {route.page === 'agents' && <AgentList key={`agents-${tokenVersion}`} source={source} />}
         {route.page === 'register' && <RegisterApplication key={`register-${tokenVersion}`} source={source} />}
         {route.page === 'home' && <Home isReal={isReal} connection={connection.state} />}
         {route.page === 'demos' && <Demos />}
-        {route.page === 'connect' && <Connect source={source} connection={connection.state} onTokenChange={onTokenChange} onRecheck={connection.recheck} />}
+        {route.page === 'connect' && <Connect connection={connection.state} onRecheck={connection.recheck} />}
       </main>
     </div>
   );

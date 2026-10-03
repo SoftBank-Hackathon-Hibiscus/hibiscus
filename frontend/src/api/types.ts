@@ -70,6 +70,20 @@ export interface HealthCheckConfig {
   updatedAt: string;
 }
 
+/** PATCH /applications/:id/health-check */
+export interface UpdateHealthCheckInput {
+  enabled: boolean;
+  path: string;
+  version_path: string | null;
+  method: 'GET' | 'HEAD';
+  interval_seconds: number;
+  timeout_seconds: number;
+  success_status_min: number;
+  success_status_max: number;
+  success_threshold: number;
+  failure_threshold: number;
+}
+
 export interface ApplicationAgentSummary {
   id: string;
   name: string;
@@ -78,6 +92,42 @@ export interface ApplicationAgentSummary {
   lastSeenAt: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** GET /agents 의 원소 */
+export interface AgentSummary extends ApplicationAgentSummary {
+  sshEnrolledAt: string | null;
+}
+
+export interface AgentSshConnection {
+  host: string;
+  port: number;
+  user: string;
+  host_key_sha256: string;
+}
+
+/** POST /agents 응답. token 값은 이 응답에서만 확인할 수 있다. */
+export interface AgentRegistration {
+  agent: AgentSummary;
+  token: string;
+  agent_id: string;
+  ssh_enrollment_token: string;
+  expires_at: string;
+  ssh: AgentSshConnection;
+}
+
+/** POST /agents/:id/token/rotate 응답 */
+export interface AgentTokenRotation {
+  agent: AgentSummary;
+  token: string;
+}
+
+/** POST /agents/:id/ssh/enrollment 응답 */
+export interface AgentSshEnrollment {
+  agent_id: string;
+  ssh_enrollment_token: string;
+  expires_at: string;
+  ssh: AgentSshConnection;
 }
 
 /** GET /applications/:id */

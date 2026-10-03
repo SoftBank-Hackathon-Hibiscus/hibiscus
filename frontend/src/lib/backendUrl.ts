@@ -14,9 +14,9 @@ export function backendBaseUrl(): string {
   return normalizeBackendUrl(import.meta.env.VITE_BACKEND_URL as string | undefined);
 }
 
-/** GET /auth/github. JSON { authorization_url } 을 돌려주며 리다이렉트하지 않는다. */
+/** OAuth state Cookie를 Backend 호스트에 설정한 뒤 GitHub로 이동한다. */
 export function oauthStartUrl(base: string = backendBaseUrl()): string {
-  return `${normalizeBackendUrl(base)}/auth/github`;
+  return `${normalizeBackendUrl(base)}/auth/github/redirect`;
 }
 
 export function isLocalBackend(base: string): boolean {

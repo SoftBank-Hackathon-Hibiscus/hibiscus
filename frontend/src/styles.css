@@ -198,6 +198,114 @@ code {
   gap: 0;
   text-align: right;
 }
+
+/* ---- Agent 관리 ---- */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.agents-page {
+  max-width: 1040px;
+}
+.agent-create-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 14px;
+}
+.agent-create-card .card-title {
+  margin-bottom: 3px;
+}
+.agent-create-form {
+  display: flex;
+  gap: 8px;
+  flex: 0 1 430px;
+}
+.agent-create-form .input {
+  flex: 1;
+  min-width: 0;
+}
+.agent-admin-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.agent-admin-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.agent-admin-head,
+.agent-admin-name,
+.agent-actions,
+.agent-serving {
+  display: flex;
+  align-items: center;
+}
+.agent-admin-head {
+  justify-content: space-between;
+  gap: 14px;
+}
+.agent-admin-name {
+  gap: 11px;
+  min-width: 0;
+}
+.agent-admin-name h2 {
+  font-size: 16px;
+  margin: 0 0 2px;
+}
+.agent-admin-name .mono {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.agent-server-icon {
+  width: 38px;
+  height: 38px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+.agent-serving {
+  align-items: flex-start;
+  gap: 4px 12px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.agent-serving .mono {
+  width: 100%;
+  overflow-wrap: anywhere;
+}
+.agent-actions {
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 2px;
+  border-top: 1px solid var(--line);
+}
+.agent-last-check {
+  text-align: right;
+  margin-top: 10px;
+}
+.agent-secret {
+  max-height: 52vh;
+  user-select: all;
+}
 .hint {
   font-size: 12px;
   color: var(--ink-3);
@@ -237,6 +345,31 @@ code {
 }
 .brand:hover {
   text-decoration: none;
+}
+.topbar-nav {
+  display: flex;
+  align-items: center;
+  align-self: stretch;
+  gap: 4px;
+  margin-right: auto;
+}
+.topbar-nav a {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 11px;
+  border-radius: 999px;
+  color: var(--ink-2);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.topbar-nav a:hover {
+  color: var(--ink);
+  background: var(--surface-2);
+  text-decoration: none;
+}
+.topbar-nav .topbar-nav-active {
+  color: var(--accent-ink);
+  background: var(--accent-soft);
 }
 .brand-mark {
   width: 26px;
@@ -2064,6 +2197,16 @@ select.input {
   .topbar-right {
     gap: 8px;
   }
+  .topbar-nav {
+    gap: 0;
+  }
+  .topbar-nav a {
+    padding: 4px 8px;
+    font-size: 12.5px;
+  }
+  .topbar-nav a:first-child {
+    display: none;
+  }
   html,
   body {
     font-size: 14px;
@@ -2079,6 +2222,19 @@ select.input {
   }
   .card {
     padding: 16px;
+  }
+  .agent-create-card,
+  .agent-create-form,
+  .agent-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .agent-create-form {
+    flex-basis: auto;
+    width: 100%;
+  }
+  .agent-actions .btn {
+    justify-content: center;
   }
   .card-collapsed {
     padding: 2px 16px;

@@ -3,6 +3,10 @@ import { refreshAccessToken, type FetchLike } from './refresh';
 import { readToken } from './token';
 import type {
   AgentStatusResponse,
+  AgentRegistration,
+  AgentSshEnrollment,
+  AgentSummary,
+  AgentTokenRotation,
   ApplicationView,
   CreateDeploymentInput,
   CurrentUser,
@@ -14,14 +18,18 @@ import type {
   GithubConnection,
   GithubInstallationsPage,
   GithubRepositoriesPage,
+  HealthCheckConfig,
   RouteSnapshot,
   RoutingTargetView,
+  UpdateHealthCheckInput,
 } from './types';
 
 /** GitHub 목록은 한 페이지에 최대 100개(backend GithubPageDto 의 per_page 상한) */
 export const GITHUB_PAGE_SIZE = 100;
 
-async function send(fetchImpl: FetchLike, method: 'GET' | 'POST', path: string, body: unknown): Promise<Response> {
+type HttpMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
+
+async function send(fetchImpl: FetchLike, method: HttpMethod, path: string, body: unknown): Promise<Response> {
   const headers: Record<string, string> = { Accept: 'application/json' };
   const token = readToken();
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -49,7 +57,7 @@ async function toError(response: Response): Promise<ApiError> {
  * 같은 origin 으로 요청한다 (Vite 프록시가 backend-v2 로 전달).
  * 401 이면 refresh token 이 있을 때 한 번만 갱신하고 원래 요청을 한 번만 재시도한다. 그래도 401 이면 그대로 던진다.
  */
-export async function request<T>(method: 'GET' | 'POST', path: string, body?: unknown, fetchImpl: FetchLike = fetch): Promise<T> {
+export async function request<T>(method: HttpMethod, path: string, body?: unknown, fetchImpl: FetchLike = fetch): Promise<T> {
   let response = await send(fetchImpl, method, path, body);
   if (response.status === 401 && (await refreshAccessToken(fetchImpl))) {
     response = await send(fetchImpl, method, path, body);
@@ -72,6 +80,14 @@ export class RealDataSource implements DataSource {
     return request<T>('POST', path, body, this.fetchImpl);
   }
 
+  private patch<T>(path: string, body: unknown) {
+    return request<T>('PATCH', path, body, this.fetchImpl);
+  }
+
+  private delete<T>(path: string) {
+    return request<T>('DELETE', path, undefined, this.fetchImpl);
+  }
+
   healthz() {
     return this.get<{ ok: boolean }>('/healthz');
   }
@@ -86,6 +102,10 @@ export class RealDataSource implements DataSource {
 
   getApplication(applicationId: string) {
     return this.get<ApplicationView>(`/applications/${encodeURIComponent(applicationId)}`);
+  }
+
+  updateHealthCheck(applicationId: string, input: UpdateHealthCheckInput) {
+    return this.patch<HealthCheckConfig>(`/applications/${encodeURIComponent(applicationId)}/health-check`, input);
   }
 
   listDeployments(applicationId: string) {
@@ -110,6 +130,26 @@ export class RealDataSource implements DataSource {
 
   getAgentStatus(agentId: string) {
     return this.get<AgentStatusResponse>(`/agents/${encodeURIComponent(agentId)}/status`);
+  }
+
+  listAgents() {
+    return this.get<AgentSummary[]>('/agents');
+  }
+
+  createAgent(name: string) {
+    return this.post<AgentRegistration>('/agents', { name });
+  }
+
+  rotateAgentToken(agentId: string) {
+    return this.post<AgentTokenRotation>(`/agents/${encodeURIComponent(agentId)}/token/rotate`, {});
+  }
+
+  revokeAgentToken(agentId: string) {
+    return this.delete<AgentSummary>(`/agents/${encodeURIComponent(agentId)}/token`);
+  }
+
+  createAgentSshEnrollment(agentId: string) {
+    return this.post<AgentSshEnrollment>(`/agents/${encodeURIComponent(agentId)}/ssh/enrollment`, {});
   }
 
   getGithubConnection() {

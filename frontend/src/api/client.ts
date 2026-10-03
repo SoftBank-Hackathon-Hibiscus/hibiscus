@@ -1,5 +1,9 @@
 import type {
   AgentStatusResponse,
+  AgentRegistration,
+  AgentSshEnrollment,
+  AgentSummary,
+  AgentTokenRotation,
   ApplicationView,
   CreateDeploymentInput,
   CurrentUser,
@@ -11,8 +15,10 @@ import type {
   GithubConnection,
   GithubInstallationsPage,
   GithubRepositoriesPage,
+  HealthCheckConfig,
   RouteSnapshot,
   RoutingTargetView,
+  UpdateHealthCheckInput,
 } from './types';
 
 export class ApiError extends Error {
@@ -42,6 +48,7 @@ export interface DataSource {
   me(): Promise<CurrentUser>;
   listApplications(): Promise<ApplicationView[]>;
   getApplication(applicationId: string): Promise<ApplicationView>;
+  updateHealthCheck(applicationId: string, input: UpdateHealthCheckInput): Promise<HealthCheckConfig>;
   listDeployments(applicationId: string): Promise<Deployment[]>;
   getDeployment(deploymentId: string): Promise<DeploymentView>;
   approveDeployment(deploymentId: string): Promise<Deployment>;
@@ -49,6 +56,11 @@ export interface DataSource {
   getRouting(applicationId: string): Promise<RouteSnapshot>;
   getTargets(applicationId: string): Promise<RoutingTargetView[]>;
   getAgentStatus(agentId: string): Promise<AgentStatusResponse>;
+  listAgents(): Promise<AgentSummary[]>;
+  createAgent(name: string): Promise<AgentRegistration>;
+  rotateAgentToken(agentId: string): Promise<AgentTokenRotation>;
+  revokeAgentToken(agentId: string): Promise<AgentSummary>;
+  createAgentSshEnrollment(agentId: string): Promise<AgentSshEnrollment>;
 
   // ---- GitHub 연동 (backend-v2 github.controller, origin/main 기준)
   /** GET /github/connection */
