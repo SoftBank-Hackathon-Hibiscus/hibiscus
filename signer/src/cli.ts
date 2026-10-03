@@ -200,7 +200,10 @@ async function main(argv: string[]): Promise<number> {
     // 시험 실행은 실제 서명이 없어서 자기 확인을 안 함. 지문 확인은 서명 전에 끝냄
     const selfVerify = !dryRun && (values["self-verify"] === true || process.env.SIGNER_SELF_VERIFY === "1");
     const selfVerifier = selfVerify ? trustedVerifier() : undefined;
-    const attest = !dryRun && (values.attest === true || process.env.SIGNER_ATTEST === "1");
+    const attestRequested = values.attest === true || process.env.SIGNER_ATTEST === "1";
+    // 시험 결과는 증명서에만 들어감. --attest 없이 주면 확인만 하고 버려지는 걸 막음
+    if (values["test-result"] !== undefined && !attestRequested) throw new SignerError("ARG_INVALID", "--test-result 는 --attest(SIGNER_ATTEST=1)와 같이 써야 함 (시험 결과는 배포 증명서에 들어감)");
+    const attest = !dryRun && attestRequested;
     const outcome = await runSign({
       planPath: required(values.plan, "plan"),
       requester: required(values.requester, "requester"),

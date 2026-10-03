@@ -48,6 +48,12 @@ describe("cli 인자 파싱 오류", () => {
 });
 
 describe("cli 같이 써야 하는 옵션", () => {
+  it("sign --test-result 를 --attest 없이 주면 ARG_INVALID (시험 결과는 증명서에만 들어감)", () => {
+    const r = cli(["sign", "--plan", plan("allow"), "--requester", "alice", "--image-repo", "localhost:5001/hib/app", "--dry-run", "--test-result", "t.json", "--out", join(tmp(), "r.json"), "--log", join(tmp(), "d.jsonl")]);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/ARG_INVALID/);
+  });
+
   it("verify --policy 를 --attestation 없이 주면 정책 검사를 건너뛰지 않고 ARG_INVALID (2), --json 이면 JSON", () => {
     const r = cli(["verify", "--result", join(tmp(), "none.json"), "--policy", "policy/strict.rego", "--json"]);
     expect(r.code).toBe(2);
