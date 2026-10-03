@@ -1,54 +1,36 @@
-import { Boxes, ChevronRight, Plus } from 'lucide-react';
+import { ChevronRight, Plus } from 'lucide-react';
 import type { DataSource } from '../api/client';
-import { ApiError } from '../api/client';
-import type { ApplicationView, RouteSnapshot } from '../api/types';
-import { ErrorNotice } from '../components/ErrorNotice';
-import { Empty, PageTitle, Pill } from '../components/ui';
+import type { ApplicationView } from '../api/types';
+import { PageError } from '../components/PageError';
+import { PageTitle, Pill, SkeletonCard } from '../components/ui';
+import { usePageTitle } from '../hooks/usePageTitle';
 import { usePolling } from '../hooks/usePolling';
-import { relTime, targetLabel } from '../lib/format';
+import { relTime } from '../lib/format';
 import { useLang } from '../lib/i18n';
 import { REGISTER_PATH, applicationPath, hrefFor } from '../lib/router';
 
 const POLL_MS = 15000;
 
-interface Row {
-  view: ApplicationView;
-  route: RouteSnapshot | null;
-  routeError: unknown;
-}
-
 /**
- * 앱 목록. 목록과 각 앱의 현재 route 를 한 번에 모아 15초마다 갱신한다 (행마다 따로 폴링하지 않는다).
- * route 가 없으면(404) "경로 없음". mock 에서도 같은 데이터 계층으로 동작한다.
+ * 앱 목록. GET /applications 하나만 15초마다 읽는다.
+ * 현재 트래픽 위치·최근 배포는 앱 상세에서 정확히 보여주므로 여기서 앱마다 추가 호출로 집계하지 않는다.
  */
 export function ApplicationList({ source }: { source: DataSource }) {
   const { t } = useLang();
-  const poll = usePolling<Row[]>(
-    async () => {
-      const apps = await source.listApplications();
-      const routes = await Promise.allSettled(apps.map((view) => source.getRouting(view.application.id)));
-      return apps.map((view, i) => {
-        const result = routes[i]!;
-        if (result.status === 'fulfilled') return { view, route: result.value, routeError: null };
-        const notFound = result.reason instanceof ApiError && result.reason.isNotFound;
-        return { view, route: null, routeError: notFound ? null : result.reason };
-      });
-    },
-    POLL_MS,
-    [source],
-  );
+  usePageTitle(t('appsTitle'));
+  const poll = usePolling<ApplicationView[]>(() => source.listApplications(), POLL_MS, [source]);
+  const apps = poll.data;
 
-  const rows = poll.data;
   return (
     <div className="page">
       <PageTitle
         title={t('appsTitle')}
-        sub={t('appsSub')}
+        sub={apps ? t('appsCount', { n: apps.length }) : t('appsSubList')}
         right={
           <div className="title-badges">
             <span className="live">
               {t('refreshing15s')}
-              {poll.lastUpdated ? `, ${relTime(new Date(poll.lastUpdated).toISOString())}` : ''}
+              {poll.lastUpdated ? ` · ${t('lastChecked', { when: relTime(new Date(poll.lastUpdated).toISOString()) })}` : ''}
             </span>
             <a className="btn btn-primary btn-small" href={hrefFor(REGISTER_PATH)}>
               <Plus size={14} aria-hidden /> {t('registerApp')}
@@ -56,52 +38,64 @@ export function ApplicationList({ source }: { source: DataSource }) {
           </div>
         }
       />
-      {poll.error ? <ErrorNotice error={poll.error} /> : null}
-      {poll.loading && !rows && <Empty>{t('loading')}</Empty>}
-      {rows && rows.length === 0 && (
-        <section className="card">
-          <div className="stack-sm">
-            <Empty>{t('noApps')}</Empty>
-            <div>
-              <a className="btn btn-primary btn-small" href={hrefFor(REGISTER_PATH)}>
-                <Plus size={14} aria-hidden /> {t('registerApp')}
-              </a>
-            </div>
+      {poll.error && !apps ? <PageError error={poll.error} /> : null}
+      {poll.error && apps ? <PageError error={poll.error} compact /> : null}
+      {poll.loading && !apps && !poll.error && (
+        <div className="app-grid" aria-busy="true">
+          <SkeletonCard lines={3} />
+          <SkeletonCard lines={3} />
+        </div>
+      )}
+      {apps && apps.length === 0 && (
+        <section className="card empty-state">
+          <h2 className="empty-title">{t('emptyAppsTitle')}</h2>
+          <p className="empty-body">{t('emptyAppsBody')}</p>
+          <div>
+            <a className="btn btn-primary" href={hrefFor(REGISTER_PATH)}>
+              <Plus size={14} aria-hidden /> {t('registerApp')}
+            </a>
           </div>
         </section>
       )}
-      {rows && rows.length > 0 && (
-        <section className="card card-collapsed">
-          <ul className="app-rows">
-            {rows.map(({ view, route, routeError }) => (
-              <li key={view.application.id}>
-                <a className="app-row" href={hrefFor(applicationPath(view.application.id))}>
-                  <Boxes size={18} className="row-icon" aria-hidden />
-                  <span className="app-row-main">
-                    <span className="app-row-name">{view.application.name}</span>
-                    <span className="small muted mono">{view.application.publicHost ?? view.application.slug}</span>
-                  </span>
-                  <span className="app-row-meta">
-                    {route ? (
-                      <>
-                        <Pill tone="success">{targetLabel(route.target.kind)}</Pill>
-                        <span className="small muted" title={t('routeRevisionHint')}>
-                          {t('switchCount')} {route.revision}
-                        </span>
-                      </>
-                    ) : routeError ? (
-                      <Pill tone="danger">{t('routeUnknown')}</Pill>
-                    ) : (
-                      <Pill tone="muted">{t('noRouteShort')}</Pill>
-                    )}
-                    <ChevronRight size={16} className="row-icon" aria-hidden />
-                  </span>
-                </a>
-              </li>
-            ))}
-          </ul>
-        </section>
+      {apps && apps.length > 0 && (
+        <ul className="app-grid">
+          {apps.map((view) => (
+            <li key={view.application.id}>
+              <AppCard view={view} />
+            </li>
+          ))}
+        </ul>
       )}
     </div>
+  );
+}
+
+function AppCard({ view }: { view: ApplicationView }) {
+  const { t } = useLang();
+  const a = view.application;
+  const agents = view.agents.length;
+  return (
+    <a className="card app-card" href={hrefFor(applicationPath(a.id))}>
+      <span className="app-card-head">
+        <span className="app-card-name">{a.name}</span>
+        <ChevronRight size={16} className="row-icon app-card-arrow" aria-hidden />
+      </span>
+      <span className="mono app-card-host">{a.publicHost ?? a.slug}</span>
+      <span className="app-card-repo small muted">
+        {a.repo ? (
+          <>
+            {a.repo}
+            {a.defaultBranch && <span className="tag">{a.defaultBranch}</span>}
+          </>
+        ) : (
+          t('noRepo')
+        )}
+      </span>
+      <span className="app-card-foot">
+        {agents > 0 ? <Pill tone="muted">{t('agentsCount', { n: agents })}</Pill> : <Pill tone="muted">{t('noAgentShort')}</Pill>}
+        {a.requiresApproval && <Pill tone="muted">{t('requiresApprovalShort')}</Pill>}
+        <span className="app-card-enter">{t('enterApp')}</span>
+      </span>
+    </a>
   );
 }

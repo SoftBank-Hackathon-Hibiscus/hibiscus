@@ -1621,40 +1621,121 @@ textarea.input {
 }
 
 /* ---- application list ---- */
-.app-rows {
+.app-grid {
   list-style: none;
   margin: 0;
   padding: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--gap);
 }
-.app-row {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 12px 6px;
-  border-bottom: 1px solid var(--line);
-  color: var(--ink);
-  border-radius: 6px;
-}
-.app-rows li:last-child .app-row {
-  border-bottom: 0;
-}
-.app-row:hover {
-  background: var(--surface-2);
-  text-decoration: none;
-}
-.app-row-main {
+.app-card {
   display: flex;
   flex-direction: column;
-  flex: 1;
-  min-width: 0;
+  gap: 6px;
+  color: var(--ink);
+  height: 100%;
+  transition: border-color 0.15s;
 }
-.app-row-name {
-  font-weight: 650;
+.app-card:hover,
+.app-card:focus-visible {
+  border-color: var(--accent);
+  text-decoration: none;
 }
-.app-row-meta {
+.app-card-head {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 10px;
+}
+.app-card-name {
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.app-card-arrow {
+  transition: transform 0.15s;
+}
+.app-card:hover .app-card-arrow {
+  transform: translateX(2px);
+  color: var(--accent-ink);
+}
+.app-card-host {
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+.app-card-repo {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
+}
+.app-card-foot {
+  margin-top: auto;
+  padding-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.app-card-enter {
+  margin-left: auto;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent-ink);
+}
+/* 빈 상태 / 오류 상태: 카드 하나에 제목, 한 줄 설명, 다음 행동 */
+.empty-state,
+.error-state {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 32px 28px;
+  max-width: 640px;
+}
+.empty-title {
+  font-size: 17px;
+  font-weight: 650;
+}
+.empty-body {
+  color: var(--ink-2);
+  font-size: 14.5px;
+  max-width: 60ch;
+}
+.empty-state > div,
+.error-state > div {
+  margin-top: 8px;
+}
+/* 로딩 자리 표시 */
+.skeleton {
+  display: block;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--muted-soft) 0%, var(--surface-2) 40%, var(--muted-soft) 80%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+.skeleton-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 96px;
+}
+.skeleton-title {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: 6px;
 }
 
 /* ---- forms (등록 / 새 배포) ---- */
@@ -1916,7 +1997,8 @@ select.input {
   .flow-item:nth-child(2)::before {
     display: none;
   }
-  .pillars {
+  .pillars,
+  .app-grid {
     grid-template-columns: 1fr;
     gap: 20px;
   }
