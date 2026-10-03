@@ -65,7 +65,7 @@ export function TopBar({ isReal, connection, route, onTokenChange, onReconnect }
 
 function LangSwitch({ lang, setLang }: { lang: Lang; setLang: (lang: Lang) => void }) {
   return (
-    <div className="lang-switch" role="group" aria-label="language">
+    <div className="lang-switch" role="group" aria-label="language" data-active={lang}>
       <button type="button" className={lang === 'ko' ? 'lang-on' : ''} onClick={() => setLang('ko')} aria-pressed={lang === 'ko'}>
         KO
       </button>

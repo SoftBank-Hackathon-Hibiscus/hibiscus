@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createDataSource, readConfig } from './api';
 import { TopBar } from './components/TopBar';
 import { useConnection } from './hooks/useConnection';
 import { LangProvider, useLang } from './lib/i18n';
+import { fadeTextSwap } from './lib/motion';
 import { useHashRoute } from './lib/router';
 import { ApplicationDetail } from './pages/ApplicationDetail';
 import { ApplicationList } from './pages/ApplicationList';
@@ -36,10 +37,19 @@ function Shell() {
     document.documentElement.lang = lang;
   }, [lang]);
 
+  // 첫 렌더는 건너뛰고, 언어를 바꿀 때만 본문과 열려 있는 모달 본문을 부드럽게 바꾼다 (reduced-motion 이면 생략)
+  const mainRef = useRef<HTMLElement>(null);
+  const langSeen = useRef(lang);
+  useEffect(() => {
+    if (langSeen.current === lang) return;
+    langSeen.current = lang;
+    fadeTextSwap([mainRef.current, document.querySelector('.modal-body')]);
+  }, [lang]);
+
   return (
     <div className="app">
       <TopBar isReal={isReal} connection={connection.state} route={route} onTokenChange={onTokenChange} onReconnect={connection.recheck} />
-      <main>
+      <main ref={mainRef}>
         {route.page === 'deployment' && <DeploymentDetail key={`${route.id}-${tokenVersion}`} id={route.id} source={source} />}
         {route.page === 'application' && <ApplicationDetail key={`${route.id}-${tokenVersion}`} id={route.id} source={source} />}
         {route.page === 'applications' && <ApplicationList key={`apps-${tokenVersion}`} source={source} />}
