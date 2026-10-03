@@ -6,6 +6,7 @@ import { GITHUB_PAGE_SIZE } from '../api/real';
 import { ErrorNotice, describeError } from '../components/ErrorNotice';
 import { Collapsible, Crumbs, Empty, Notice, PageTitle, Pill } from '../components/ui';
 import { EMPTY_REGISTRATION, friendlyBackendError, repoShortName, slugify, toGithubApplicationInput, validateRegistration, type RegistrationDraft, type RegistrationErrors } from '../lib/forms';
+import { usePageTitle } from '../hooks/usePageTitle';
 import { useLang } from '../lib/i18n';
 import { APPLICATIONS_PATH, applicationPath, hrefFor, navigate } from '../lib/router';
 
@@ -39,6 +40,7 @@ function useLoadable<T>(load: (() => Promise<T>) | null, deps: unknown[]): Loada
  */
 export function RegisterApplication({ source }: { source: DataSource }) {
   const { t, lang } = useLang();
+  usePageTitle(t('registerApp'));
   const [draft, setDraft] = useState<RegistrationDraft>(EMPTY_REGISTRATION);
   const [touched, setTouched] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -261,8 +263,8 @@ function StepCard({ n, title, aside, children }: { n: number; title: string; asi
     <section className="card">
       <div className="card-head">
         <h2 className="card-title">
-          <span className="check-mark" aria-hidden>
-            {n}
+          <span className="step-card-mark" aria-hidden>
+            <span className="num">{n}</span>
           </span>
           {title}
         </h2>

@@ -5,7 +5,9 @@ import type { Approval, PiiReport, SignLog, TestResult } from '../api/contracts'
 import type { ApplicationView, Decision, DeploymentStatus, DeploymentView, StageName } from '../api/types';
 import { ErrorNotice } from '../components/ErrorNotice';
 import { Modal } from '../components/Modal';
-import { Collapsible, Crumbs, DemoBadge, Empty, Hash, Kv, PageTitle, Pill, type Tone } from '../components/ui';
+import { PageError } from '../components/PageError';
+import { Collapsible, Crumbs, DemoBadge, Empty, Hash, Kv, PageSkeleton, PageTitle, Pill, type Tone } from '../components/ui';
+import { usePageTitle } from '../hooks/usePageTitle';
 import { usePolling } from '../hooks/usePolling';
 import { findArtifact, latestStages, parseJsonArtifact } from '../lib/artifacts';
 import { fmtTime, relTime, targetLabel } from '../lib/format';
@@ -71,17 +73,18 @@ export function DeploymentDetail({ id, source }: { id: string; source: DataSourc
   }, [applicationId, source]);
 
   const summary = useMemo(() => (view ? summarizeDeployment(view, lang) : null), [view, lang]);
+  const appName = app?.application.name ?? view?.deployment.applicationId ?? '';
+  usePageTitle(view ? `${appName} v${view.deployment.version}` : null);
 
-  if (poll.loading && !view) return <Empty>{t('loading')}</Empty>;
-  if (!view || !summary) return <ErrorNotice error={poll.error ?? new Error('no data')} />;
+  if (poll.loading && !view) return <PageSkeleton cards={4} />;
+  if (!view || !summary) return <PageError error={poll.error ?? new Error('no data')} />;
   const d = view.deployment;
-  const appName = app?.application.name ?? d.applicationId;
   const needsApproval = d.decision === 'needs_approval' || d.status === 'awaiting_approval';
   const HeadIcon = TONE_ICON[summary.tone];
 
   return (
     <div className="page">
-      {poll.error ? <ErrorNotice error={poll.error} /> : null}
+      {poll.error ? <PageError error={poll.error} compact /> : null}
       <PageTitle
         crumbs={<Crumbs items={[{ label: t('crumbApps'), href: hrefFor(APPLICATIONS_PATH) }, { label: appName, href: hrefFor(applicationPath(d.applicationId)) }, { label: `v${d.version}` }]} />}
         title={
@@ -98,8 +101,8 @@ export function DeploymentDetail({ id, source }: { id: string; source: DataSourc
             {d.deploymentPerformed && <Pill tone="success">{t('deployed')}</Pill>}
             {progressing && (
               <span className="live">
-                {t('refreshing2s')}
-                {poll.lastUpdated ? `, ${relTime(new Date(poll.lastUpdated).toISOString())}` : ''}
+                {t('autoRefresh', { s: 2 })}
+                {poll.lastUpdated ? ` · ${t('lastChecked', { when: relTime(new Date(poll.lastUpdated).toISOString()) })}` : ''}
               </span>
             )}
           </div>

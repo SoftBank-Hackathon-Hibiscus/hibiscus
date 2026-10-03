@@ -5,7 +5,9 @@ import { MockDataSource } from '../api/mock';
 import type { AgentStatusResponse, ApplicationAgentSummary, ApplicationView, Deployment, DeploymentStatus, PolicyResult, RouteSnapshot, RoutingTargetHealth, RoutingTargetView, TargetKind } from '../api/types';
 import { ErrorNotice, describeError } from '../components/ErrorNotice';
 import { NewDeploymentModal } from '../components/NewDeploymentModal';
-import { Crumbs, Empty, Hash, PageTitle, Pill, type Tone } from '../components/ui';
+import { PageError } from '../components/PageError';
+import { Crumbs, Empty, Hash, PageSkeleton, PageTitle, Pill, type Tone } from '../components/ui';
+import { usePageTitle } from '../hooks/usePageTitle';
 import { usePolling } from '../hooks/usePolling';
 import { detectRouteChange, markOf, type RouteChange, type RouteMark } from '../lib/failover';
 import { fmtTime, relTime, targetLabel } from '../lib/format';
@@ -114,8 +116,9 @@ export function ApplicationDetail({ id, source }: { id: string; source: DataSour
   }, [poll.data]);
 
   const snap = poll.data;
-  if (poll.loading && !snap) return <Empty>{t('loading')}</Empty>;
-  if (!snap) return <ErrorNotice error={poll.error ?? new Error('no data')} />;
+  usePageTitle(snap ? snap.app.application.name : null);
+  if (poll.loading && !snap) return <PageSkeleton cards={3} />;
+  if (!snap) return <PageError error={poll.error ?? new Error('no data')} />;
 
   const a = snap.app.application;
   const h = snap.app.healthCheck;
@@ -130,7 +133,7 @@ export function ApplicationDetail({ id, source }: { id: string; source: DataSour
 
   return (
     <div className="page">
-      {poll.error ? <ErrorNotice error={poll.error} /> : null}
+      {poll.error ? <PageError error={poll.error} compact /> : null}
       <PageTitle
         crumbs={<Crumbs items={[{ label: t('crumbApps'), href: hrefFor(APPLICATIONS_PATH) }, { label: a.name }]} />}
         title={a.name}
@@ -144,8 +147,8 @@ export function ApplicationDetail({ id, source }: { id: string; source: DataSour
           <div className="title-badges">
             {a.publicHost && <span className="mono muted small">{a.publicHost}</span>}
             <span className="live">
-              {h.enabled ? t('healthEvery', { interval: h.intervalSeconds }) : t('healthOff')}
-              {poll.lastUpdated ? `, ${relTime(new Date(poll.lastUpdated).toISOString())}` : ''}
+              {t('autoRefresh', { s: POLL_MS / 1000 })}
+              {poll.lastUpdated ? ` · ${t('lastChecked', { when: relTime(new Date(poll.lastUpdated).toISOString()) })}` : ''}
             </span>
             <button type="button" className="btn btn-primary btn-small" onClick={() => setDeployOpen(true)}>
               <Plus size={14} aria-hidden /> {t('newDeployment')}

@@ -1830,11 +1830,6 @@ select.input {
   border-color: var(--accent);
   box-shadow: inset 0 0 0 3.5px var(--surface), inset 0 0 0 8px var(--accent);
 }
-.card-title .check-mark {
-  width: 22px;
-  height: 22px;
-  font-size: 11.5px;
-}
 
 /* ---- connect: 단계 카드 ---- */
 .connect {
@@ -1939,30 +1934,6 @@ select.input {
   width: 100%;
   font-family: var(--mono);
   font-size: 12.5px;
-}
-.check-mark {
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 800;
-  font-size: 12px;
-  background: var(--muted-soft);
-  color: var(--ink-3);
-}
-.check-ok .check-mark {
-  background: var(--success-soft);
-  color: var(--success);
-}
-.check-warn .check-mark {
-  background: var(--warning-soft);
-  color: var(--warning);
-}
-.check-fail .check-mark {
-  background: var(--danger-soft);
-  color: var(--danger);
 }
 .check-help {
   color: var(--ink-2);

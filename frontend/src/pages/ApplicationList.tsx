@@ -29,7 +29,7 @@ export function ApplicationList({ source }: { source: DataSource }) {
         right={
           <div className="title-badges">
             <span className="live">
-              {t('refreshing15s')}
+              {t('autoRefresh', { s: POLL_MS / 1000 })}
               {poll.lastUpdated ? ` · ${t('lastChecked', { when: relTime(new Date(poll.lastUpdated).toISOString()) })}` : ''}
             </span>
             <a className="btn btn-primary btn-small" href={hrefFor(REGISTER_PATH)}>
