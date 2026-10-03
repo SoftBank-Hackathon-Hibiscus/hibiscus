@@ -209,7 +209,21 @@ export class DeploymentWorker
       };
     }
 
-    const captured = this.artifacts.capture(paths, execution, deployment);
+    // A successful build/test replaces the placeholder before artifact validation.
+    // The patch is still committed only if every captured artifact is valid.
+    const capturedDeployment =
+      runner.name === 'test' && outcome.status === 'succeeded'
+        ? {
+            ...deployment,
+            imageDigest:
+              outcome.deploymentPatch?.imageDigest ?? deployment.imageDigest,
+          }
+        : deployment;
+    const captured = this.artifacts.capture(
+      paths,
+      execution,
+      capturedDeployment,
+    );
     if (captured.error)
       outcome = {
         ...outcome,

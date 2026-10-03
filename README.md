@@ -57,4 +57,3 @@ Branch name: `<scope>/<short-desc>` (e.g. `signer/approval-cli`)
 ## 링크
 
 - Notion 팀 페이지: https://app.notion.com/p/term1_team_hibiscus-db48bee9ada48277897001c7e3e32cdf
-- 문서 레포: [SoftBank-Hackathon-Hibiscus/document](https://github.com/SoftBank-Hackathon-Hibiscus/document)

@@ -25,7 +25,6 @@ export class DeploymentService {
     input: CreateDeploymentDto,
     requesterId: string,
     trigger: 'manual' | 'webhook' = 'manual',
-    sourceRevisionVerified = false,
   ) {
     const application = this.applications.find(applicationId);
     if (!application) throw new NotFoundException('Application not found');
@@ -41,7 +40,8 @@ export class DeploymentService {
       applicationId,
       trigger,
       sourceRevision: input.source_revision,
-      sourceRevisionVerified,
+      // Webhook authentication verifies the request, not the built/tested image.
+      sourceRevisionVerified: false,
       imageDigest: digest,
       digestSource: input.image_digest ? 'registry' : 'placeholder',
       requester: requesterId,

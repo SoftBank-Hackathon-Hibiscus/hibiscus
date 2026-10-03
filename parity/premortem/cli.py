@@ -52,6 +52,49 @@ def _cmd_build(args) -> int:
     return EXIT_OK
 
 
+def _cmd_test_build(args) -> int:
+    from .built_test import test_build
+    from .process import SubprocessRunner
+
+    try:
+        after = tuple(int(value) for value in args.after.split(',')) if args.after else ()
+    except ValueError:
+        raise PremortemError('INPUT_INVALID', '--after는 쉼표로 구분한 요청 번호여야 함') from None
+    result = test_build(manifest_path=args.build_manifest, record=args.record, noise=args.noise,
+                        app=args.name, out_dir=args.out_dir, runner=SubprocessRunner(),
+                        run_id=args.run_id, revision=args.source_revision, digest=args.digest,
+                        port=args.port, health_path=args.health_path, health_timeout=args.health_timeout,
+                        after=after)
+    if args.json:
+        _print_json(result)
+    else:
+        print(f"검사: {result['status']}, passed={result['passed']} ({args.out_dir})")
+    if result['status'] != 'completed':
+        return EXIT_ERROR
+    return EXIT_OK if result['passed'] else EXIT_FAILED
+
+
+def _cmd_policy_preview(args) -> int:
+    from .policy_preview import preview_policy
+
+    result = preview_policy(args.test_dir, args.out_dir, args.policy_root)
+    if args.json:
+        _print_json(result)
+    else:
+        print(f"정책: {result['decision']} ({result['plan_path']})")
+    return result['exit_code']
+
+
+def _cmd_backend_test(args) -> int:
+    from .backend_test import run_backend_test
+
+    result = run_backend_test(args.request, args.out_dir, args.policy_root)
+    _print_json(result)
+    return EXIT_OK
+
+
+
+
 def _cmd_demo(args) -> int:
     from .demo import run_demo
 
@@ -232,6 +275,37 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument("--timeout", type=int, default=900, help="빌드·pull 제한 시간(초)")
     build.add_argument("--json", action="store_true")
     build.set_defaults(handler=_cmd_build)
+
+    test_build = sub.add_parser('test-build', help='빌드한 같은 이미지로 세 조건 검사와 원본 인계 파일 생성')
+    test_build.add_argument('--build-manifest', required=True)
+    test_build.add_argument('--record', required=True)
+    test_build.add_argument('--noise', required=True)
+    test_build.add_argument('--name', required=True)
+    test_build.add_argument('--out-dir', required=True)
+    test_build.add_argument('--run-id', help='빌드 기록과 대조할 파이프라인 ID')
+    test_build.add_argument('--source-revision', help='빌드 기록과 대조할 앱 커밋 전체 SHA')
+    test_build.add_argument('--digest', help='빌드 기록과 대조할 index digest')
+    test_build.add_argument('--port', type=int, default=8080)
+    test_build.add_argument('--health-path', default='/healthz')
+    test_build.add_argument('--health-timeout', type=float, default=30)
+    test_build.add_argument('--after')
+    test_build.add_argument('--json', action='store_true')
+    test_build.set_defaults(handler=_cmd_test_build)
+
+    preview = sub.add_parser('policy-preview', help='parity 원본을 정책 변환기와 결정기에 전달 (서명·배포 없음)')
+    preview.add_argument('--test-dir', required=True)
+    preview.add_argument('--out-dir', required=True)
+    preview.add_argument('--policy-root')
+    preview.add_argument('--json', action='store_true')
+    preview.set_defaults(handler=_cmd_policy_preview)
+
+    backend = sub.add_parser('backend-test', help='Backend 호출용 테스트 단계 (요청 JSON → 정책 입력 JSON)')
+    backend.add_argument('--request', required=True)
+    backend.add_argument('--out-dir', required=True)
+    backend.add_argument('--policy-root')
+    backend.add_argument('--json', action='store_true', default=True)
+    backend.set_defaults(handler=_cmd_backend_test)
+
     return parser
 
 

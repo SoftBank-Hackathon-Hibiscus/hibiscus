@@ -253,7 +253,7 @@ describe('GitHub management and Webhook (e2e)', () => {
     ).toBe('feature/test');
   });
 
-  it('validates HMAC over exact raw bytes before recording or creating a deployment', async () => {
+  it('validates webhook HMAC without claiming the source image has been tested', async () => {
     const created = await createApplication();
     const payload = push(created.github.repositoryId);
     const raw = JSON.stringify(payload, null, 2);
@@ -280,7 +280,7 @@ describe('GitHub management and Webhook (e2e)', () => {
     expect(row).toMatchObject({
       requester: userId,
       sourceRevision: payload.after,
-      sourceRevisionVerified: true,
+      sourceRevisionVerified: false,
       trigger: 'webhook',
     });
   });

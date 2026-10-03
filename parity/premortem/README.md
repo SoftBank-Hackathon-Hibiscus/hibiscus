@@ -8,9 +8,9 @@ parity 안에서 배포 환경 조건을 재현하고, AI 수정안을 같은 �
 
 ## 지금 상태
 
-- 윤선님 재생기(`parity/parity`)와는 아직 연결 전입니다. 지금은 `examples/premortem`의 샘플 전용 재생기로만 돌고, 결과에 reference라고 표시됩니다.
-- AI는 키가 없어서 예시 응답(fixture)으로만 돌렸습니다. 실제 호출 코드는 들어 있습니다.
-- 정책 입력(test_result)은 만들지 않습니다. 결과(env_report)와 증거를 넘기고, 변환은 류진님 변환기에서 합니다.
+- 로컬 검토본의 `test-build`는 윤선님 실행기로 같은 이미지의 세 조건을 시험합니다. 기존 `demo`는 샘플 전용 reference 재생기를 사용합니다.
+- 기존 `demo`의 AI 수정·재검증은 예제 앱을 대상으로 합니다. 빌드 이미지와 연결하는 명령은 후속 변경에서 추가합니다.
+- 정책 입력(test_result)은 원본 result·facts·handoff를 류진님 변환기에 넘겨 만듭니다. env_report는 환경 진단·AI 분석용 내부 결과입니다.
 
 샘플 결과: 메모 앱은 컨테이너를 새로 바꾸면(replace) 6건 중 4건만 맞습니다(restart는 6건 다 맞음). 127.0.0.1 앱은 AI 수정 후 같은 기록으로 다시 돌려서 none, restart, replace 모두 통과합니다.
 
@@ -81,3 +81,73 @@ Dockerfile은 앱 폴더 바로 아래에 있어야 하며, submodule은 지원�
 `schema_version`은 `premortem.build.v1`입니다. 이는 빌드 기록이며 정책 통과나 배포 완료를 뜻하지 않습니다.
 조건별 재생은 실행하지 않습니다. 기존 `demo`/`run`/`handoff`에 이 이미지를 넘기는 연결은 별도 작업입니다.
 pull한 로컬 이미지는 다음 검사에서 쓸 수 있도록 남겨 둡니다.
+
+## 빌드 이미지 검사와 정책 확인
+
+아래 연결은 PR #10, #12, #15, #21을 함께 읽는 로컬 검토본입니다. 각 PR의 병합 여부와 별개로
+확인한 것이며, 기존 Backend의 TestStage에는 등록하지 않았습니다.
+
+```sh
+python -m premortem test-build \
+  --build-manifest <빌드폴더>/build_manifest.json \
+  --record <기록폴더>/session.jsonl --noise <기록폴더>/session.noise.json \
+  --name guestbook --out-dir <새검사폴더> --after 10 --json
+
+python -m premortem policy-preview \
+  --test-dir <검사폴더> --out-dir <새정책폴더> --json
+```
+
+`test-build`는 registry의 index와 platform manifest를 다시 읽고 소스 hash와 이미지 라벨을 대조합니다.
+태그를 다시 빌드하지 않고, pull한 로컬 이미지 ID를 윤선님 `parity.execution.run_test`에 넘깁니다.
+새 컨테이너와 고정된 loopback 포트를 사용하며 none, restart, replace를 모두 실행합니다.
+교체된 컨테이너도 소유 라벨을 확인한 뒤 정리합니다. Docker 호스트 platform이 index에 있으면
+빌드한 PC와 다른 아키텍처에서도 같은 index로 검사할 수 있습니다.
+
+원본 `result.json`과 `result.diagnostics.json`은 수정하지 않습니다. 실제 digest와 소스 커밋은
+`verified.diagnostics.json`에, 원본 facts를 포함한 인계 묶음은 `parity_handoff.json`에 둡니다.
+`execution_manifest.json`은 각 파일의 hash와 이번 실행의 식별값을 기록합니다.
+handoff 안의 `caller_asserted`는 기존 parity 형식을 유지한 값이며, 추가 이미지 검증은 별도 빌드·실행 기록에 남습니다.
+실행이 중단되면 원본 부분 결과를 보존하고 정책 인계 파일은 만들지 않습니다.
+
+`policy-preview`는 파일 hash와 식별값을 먼저 확인한 뒤 류진님 정책 실행기를 부릅니다.
+`policy/`에서 `npm ci`가 필요합니다. 입력은 원본 handoff와 검증 진단, 소스는 빌드 당시 복사본입니다.
+분류기는 `heuristic`으로 고정합니다. 정책 규칙을 재구현하지 않으며 서명·배포는 호출하지 않습니다.
+
+| 명령 | 종료 코드 |
+|---|---|
+| `test-build` | 0: 앱 검사 통과, 3: 완료했지만 불일치, 1: 입력·실행·정리 오류 |
+| `policy-preview` | 정책 CLI와 같음. 0: allow, 2: needs_approval, 3: block, 1: 실행 오류 |
+| `backend-test` | 0: 원본 시험과 정책 변환 완료. 앱 `passed=false`도 포함. 그 외: 다음 단계로 진행 금지 |
+
+현재 비교 범위는 요청 200건 이하와 빈 컨테이너 쓰기 계층입니다. 기존 볼륨·서비스 컨테이너는 받지 않습니다.
+테스트와 정책 결과 폴더는 새로 만들어야 하며, 완료 결과를 덮어쓰지 않습니다.
+
+## Backend 호출부
+
+`integrations/backend_v2.ts`의 `runParityTestStage`가 PR #20의 CommandRunner와 StageOutcome 형태에
+맞춰 Python 명령을 호출합니다. `repoRoot`, `pythonCommand`, `artifactRoot`, `outputDir`는 Backend 설정에서
+주고, `request`에는 아래 값을 전달합니다. `build_manifest`, `record`, `noise`는 실행 환경의 절대 경로입니다.
+앱 설정과 실행 정보 중 어느 곳에서 이 세 경로를 관리할지는 태현님 코드에 연결할 때 정해야 합니다.
+
+```json
+{
+  "format": "premortem-backend-test-v1",
+  "run_id": "Backend가 만든 deployment.id",
+  "app": "guestbook",
+  "source_revision": "앱 커밋 전체 SHA",
+  "digest": "레지스트리 index digest",
+  "build_manifest": "/workspace/build/build_manifest.json",
+  "record": "/workspace/records/session.jsonl",
+  "noise": "/workspace/records/session.noise.json",
+  "after": [10]
+}
+```
+
+호출 명령은 `python -m premortem backend-test --request <요청.json> --out-dir <단계폴더> --json`입니다.
+단계 폴더는 새 폴더 또는 비어 있는 폴더여야 합니다. 결과의 `artifacts`는 이 폴더 기준 상대 경로이며,
+TypeScript 호출부는 이를 Backend의 artifact root 기준으로 바꿉니다.
+필요하면 `port`, `health_path`, `health_timeout`을 요청에 추가합니다. 기본은 8080, `/healthz`, 30초입니다.
+
+`test_result.json` 변환은 류진님 adapter CLI가 맡습니다. 끝까지 실행된 불일치를 `status=succeeded`,
+`summary.test_passed=false`로 구분해서 정책이 판단할 수 있게 넘깁니다. 시험 중단·다른 digest·다른 커밋은
+단계 실패입니다. 이 호출부를 Backend에 등록하거나 DB 구조·배포 worker를 바꾸지는 않았습니다.
