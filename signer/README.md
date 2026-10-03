@@ -37,9 +37,10 @@ sign_result.json ─→ [npm run verify] ─→ 서명 주석과 하나라도 �
 - 요청자 id 형식이 틀리면 서명 전에 멈춤 (`REQUESTER_INVALID`)
 - cosign v3 이상만 씀. v2면 서명·확인 전에 멈춤 (`COSIGN_VERSION`)
 
-### 누가 요청하고 승인했는지는 signer가 확인하지 않음
+### 누가 요청하고 승인했는지는 signer가 확인하지 않음 (승인자 서명을 켜면 승인자는 확인)
 
 - `--requester`, `--approver`에 들어온 id를 그대로 믿음. 로그인이나 GitHub 인증은 signer 밖의 일
+- 승인자 서명(`--approvers`)을 켜면 승인 기록은 승인자 본인 SSH 키로 서명한 것만 받음 (아래 "승인자 SSH 서명")
 - 인증된 사람 id를 넘기는 건 부르는 쪽(backend) 책임. 예: webhook의 push 작성자 → requester, 로그인한 승인 화면 사용자 → approver
 - signer가 막는 건 본인 승인, 승인 뒤 plan·이미지 바꿔치기, 오래된 승인, 서명 뒤 결과 바꿔치기까지
 
@@ -48,15 +49,15 @@ sign_result.json ─→ [npm run verify] ─→ 서명 주석과 하나라도 �
 ```bash
 cd signer && npm ci
 
-# needs_approval일 때: 요청자가 아닌 사람이 승인 기록 만들기
-npm run approve -- --plan plan.json --requester <요청자> --approver <승인자> --out approval.json
+# needs_approval일 때: 요청자가 아닌 사람이 승인 기록 만들기 (--ssh-key 면 승인자 SSH 키로 서명해서 approval.json.sig 도)
+npm run approve -- --plan plan.json --requester <요청자> --approver <승인자> --out approval.json [--ssh-key ~/.ssh/id_ed25519]
 
 # 서명 (allow면 --approval 없이)
 COSIGN_PASSWORD="$(cat ~/hibiscus-secrets/cosign.password)" \
 npm run sign -- --plan plan.json --requester <요청자> [--approval approval.json] \
   --image-repo <저장소> --key ~/hibiscus-secrets/cosign.key \
   --out sign_result.json --log decisions.jsonl \
-  [--audit /var/lib/hibiscus/sign_audit.jsonl] [--approval-ttl 15]
+  [--audit /var/lib/hibiscus/sign_audit.jsonl] [--approval-ttl 15] [--approvers allowed_signers]
 
 # Rekor 장애 시: Rekor에 안 올리고 서명
 npm run sign -- ... --key ~/hibiscus-secrets/cosign.key --no-tlog
@@ -105,12 +106,16 @@ bash scripts/attack-demo.sh
 | `--pubkey-sha256` | `SIGNER_PUBKEY_SHA256` | 공개키 지문 고정 (여러 개 가능, 환경변수는 쉼표로). 확인에 쓰는 공개키가 이 목록에 없으면 멈춤 (`PUBKEY_MISMATCH`) |
 | `--self-verify` (sign) | `SIGNER_SELF_VERIFY=1` | 서명 직후 공개키로 바로 다시 확인. 실패하면 sign_result 안 남김 |
 | `--attest` (sign) | `SIGNER_ATTEST=1` | 배포 증명서도 이미지에 붙임. 못 붙이면 sign_result 안 남김 |
-| `--test-result` | | sign: 시험 결과를 증명서에 넣음. verify `--attestation`: 이 시험 결과로 서명했는지 확인 |
+| `--test-result` | | sign: 시험 결과를 증명서에 넣음 (`--attest` 없이 주면 `ARG_INVALID`). verify `--attestation`: 이 시험 결과로 서명했는지 확인 |
 | `--minimal-env` | `SIGNER_MINIMAL_ENV=1` | cosign 에 필요한 환경변수만 넘김 |
 | | `SIGNER_STRICT_KEY_PERMS=1` | 개인키 파일을 다른 사용자도 읽을 수 있으면 서명 안 함 (없으면 경고만) |
 | `--attestation` (verify) | | 배포 증명서도 확인. `--policy` 없으면 `policy/deploy.rego` (`--policy`만 주고 `--attestation`이 없으면 `ARG_INVALID`) |
 | `--policy-sha256` (verify) | `SIGNER_POLICY_SHA256` | Rego 정책 파일 지문 고정 (여러 개 가능). 정책 파일이 이 목록에 없으면 멈춤 (`POLICY_PIN_MISMATCH`) |
 | `--approval` (verify) | | 이 승인 기록으로 서명했는지까지 확인 |
+| `--ssh-key` (approve) | | 승인 기록에 승인자 SSH 키로 서명 (`<승인 기록>.sig`) |
+| `--approvers` (sign, verify) | `SIGNER_APPROVERS` (승인 기록을 줄 때만) | 승인자 명부(ssh `allowed_signers`). 사람 승인은 명부의 그 id 키로 서명한 승인 기록만 |
+| `--approvers-sha256` | `SIGNER_APPROVERS_SHA256` | 승인자 명부 지문 고정 (`APPROVERS_PIN_MISMATCH`) |
+| `--approval-sig` | | 승인 서명 파일. 없으면 `<승인 기록>.sig` |
 | `--max-age` (verify) | `SIGNER_MAX_AGE_MIN` | 서명한 지 이 시간(분)이 지난 결과는 거부 (`expired`) |
 | `--json` (verify, audit, reconcile) | | 결과를 JSON 한 줄로 (실행 오류도) |
 | `--latest` (verify) | `SIGNER_VERIFY_LATEST=1` | `--audit`와 같이. 뒤에 더 새로 서명한 결과가 있거나 같은 이미지가 block 됐으면 거부 (`superseded`) |
@@ -124,6 +129,7 @@ bash scripts/attack-demo.sh
 | `--digest`, `--run-id`, `--reason`, `--by`, `--note` (revoke) | | 철회할 이미지·실행, 이유(`vulnerability`/`policy_changed`/`key_compromise`/`mistake`), 철회한 사람, 메모 |
 
 - 빈 환경변수는 없는 것으로 봄
+- 화면에 찍는 문자열의 제어 문자(터미널 escape, 방향 바꾸는 유니코드)는 `\uXXXX`로 바꿔 찍음. sign_result·감사 로그처럼 남이 쓴 값으로 화면을 속이지 못하게
 - 종료 코드: 0 서명함·확인함 / 1 서명 거절·확인 실패 / 2 실행 오류 (인자, 파일, 키, 레지스트리 접근 등)
 
 ## 서명 주석
@@ -138,6 +144,7 @@ bash scripts/attack-demo.sh
 | `failover_allowed` | `true` / `false` |
 | `requester`, `approver` | 요청자, 승인자 (allow면 `auto`) |
 | `approval_sha256` | 승인 기록(approval.json, 키 정렬 JSON) 해시. 자동 승인이면 `none` |
+| `approval_key` | 승인자 서명을 확인했을 때만. 승인 기록에 서명한 SSH 키 지문 (`SHA256:…`, 인코딩) |
 | `plan_sha256` | plan.json 전체(키 정렬 JSON) 해시. rules 등 나머지까지 묶음 |
 | `signed_at` | 서명 시각, `encodeURIComponent`로 인코딩. sign_result의 signed_at만 고쳐서 `--max-age`를 피하지 못하게 |
 | `audit_head` | 감사 로그를 켰을 때만. 서명 직전 체인 끝 hash |
@@ -233,6 +240,7 @@ bash scripts/attack-demo.sh
 
 - 서명하는 내용: 키 정렬 JSON `{"type":"hibiscus-audit-anchor/v1","seq","head","time"}`. `cosign sign-blob --bundle`로 서명, `verify-blob`으로 확인
 - 체인이 깨진 로그는 고정하지 않음 (`AUDIT_INVALID`, 실행 오류)
+- 이미 있는 고정값과 지금 로그가 다르면(끝이 잘리거나 다시 씀) 새로 고정하지 않음 (`ANCHOR_CONFLICT`). 정기 고정이 고쳐진 로그를 그대로 인정하지 않게
 - `audit:verify --anchors`가 고정값마다 확인하는 것
   - 서명이 믿는 공개키(`--pub`, 여러 개 가능)로 확인됨, 아니면 `anchor_signature_invalid`
   - 지금 로그에 그 줄이 있음, 없으면 끝이 잘린 것 `anchor_truncated`
@@ -280,6 +288,8 @@ SIGNER_PUBKEY_SHA256=sha256:2f049a77... npm run verify -- --result sign_result.j
 ## 서명 환경
 
 - 개인키 파일 권한: 다른 사용자도 읽을 수 있으면(예: 644) 서명할 때 경고. `SIGNER_STRICT_KEY_PERMS=1`이면 서명 안 함 (`KEY_PERMISSIONS`, 실행 오류). KMS 키·Windows는 안 봄
+- `COSIGN_REPOSITORY`가 설정돼 있으면 cosign 을 부르지 않고 멈춤 (`COSIGN_ENV_UNSAFE`)
+  - cosign 은 이 저장소에서 서명을 읽고 써서, 정상 서명만 복사해 둔 그림자 저장소를 가리키면 이미지 저장소에 붙은 몰래 한 서명이 감사에서 안 보임 (실제 cosign 으로 확인)
 - `--minimal-env` / `SIGNER_MINIMAL_ENV=1`: cosign 프로세스에 필요한 환경변수만 넘김. backend의 DB 비밀번호, GitHub 토큰 같은 다른 비밀값이 cosign으로 안 감
   - 넘기는 것: `PATH`, `HOME`, `TMPDIR`, 로케일, 프록시, 인증서 경로, `DOCKER_CONFIG`, `GOOGLE_APPLICATION_CREDENTIALS`, `COSIGN_*`, `SIGSTORE_*`, `REKOR_*`, `CLOUDSDK_*`, `GOOGLE_*`, `AWS_*`, `AZURE_*`, `VAULT_*` 등
 
@@ -307,7 +317,7 @@ SIGNER_PUBKEY_SHA256=sha256:2f049a77... npm run verify -- --result sign_result.j
 
 | 조건 | 내용 |
 |---|---|
-| 시험 | 증명서에 시험 결과가 있고, 통과했고, 맞은 수 = 전체, 모든 조건에서 맞음 |
+| 시험 | 증명서에 시험 결과가 있고, 통과했고, 한 건 이상 재생했고, 맞은 수 = 전체, 모든 조건에서 맞음 (0건 재생은 시험을 안 한 것) |
 | 개인정보 | 개인정보 규칙(R4)이 걸린 앱은 `cloud_run` 금지, 장애 전환(failover)도 금지 |
 | 승인 시각 | 사람 승인은 서명 1시간 안에 받은 것만 |
 
@@ -368,6 +378,30 @@ cosign verify-attestation --key signer/keys/cosign.pub --type https://hibiscus.l
 - 형식이 틀린 관측 줄은 줄 번호와 같이 실행 오류 (`OBSERVED_INVALID`)
 - 한계: 관측 시점 사이에 잠깐 띄웠다 내린 배포는 못 봄. 주석 기록이 없는 예전 줄은 배포 위치를 몰라서 `target_not_signed`
 
+## 승인자 SSH 서명 (`--approvers`)
+
+승인 기록(approval.json)은 그냥 JSON 파일이라, 파일을 쓸 수 있으면 누구 이름으로든 승인 기록을 만들 수 있음. 켜면 승인자가 자기 SSH 키로 서명한 승인 기록만 받음 (`ssh-keygen -Y sign/verify`, OpenSSH 8.1 이상)
+
+```bash
+# 승인자 명부 (ssh allowed_signers 형식). GitHub 에 등록한 공개키는 https://github.com/<id>.keys
+echo "bob namespaces=\"hibiscus-approval\" $(curl -s https://github.com/bob.keys | head -1)" >> allowed_signers
+
+# 승인자: 승인 기록 + 서명 (approval.json.sig). ssh-agent 를 쓰면 --ssh-key 에 공개키 파일
+npm run approve -- --plan plan.json --requester alice --approver bob --out approval.json --ssh-key ~/.ssh/id_ed25519
+
+# 서명·확인: 승인 기록이 명부의 bob 키로 서명됐는지
+npm run sign -- ... --approval approval.json --approvers allowed_signers [--approvers-sha256 sha256:<지문>]
+npm run verify -- --result sign_result.json --approval approval.json --approvers allowed_signers
+```
+
+- 확인하는 것: 서명이 명부에 승인자 id(`approval.json`의 approver)로 적힌 키인지, namespace 가 `hibiscus-approval`인지(같은 키로 한 git 커밋 서명은 안 됨), 승인 기록 바이트가 서명한 그대로인지
+- 실패하면 `approval_mismatch`로 서명 거절 (서명 파일 없음, 다른 사람 키, 서명 뒤 고침, 명부에 없음)
+- 서명한 키 지문을 서명 주석 `approval_key`와 배포 증명서 `approval_key`에 남김 → verify `--approvers`는 서명 때 확인한 키와도 맞춰 봄
+- 서명 확인과 내용 읽기를 같은 바이트로 함. 명부도 지문 고정한 바이트를 임시 파일로 넘김 (확인한 뒤 바꿔치기해도 소용없게)
+- 명부의 id 는 대소문자까지 승인 기록과 같아야 함 (ssh principal 비교). `valid-before` 같은 키 만료도 ssh 규칙대로
+- 자동 승인(allow)은 승인자 서명이 필요 없음
+- 지금 backend 는 승인 버튼을 누를 때 서명 없는 승인 기록을 만들어서, backend 에서 켜면 사람 승인이 전부 거절됨. 수동 CLI 흐름용이고 backend 연동은 팀 결정 뒤
+
 ## 배포 쪽 서명 확인
 
 ```bash
@@ -424,19 +458,20 @@ SIGNER_COSIGN_KEY=gcpkms://... npm run sign -- ...
 
 ```bash
 cd signer && npm ci
-bash scripts/attack-demo.sh            # DEMO_PORT=5055, DEMO_KEEP=1 이면 작업 폴더 남김
+bash scripts/attack-demo.sh            # DEMO_PORT=5055, DEMO_KEEP=1 이면 작업 폴더 남김 (cosign·crane·ssh-keygen 필요)
 ```
 
 | 공격 | 잡는 곳 |
 |---|---|
 | block 결정 서명 요청, 승인자를 요청자 본인(대소문자만 바꿈)으로 | sign 거절 (`policy_block`, `self_approval`) |
+| 손으로 만든 승인 기록 / 남의 SSH 키로 서명 / 서명 뒤 승인 시각 고침 | sign `--approvers` 거절 (`approval_mismatch`) |
 | 다른 사용자도 읽을 수 있는 개인키 | sign 실행 오류 (`KEY_PERMISSIONS`) |
 | 서명 뒤 targets에 cloud_run, approver, signed_at, plan 규칙 결과 바꾸기 | verify `signature_invalid` |
 | 다른 이미지 digest, 이미지·서명을 다른 저장소로 복사, dry-run 결과 | verify `ref_invalid`, `repo_mismatch`, `dry_run` |
 | 공격자 키로 서명 / 레포 공개키 바꿔치기 | verify `signature_invalid` / `PUBKEY_MISMATCH` |
 | 팀 키를 훔쳐 signer 밖에서 직접 서명 (새 형식, 예전 `.sig` 형식) | audit `--strict-images` `unlogged_signature` |
 | 복사한 로그로 서명, 훔친 키로 새 이미지 서명 | audit `--sweep` (두 건 다 `findings`) |
-| 시험 실패 이미지 / 시험 결과 파일 바꿔치기 / 정책 파일에 한 줄 붙이기 | verify `policy_denied` (strict.rego) / `attestation_invalid` / `POLICY_PIN_MISMATCH` |
+| 시험 실패 이미지 / 시험 0건을 통과로 표시 / 시험 결과 파일 바꿔치기 / 정책 파일에 한 줄 붙이기 | verify `policy_denied` (strict.rego) / `policy_denied` / `attestation_invalid` / `POLICY_PIN_MISMATCH` |
 | 감사 로그 한 줄 수정 / 끝 자르기 / 서명 줄 빼기 / 빼고 체인 다시 계산 | audit `hash_mismatch` / `anchor_truncated` / verify `audit_mismatch` / audit `--images` `unlogged_signature` |
 | v2 뒤에 v1 결과로 배포 / 철회한 v2 배포 / 철회 줄 지우기 / 철회 이미지 다시 서명 | verify `superseded` / `revoked` / verify·audit `--anchors` `anchor_truncated` / sign `DIGEST_REVOKED` |
 | targets 를 고쳐 Cloud Run 에 배포, 철회한 이미지·로그에 없는 이미지가 떠 있음 | reconcile `target_not_signed` / `deploy_revoked` / `deploy_unlogged` |
