@@ -27,17 +27,22 @@ const hopByHopHeaders = new Set([
 @Injectable()
 export class GatewayProxyService implements OnModuleDestroy {
   private readonly onPremAgent = new HttpAgent({
-    keepAlive: true, maxSockets: 64, maxTotalSockets: 256, maxFreeSockets: 16,
+    keepAlive: true,
+    maxSockets: 64,
+    maxTotalSockets: 256,
+    maxFreeSockets: 16,
   });
   private readonly cloudAgent = new HttpsAgent({
-    keepAlive: true, maxSockets: 64, maxTotalSockets: 256, maxFreeSockets: 16,
+    keepAlive: true,
+    maxSockets: 64,
+    maxTotalSockets: 256,
+    maxFreeSockets: 16,
   });
 
   onModuleDestroy(): void {
     this.onPremAgent.destroy();
     this.cloudAgent.destroy();
   }
-
 
   constructor(
     _tunnel: SshTunnelService,
@@ -72,6 +77,11 @@ export class GatewayProxyService implements OnModuleDestroy {
 
     this.watchIdle(request, outgoing, timeout);
     outgoing.once('response', (incoming) => {
+      if (response.destroyed) {
+        incoming.destroy();
+        outgoing.destroy();
+        return;
+      }
       response.writeHead(
         incoming.statusCode ?? 502,
         incoming.statusMessage,
@@ -80,6 +90,7 @@ export class GatewayProxyService implements OnModuleDestroy {
       incoming.pipe(response);
     });
     outgoing.once('error', (error) => {
+      if (response.destroyed || response.writableEnded) return;
       if (response.headersSent) {
         response.destroy(error);
         return;
@@ -93,7 +104,21 @@ export class GatewayProxyService implements OnModuleDestroy {
             : 'Gateway upstream is unavailable',
       });
     });
-    request.once('aborted', () => outgoing.destroy());
+    const cancel = () => {
+      if (!response.writableFinished) outgoing.destroy();
+    };
+    request.once('aborted', cancel);
+    // A complete GET body does not emit request.aborted when its client leaves.
+    response.once('close', cancel);
+    outgoing.once('close', () => {
+      request.off('aborted', cancel);
+      response.off('close', cancel);
+    });
+    // The client may disconnect while the async upstream request is created.
+    if (request.aborted || response.destroyed) {
+      outgoing.destroy();
+      return;
+    }
     const rawBody = (request as Request & { rawBody?: Buffer }).rawBody;
     if (rawBody) outgoing.end(rawBody);
     else request.pipe(outgoing);
@@ -104,7 +129,8 @@ export class GatewayProxyService implements OnModuleDestroy {
     request: Request,
     headers: OutgoingHttpHeaders,
   ) {
-    if (!resolution.target.gatewayPort) throw new Error('SSH forward target is invalid');
+    if (!resolution.target.gatewayPort)
+      throw new Error('SSH forward target is invalid');
     return httpRequest({
       method: request.method,
       host: '127.0.0.1',
