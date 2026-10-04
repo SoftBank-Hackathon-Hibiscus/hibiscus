@@ -1,5 +1,5 @@
 import { TrafficService } from '../observability/traffic.service.js';
-import { Injectable } from '@nestjs/common';
+import { Injectable, type OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   Agent as HttpAgent,
@@ -7,8 +7,7 @@ import {
   type IncomingHttpHeaders,
   type OutgoingHttpHeaders,
 } from 'node:http';
-import { request as httpsRequest } from 'node:https';
-import type { Socket } from 'node:net';
+import { Agent as HttpsAgent, request as httpsRequest } from 'node:https';
 import type { Request, Response } from 'express';
 import type { BackendConfig } from '../config/configs/backend.config.js';
 import { SshTunnelService } from '../ssh-tunnel/ssh-tunnel.service.js';
@@ -26,9 +25,22 @@ const hopByHopHeaders = new Set([
 ]);
 
 @Injectable()
-export class GatewayProxyService {
+export class GatewayProxyService implements OnModuleDestroy {
+  private readonly onPremAgent = new HttpAgent({
+    keepAlive: true, maxSockets: 64, maxTotalSockets: 256, maxFreeSockets: 16,
+  });
+  private readonly cloudAgent = new HttpsAgent({
+    keepAlive: true, maxSockets: 64, maxTotalSockets: 256, maxFreeSockets: 16,
+  });
+
+  onModuleDestroy(): void {
+    this.onPremAgent.destroy();
+    this.cloudAgent.destroy();
+  }
+
+
   constructor(
-    private readonly tunnel: SshTunnelService,
+    _tunnel: SshTunnelService,
     private readonly traffic: TrafficService,
     private readonly config: ConfigService<BackendConfig, true>,
   ) {}
@@ -92,15 +104,14 @@ export class GatewayProxyService {
     request: Request,
     headers: OutgoingHttpHeaders,
   ) {
-    const stream = await this.tunnel.open(resolution.target);
-    const agent = new HttpAgent({ keepAlive: false });
-    agent.createConnection = () => stream as Socket;
+    if (!resolution.target.gatewayPort) throw new Error('SSH forward target is invalid');
     return httpRequest({
       method: request.method,
-      host: 'onprem.internal',
+      host: '127.0.0.1',
+      port: resolution.target.gatewayPort,
       path: resolution.upstreamPath,
       headers: { ...headers, host: request.headers.host },
-      agent,
+      agent: this.onPremAgent,
     });
   }
 
@@ -112,6 +123,7 @@ export class GatewayProxyService {
     const base = new URL(resolution.target.url!);
     const upstream = new URL(resolution.upstreamPath, base);
     return httpsRequest(upstream, {
+      agent: this.cloudAgent,
       method: request.method,
       headers,
     });
