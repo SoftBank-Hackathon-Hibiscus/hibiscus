@@ -9,6 +9,7 @@ import type {
   StageOutcome,
   StageRunner,
 } from '../types/deployment.type.js';
+import { ApplicationPolicyInputService } from '../application-policy-input.service.js';
 
 @Injectable()
 export class TestStage implements StageRunner {
@@ -17,6 +18,7 @@ export class TestStage implements StageRunner {
   constructor(
     private readonly config: ConfigService<BackendConfig, true>,
     private readonly parity: ParityTestStage,
+    private readonly policyInput: ApplicationPolicyInputService,
   ) {}
 
   async run(context: StageContext): Promise<StageOutcome> {
@@ -49,11 +51,22 @@ export class TestStage implements StageRunner {
       };
       const output = resolve(paths.test, 'test_result.json');
       writeFileSync(output, `${JSON.stringify(result, null, 2)}\n`, 'utf8');
+      const policyInput = this.policyInput.capture(
+        application.sourcePath,
+        paths,
+      );
       return {
         status: 'succeeded',
         exitCode: 0,
-        artifacts: { test_result: paths.relative(output) },
-        summary: { template: application.testTemplate, stub: true },
+        artifacts: {
+          test_result: paths.relative(output),
+          ...(policyInput ? { policy_input: policyInput } : {}),
+        },
+        summary: {
+          template: application.testTemplate,
+          stub: true,
+          policy_input: Boolean(policyInput),
+        },
       };
     } catch (error) {
       return {

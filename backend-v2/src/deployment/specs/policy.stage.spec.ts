@@ -20,6 +20,7 @@ import {
   type DeploymentPlan,
   type StageContext,
 } from '../types/deployment.type.js';
+import { ApplicationPolicyInputService } from '../application-policy-input.service.js';
 
 describe('PolicyStage application policy', () => {
   const temporaryDirectories: string[] = [];
@@ -69,7 +70,14 @@ describe('PolicyStage application policy', () => {
       }),
     } as unknown as ConfigService<BackendConfig, true>;
     const runner = { run } as unknown as CommandRunner;
-    return { policy: new PolicyStage(config, runner), run };
+    return {
+      policy: new PolicyStage(
+        config,
+        runner,
+        new ApplicationPolicyInputService(),
+      ),
+      run,
+    };
   }
 
   it('skips policy evaluation when .hibiscus/policy.yaml is absent', async () => {
@@ -100,7 +108,7 @@ describe('PolicyStage application policy', () => {
     ]);
   });
 
-  it('runs only the policy file from the application source', async () => {
+  it('runs only the policy file handed off by the test stage', async () => {
     const { sourcePath, context: stageContext } = context();
     const applicationPolicy = 'version: 1\n';
     mkdirSync(join(sourcePath, '.hibiscus'));
@@ -109,6 +117,7 @@ describe('PolicyStage application policy', () => {
       applicationPolicy,
       'utf8',
     );
+    new ApplicationPolicyInputService().capture(sourcePath, stageContext.paths);
     const planWithoutHash = {
       run_id: stageContext.deployment.id,
       app: stageContext.application.name,
@@ -144,7 +153,7 @@ describe('PolicyStage application policy', () => {
 
     const args = run.mock.calls[0]![0].args;
     expect(args[args.indexOf('--policy') + 1]).toBe(
-      join(sourcePath, '.hibiscus/policy.yaml'),
+      join(stageContext.paths.test, 'policy-input', 'policy.yaml'),
     );
     expect(outcome.policyResult).toMatchObject({
       policyPath: '.hibiscus/policy.yaml',

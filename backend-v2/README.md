@@ -144,7 +144,7 @@ deploy
 
 `STAGE_MODE=cli`는 기존 `policy/`와 `signer/` CLI를 호출합니다. CLI 모드는 각 폴더의 의존성을 먼저 설치해야 합니다.
 
-CLI 정책은 배포 대상 커밋의 `.hibiscus/policy.yaml`만 사용합니다. Backend VM의 공통 정책 파일로 대체하지 않습니다. 파일이 없으면 정책 단계를 `skipped`로 기록하고 `onprem`, `cloud_run` 배포와 failover를 허용하는 계획을 생성합니다. 파일이 있으면 경로와 SHA-256을 `policy_results`에 저장합니다.
+CLI 정책은 배포 대상 커밋의 `.hibiscus/policy.yaml`만 사용합니다. Test 단계가 원본 checkout에서 이 파일만 `test/policy-input/policy.yaml`로 복사하고, Policy 단계는 복사된 입력을 사용합니다. `.hibiscus` 전체는 이미지 빌드 스냅샷에서 계속 제외합니다. Backend VM의 공통 정책 파일로 대체하지 않습니다. 파일이 없으면 정책 단계를 `skipped`로 기록하고 `onprem`, `cloud_run` 배포와 failover를 허용하는 계획을 생성합니다. 파일이 있으면 경로와 SHA-256을 `policy_results`에 저장합니다.
 
 ## 결과 저장과 CLI 연결
 
