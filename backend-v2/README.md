@@ -561,3 +561,20 @@ DB 결과 저장, 잘못된 결과의 차단, 원문 해시와 경로 검사, �
 - `POST /deployments/:id/rollback` (`{}`): `id`는 복구할 이전 성공 배포입니다. 현재 활성 버전보다 오래되고 실제 배포가 성공한 버전만 사용할 수 있습니다. 대기 중인 다른 배포가 있으면 409를 반환합니다.
 - 롤백은 이전 커밋과 당시의 실행·검사 환경변수로 새 `queued` 배포를 만듭니다. 새 버전 번호와 `trigger=rollback`을 기록합니다. 다시 빌드하고 검사 → 정책 → 서명 → 배포를 실행합니다. 승인도 새로 받아야 합니다. 기존 이미지 digest를 그대로 전환하는 방식은 아닙니다. 데이터베이스 데이터와 외부 상태는 복구하지 않습니다. 검증 중에는 현재 경로를 유지합니다.
 - 두 API 모두 기존 Bearer 인증을 사용합니다. 프런트엔드 배포 상세 화면에서 취소하거나 복구할 버전을 선택할 수 있습니다.
+
+### Gateway overload controls
+
+`GATEWAY_MAX_ACTIVE` limits active upstream requests per application (default 64,
+maximum 64). `GATEWAY_MAX_QUEUED` bounds waiting requests per application (default
+64; zero disables waiting). `GATEWAY_QUEUE_TIMEOUT_MS` limits admission and HTTP
+connection-pool waits separately (default 1000ms each). Overflow and expired
+waits return HTTP 503 with `Retry-After: 1`; clients should use backoff rather than
+retry immediately. These are initial defaults, not a throughput guarantee.
+
+The HTTP/HTTPS pools retain up to 64 idle connections per upstream. Their total
+socket limit remains 256 per pool. `gateway_pool` logs every 30 seconds include
+current per-app active/queued counts and process-lifetime cumulative counters:
+`admitted`, `rejected` (admission or socket wait failures), `canceled` (admission
+cancellations), `queueWaitMs`, `socketWaitMs`, `upstreamHeaderMs`, and `headers`.
+`upstreamHeaderMs` includes the socket wait; it is time from outgoing-request
+creation until response headers, not the complete response body duration.
