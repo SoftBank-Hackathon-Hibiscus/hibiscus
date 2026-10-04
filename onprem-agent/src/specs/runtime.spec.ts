@@ -36,7 +36,7 @@ void test("verifies a signed digest and starts a loopback-only candidate", async
   const config = agentConfig();
   const job = candidateJob();
   await new CosignImageVerifier(config, commands).verify(job);
-  const candidate = await new DockerRuntime(config, commands).createCandidate(
+  const candidate = await new DockerRuntime(config, commands, async () => 32768).createCandidate(
     job,
   );
 
@@ -57,7 +57,7 @@ void test("verifies a signed digest and starts a loopback-only candidate", async
   });
   const run = commands.calls.find((call) => call.args[0] === "run");
   assert.ok(run);
-  assert.ok(run.args.includes("127.0.0.1::8080"));
+  assert.ok(run.args.includes("127.0.0.1:32768:8080"));
   assert.ok(run.args.includes("hibiscus.managed=true"));
   assert.deepEqual(
     run.args.slice(run.args.indexOf("--env"), run.args.indexOf("--env") + 2),
@@ -94,6 +94,52 @@ void test("does not recreate a missing non-serving container", async () => {
 
   assert.deepEqual(recovered, []);
   assert.equal(commands.calls.some((call) => call.args[0] === "run"), false);
+});
+
+void test("rejects a changed port after Docker restart", async () => {
+  const container = managedContainer("serving");
+  const commands: CommandExecutor = {
+    async run(_command, args) {
+      if (args.includes("{{json .Config.Labels}}")) return {stdout: JSON.stringify({"hibiscus.managed": "true", "hibiscus.digest": container.digest}), stderr: ""};
+      if (args[0] === "port") return {stdout: "127.0.0.1:32769", stderr: ""};
+      return {stdout: "true", stderr: ""};
+    },
+  };
+  await assert.rejects(new DockerRuntime(agentConfig(), commands).reconcile([container], container.container), /expected 32768, actual 32769/);
+});
+
+void test("rejects a dynamic binding even when the current port matches", async () => {
+  const container = managedContainer("serving");
+  const commands: CommandExecutor = {
+    async run(_command, args) {
+      if (args.includes("{{json .Config.Labels}}")) return {stdout: JSON.stringify({"hibiscus.managed": "true", "hibiscus.digest": container.digest}), stderr: ""};
+      if (args.includes("{{json .HostConfig.PortBindings}}")) return {stdout: JSON.stringify({"8080/tcp": [{HostIp: "127.0.0.1", HostPort: ""}]}), stderr: ""};
+      if (args[0] === "port") return {stdout: "127.0.0.1:32768", stderr: ""};
+      return {stdout: "true", stderr: ""};
+    },
+  };
+  await assert.rejects(new DockerRuntime(agentConfig(), commands).reconcile([container], container.container), /fixed loopback binding/);
+});
+
+void test("keeps the saved port when recreating a missing candidate", async () => {
+  const commands = new FakeCommands();
+  const existing = managedContainer("candidate");
+  await new DockerRuntime(agentConfig(), commands, async () => 40000).createCandidate(candidateJob(), existing);
+  assert.ok(commands.calls.find(c => c.args[0] === "run")?.args.includes("127.0.0.1:32768:8080"));
+});
+
+void test("reports a fixed-port collision without retrying on another port", async () => {
+  const commands = new FakeCommands();
+  const run = commands.run.bind(commands);
+  commands.run = (command, args) => args[0] === "run"
+    ? Promise.reject(new CommandError("docker command failed", "port is already allocated", 1))
+    : run(command, args);
+  let allocations = 0;
+  await assert.rejects(new DockerRuntime(agentConfig(), commands, async () => {
+    allocations++;
+    return 32768;
+  }).createCandidate(candidateJob()), /docker command failed/);
+  assert.equal(allocations, 1);
 });
 
 function candidateJob(): AgentJob {
