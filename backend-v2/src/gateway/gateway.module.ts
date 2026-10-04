@@ -4,6 +4,7 @@ import {
   RequestMethod,
   type NestModule,
 } from '@nestjs/common';
+import { DatabaseModule } from '../database/database.module.js';
 import { ObservabilityModule } from '../observability/observability.module.js';
 import { ApplicationModule } from '../application/application.module.js';
 import { RoutingModule } from '../routing/routing.module.js';
@@ -14,6 +15,7 @@ import { GatewayResolverService } from './gateway-resolver.service.js';
 
 @Module({
   imports: [
+    DatabaseModule,
     ApplicationModule,
     RoutingModule,
     SshTunnelModule,
