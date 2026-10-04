@@ -35,6 +35,7 @@ import { ErrorNotice } from "../components/ErrorNotice";
 import { Modal } from "../components/Modal";
 import { PageError } from "../components/PageError";
 import { Loader } from "../components/Loader";
+import { RecordedDiagnosis } from "../components/RecordedDiagnosis";
 import {
   Collapsible,
   Crumbs,
@@ -57,6 +58,7 @@ import { fmtTime, relTime, targetLabel } from "../lib/format";
 import { pickLang, useLang, type DictKey } from "../lib/i18n";
 import { Markdown, prepareExplain } from "../lib/markdown";
 import { loaderHoldMs } from "../lib/motion";
+import { matchesRecordedGuestbook } from "../lib/recordedDiagnosis";
 import {
   APPLICATIONS_PATH,
   applicationPath,
@@ -319,7 +321,7 @@ export function DeploymentDetail({
         <div className="stack">
           <section className="card">
             <CardTitle icon={FlaskConical}>{t(STEP_DETAIL_KEY.test)}</CardTitle>
-            <TestDetail view={view} summary={summary} />
+            <TestDetail view={view} summary={summary} sourceKind={source.kind} />
           </section>
           {needsApproval && (
             <section className="card">
@@ -967,9 +969,11 @@ function ApprovalCard({
 function TestDetail({
   view,
   summary,
+  sourceKind,
 }: {
   view: DeploymentView;
   summary: DeploymentSummary;
+  sourceKind: DataSource["kind"];
 }) {
   const { t } = useLang();
   const stage = latestStages(view.stages).test;
@@ -1070,6 +1074,12 @@ function TestDetail({
           </pre>
         </div>
       )}
+      {!stub && !result.passed &&
+        (sourceKind === "mock"
+          ? result.app === "guestbook"
+          : matchesRecordedGuestbook(result)) && (
+          <RecordedDiagnosis relatedCase={sourceKind === "real"} />
+        )}
       {withMismatch.length > 0 && (
         <div className="fold-list">
           {withMismatch.map((c) => (
