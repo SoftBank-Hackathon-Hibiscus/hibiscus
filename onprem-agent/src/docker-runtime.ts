@@ -1,3 +1,4 @@
+import { createServer } from "node:net";
 import type { AgentConfig } from "./config.js";
 import { CommandError, type CommandExecutor } from "./command-runner.js";
 import type { AgentJob, ContainerRuntime, ManagedContainer } from "./types.js";
@@ -6,6 +7,7 @@ export class DockerRuntime implements ContainerRuntime {
   constructor(
     private readonly config: AgentConfig,
     private readonly commands: CommandExecutor,
+    private readonly allocatePort = allocateHostPort,
   ) {}
 
   async createCandidate(
@@ -19,14 +21,19 @@ export class DockerRuntime implements ContainerRuntime {
       try {
         await this.ensureManaged(existing);
         await this.start(existing.container);
+        await this.verifyPort(existing);
         return existing;
       } catch (error) {
         if (!this.isMissing(error)) throw error;
       }
     }
     const recovered = await this.recover(job, name);
-    if (recovered) return recovered;
+    if (recovered) {
+      await this.verifyPort(recovered);
+      return recovered;
+    }
 
+    const expectedPort = existing?.host_port ?? await this.allocatePort();
     const environment = this.environmentArgs(job.runtime.environment);
     await this.commands.run(this.config.dockerCommand, [
       "run",
@@ -42,11 +49,12 @@ export class DockerRuntime implements ContainerRuntime {
       "--label",
       `hibiscus.digest=${job.digest}`,
       "-p",
-      `127.0.0.1::${job.runtime.container_port}`,
+      `127.0.0.1:${expectedPort}:${job.runtime.container_port}`,
       ...environment,
       job.image,
     ]);
     const hostPort = await this.hostPort(name, job.runtime.container_port);
+    if (hostPort !== expectedPort) throw new Error("Candidate host port does not match its fixed binding");
     return {
       run_id: job.run_id,
       digest: job.digest,
@@ -66,6 +74,7 @@ export class DockerRuntime implements ContainerRuntime {
   ): Promise<void> {
     await this.ensureManaged(target);
     await this.start(target.container);
+    await this.verifyPort(target);
     await this.commands.run(this.config.dockerCommand, [
       "update",
       "--restart",
@@ -114,6 +123,7 @@ export class DockerRuntime implements ContainerRuntime {
         await this.ensureManaged(container);
         if (container.container === servingContainer) {
           await this.start(container.container);
+          await this.verifyPort(container);
         }
         available.push(container);
       } catch (error) {
@@ -248,6 +258,21 @@ export class DockerRuntime implements ContainerRuntime {
     }
   }
 
+  private async verifyPort(container: ManagedContainer): Promise<void> {
+    const actual = await this.hostPort(container.container, container.container_port);
+    if (actual !== container.host_port) {
+      throw new Error(`Container host port changed: expected ${container.host_port}, actual ${actual}`);
+    }
+    const binding = await this.commands.run(this.config.dockerCommand, [
+      "inspect", "--format", "{{json .HostConfig.PortBindings}}", container.container,
+    ]);
+    const ports = JSON.parse(binding.stdout) as Record<string, Array<{ HostIp: string; HostPort: string }>>;
+    const entries = ports[`${container.container_port}/tcp`] ?? [];
+    if (entries.length !== 1 || entries[0]?.HostIp !== "127.0.0.1" || entries[0]?.HostPort !== String(container.host_port)) {
+      throw new Error(`Container needs a fixed loopback binding on port ${container.host_port}: ${container.container}`);
+    }
+  }
+
   private async hostPort(name: string, containerPort: number): Promise<number> {
     const output = await this.commands.run(this.config.dockerCommand, [
       "port",
@@ -274,4 +299,18 @@ export class DockerRuntime implements ContainerRuntime {
       /No such (object|container)/i.test(error.stderr)
     );
   }
+}
+
+async function allocateHostPort(): Promise<number> {
+  const listener = createServer();
+  await new Promise<void>((resolve, reject) => {
+    listener.once("error", reject);
+    listener.listen(0, "127.0.0.1", resolve);
+  });
+  const address = listener.address();
+  if (!address || typeof address === "string") throw new Error("Unable to allocate host port");
+  const port = address.port;
+  await new Promise<void>((resolve, reject) => listener.close(error => error ? reject(error) : resolve()));
+  // Docker must claim this exact port; a race or conflict fails instead of remapping it.
+  return port;
 }
