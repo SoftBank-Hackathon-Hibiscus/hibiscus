@@ -29,7 +29,7 @@ async function listen(server: Server) {
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   return (server.address() as AddressInfo).port;
 }
-async function setup() {
+async function setup(overload = false) {
   let markStarted!: () => void;
   const started = new Promise<void>((resolve) => {
     markStarted = resolve;
@@ -52,7 +52,16 @@ async function setup() {
     {} as SshTunnelService,
     new TrafficService(),
     new ConfigService<BackendConfig, true>({
-      backend: { gatewayIdleTimeoutMs: 10000 },
+      backend: {
+        gatewayIdleTimeoutMs: 10000,
+        ...(overload
+          ? {
+              gatewayMaxActive: 1,
+              gatewayMaxQueued: 1,
+              gatewayQueueTimeoutMs: 100,
+            }
+          : {}),
+      },
     }),
   );
   // One slot makes an abandoned upstream deterministically block the next request.
@@ -60,6 +69,16 @@ async function setup() {
   const gatewayPort = await listen(
     createServer((req, res) => {
       Object.assign(req, { protocol: 'http' });
+      Object.assign(res, {
+        status(code: number) {
+          res.statusCode = code;
+          return res;
+        },
+        json(body: unknown) {
+          res.end(JSON.stringify(body));
+          return res;
+        },
+      });
       req.once('aborted', () => {
         requestAborted = true;
       });
@@ -109,6 +128,7 @@ async function setup() {
     hang,
     healthy,
     requestAborted: () => requestAborted,
+    gatewayPort,
   };
 }
 it('cancels upstream after a completed GET client disconnects and releases its pool slot', async () => {
@@ -163,5 +183,35 @@ it('cancels upstream when the client leaves during a partial response', async ()
       throw new Error('stream not canceled');
     }),
   ]);
+  expect(await f.healthy()).toBe('ok');
+});
+
+it('returns 503 with Retry-After on queue overflow and expiry, then recovers', async () => {
+  const f = await setup(true);
+  const active = f.hang();
+  await f.started;
+  const send = () =>
+    new Promise<{ code: number; retry: string | undefined }>((resolve) => {
+      request(
+        { host: '127.0.0.1', port: f.gatewayPort, path: '/ok' },
+        (response) => {
+          response.resume();
+          response.on('end', () =>
+            resolve({
+              code: response.statusCode!,
+              retry: response.headers['retry-after'],
+            }),
+          );
+        },
+      ).end();
+    });
+  const expired = send();
+  await delay(20);
+  const start = performance.now();
+  expect(await send()).toEqual({ code: 503, retry: '1' });
+  expect(performance.now() - start).toBeLessThan(500);
+  expect(await expired).toEqual({ code: 503, retry: '1' });
+  active.destroy();
+  await f.closed;
   expect(await f.healthy()).toBe('ok');
 });

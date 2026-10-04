@@ -55,6 +55,14 @@ export const environmentSchema = z
       .min(1_000)
       .default(120_000),
     AGENT_ACTION_LEASE_MS: z.coerce.number().int().min(1_000).default(30_000),
+    GATEWAY_MAX_ACTIVE: z.coerce.number().int().min(1).max(64).default(64),
+    GATEWAY_MAX_QUEUED: z.coerce.number().int().min(0).max(4096).default(64),
+    GATEWAY_QUEUE_TIMEOUT_MS: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(60000)
+      .default(1000),
     GATEWAY_IDLE_TIMEOUT_MS: z.coerce.number().int().min(1_000).default(60_000),
     GATEWAY_BASE_DOMAIN: z
       .string()
@@ -132,6 +140,9 @@ export const backendConfig = registerAs('backend', () => {
     agentOfflineAfterMs: env.AGENT_OFFLINE_AFTER_MS,
     agentCandidateLeaseMs: env.AGENT_CANDIDATE_LEASE_MS,
     agentActionLeaseMs: env.AGENT_ACTION_LEASE_MS,
+    gatewayMaxActive: env.GATEWAY_MAX_ACTIVE,
+    gatewayMaxQueued: env.GATEWAY_MAX_QUEUED,
+    gatewayQueueTimeoutMs: env.GATEWAY_QUEUE_TIMEOUT_MS,
     gatewayIdleTimeoutMs: env.GATEWAY_IDLE_TIMEOUT_MS,
     gatewayBaseDomain: env.GATEWAY_BASE_DOMAIN,
     healthMonitorEnabled: env.HEALTH_MONITOR_ENABLED,
