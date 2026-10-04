@@ -148,11 +148,18 @@ export class RoutingService {
   }
 
   resolve(applicationId: string): RouteSnapshot {
-    const route = this.getRoute(applicationId);
+    this.requireApplication(applicationId);
+    return this.resolveKnownApplication(applicationId);
+  }
+
+  /** Gateway already looked up the application; avoid repeating that query. */
+  resolveKnownApplication(applicationId: string): RouteSnapshot {
+    const route = this.repository.route(applicationId);
+    if (!route) throw new NotFoundException('Application route not found');
     if (!route.target.enabled) {
       throw new ConflictException('Routing target is disabled');
     }
-    return route;
+    return { ...route, health: this.effectiveHealth(route.health) };
   }
 
   recordHealth(input: TargetHealthObservation): RoutingTargetHealth {
