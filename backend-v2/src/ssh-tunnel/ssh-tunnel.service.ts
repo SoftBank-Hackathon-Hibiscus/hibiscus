@@ -3,11 +3,15 @@ import { ConfigService } from '@nestjs/config';
 import { connect, type Socket } from 'node:net';
 import type { BackendConfig } from '../config/configs/backend.config.js';
 import type { RoutingTarget } from '../database/schema.js';
+import { SshConnectionStateService } from './ssh-connection-state.service.js';
+import { SshTunnelEndpointService } from './ssh-tunnel-endpoint.service.js';
 import { RoutingRepository } from '../routing/routing.repository.js';
 
 @Injectable()
 export class SshTunnelService {
   constructor(
+    private readonly state: SshConnectionStateService,
+    private readonly endpoint: SshTunnelEndpointService,
     private readonly routing: RoutingRepository,
     private readonly config: ConfigService<BackendConfig, true>,
   ) {}
@@ -21,19 +25,33 @@ export class SshTunnelService {
 
   async status(agentId: string) {
     const targets = this.routing.listAgentForwards(agentId);
-    const forwards = await Promise.all(
-      targets.map(async (target) => ({
-        target_id: target.id,
-        gateway_port: target.gatewayPort,
-        local_port: target.localPort,
-        connected: target.gatewayPort
-          ? await this.isReachable(target.gatewayPort)
-          : false,
-      })),
-    );
+    const session = this.state.snapshot(agentId);
+    const forwards = targets.map((target) => ({
+      target_id: target.id,
+      application_id: target.applicationId,
+      deployment_id: target.deploymentId,
+      gateway_port: target.gatewayPort,
+      local_port: target.localPort,
+      connected:
+        session.connected && session.bound_ports.includes(target.gatewayPort!),
+      health:
+        this.routing
+          .listTargets(target.applicationId)
+          .find((t) => t.target.id === target.id)?.health ?? null,
+    }));
+    const reportState = session.report?.state;
     return {
-      connected: forwards.some((forward) => forward.connected),
-      active_forwards: forwards.filter((forward) => forward.connected).length,
+      ...session,
+      state: session.connected
+        ? 'connected'
+        : reportState === 'connecting' || reportState === 'reconnecting'
+          ? reportState
+          : targets.length === 0
+            ? 'idle'
+            : 'disconnected',
+      endpoint: this.endpoint.connection(),
+      requested_forwards: targets.length,
+      active_forwards: forwards.filter((f) => f.connected).length,
       forwards,
     };
   }
@@ -58,15 +76,5 @@ export class SshTunnelService {
         reject(error);
       });
     });
-  }
-
-  private async isReachable(port: number): Promise<boolean> {
-    try {
-      const socket = await this.connect(port);
-      socket.destroy();
-      return true;
-    } catch {
-      return false;
-    }
   }
 }

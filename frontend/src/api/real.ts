@@ -3,6 +3,7 @@ import { refreshAccessToken, type FetchLike } from './refresh';
 import { readToken } from './token';
 import type {
   AgentStatusResponse,
+  AgentTunnelStatus,
   AgentRegistration,
   AgentSshEnrollment,
   AgentSummary,
@@ -174,6 +175,7 @@ export class RealDataSource implements DataSource {
     return this.get<RoutingTargetView[]>(`/applications/${encodeURIComponent(applicationId)}/targets`);
   }
 
+  getAgentTunnel(id:string) {return this.get<AgentTunnelStatus>(`/agents/${encodeURIComponent(id)}/tunnel`);}
   getAgentStatus(agentId: string) {
     return this.get<AgentStatusResponse>(`/agents/${encodeURIComponent(agentId)}/status`);
   }

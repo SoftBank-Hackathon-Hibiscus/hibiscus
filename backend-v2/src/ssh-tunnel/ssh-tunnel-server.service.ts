@@ -17,6 +17,7 @@ import type {
   ServerChannel,
   TcpipBindInfo,
 } from 'ssh2';
+import { SshConnectionStateService } from './ssh-connection-state.service.js';
 import { AgentService } from '../agent/agent.service.js';
 import type { BackendConfig } from '../config/configs/backend.config.js';
 import { SshTunnelAuthService } from './ssh-tunnel-auth.service.js';
@@ -41,6 +42,7 @@ export class SshTunnelServerService implements OnModuleInit, OnModuleDestroy {
   private unsubscribeTokenInvalidation?: () => void;
 
   constructor(
+    private readonly state: SshConnectionStateService,
     private readonly config: ConfigService<BackendConfig, true>,
     private readonly hostKey: SshTunnelHostKeyService,
     private readonly endpoint: SshTunnelEndpointService,
@@ -106,6 +108,13 @@ export class SshTunnelServerService implements OnModuleInit, OnModuleDestroy {
     let activeSession: TunnelSession | undefined;
     this.connections.add(connection);
     connection.on('error', (error) => {
+      if (agentId)
+        this.state.event(
+          agentId,
+          'session_error',
+          'SSH_SESSION_ERROR',
+          error.message,
+        );
       this.logger.warn(
         `SSH connection${agentId ? ` for Agent ${agentId}` : ''} failed: ${error.message}`,
       );
@@ -138,6 +147,7 @@ export class SshTunnelServerService implements OnModuleInit, OnModuleDestroy {
       };
       activeSession = session;
       this.sessions.set(agentId, session);
+      this.state.connected(agentId);
       connection.on('session', (_accept, reject) => reject());
       connection.on('tcpip', (_accept, reject) => reject());
       connection.on('openssh.streamlocal', (_accept, reject) => reject());
@@ -174,6 +184,15 @@ export class SshTunnelServerService implements OnModuleInit, OnModuleDestroy {
 
     const listener = createTcpServer((socket) => {
       session.sockets.add(socket);
+      socket.on('error', (error) =>
+        this.state.event(
+          session.agentId,
+          'channel_error',
+          'GATEWAY_SOCKET_ERROR',
+          error.message,
+          info.bindPort,
+        ),
+      );
       socket.once('close', () => session.sockets.delete(socket));
       session.connection.forwardOut(
         info.bindAddr,
@@ -182,16 +201,41 @@ export class SshTunnelServerService implements OnModuleInit, OnModuleDestroy {
         socket.remotePort ?? 0,
         (error, channel) => {
           if (error) {
+            this.state.event(
+              session.agentId,
+              'channel_error',
+              'SSH_FORWARD_ERROR',
+              error.message,
+              info.bindPort,
+            );
             socket.destroy();
             return;
           }
           session.sockets.add(channel);
+          channel.on('error', (error: Error) => {
+            this.state.event(
+              session.agentId,
+              'channel_error',
+              'SSH_CHANNEL_ERROR',
+              error.message,
+              info.bindPort,
+            );
+            socket.destroy();
+          });
+          socket.once('close', () => channel.destroy());
           channel.once('close', () => session.sockets.delete(channel));
           socket.pipe(channel).pipe(socket);
         },
       );
     });
     listener.on('error', (error) => {
+      this.state.event(
+        session.agentId,
+        'forward_error',
+        'SSH_BIND_ERROR',
+        error.message,
+        info.bindPort,
+      );
       this.logger.warn(
         `SSH forward ${info.bindPort} failed for Agent ${session.agentId}: ${error.message}`,
       );
@@ -204,7 +248,13 @@ export class SshTunnelServerService implements OnModuleInit, OnModuleDestroy {
           resolve();
         });
       });
+      if (this.sessions.get(session.agentId) !== session) {
+        listener.close();
+        reject();
+        return;
+      }
       session.listeners.set(info.bindPort, listener);
+      this.state.forward(session.agentId, info.bindPort, true);
       accept();
     } catch {
       if (listener.listening) listener.close();
@@ -215,6 +265,7 @@ export class SshTunnelServerService implements OnModuleInit, OnModuleDestroy {
   private stopForward(session: TunnelSession, port: number): void {
     const listener = session.listeners.get(port);
     session.listeners.delete(port);
+    if (listener) this.state.forward(session.agentId, port, false);
     listener?.close();
   }
 
@@ -226,6 +277,10 @@ export class SshTunnelServerService implements OnModuleInit, OnModuleDestroy {
   private closeSession(session: TunnelSession, end = true): void {
     if (this.sessions.get(session.agentId) === session) {
       this.sessions.delete(session.agentId);
+      this.state.disconnected(
+        session.agentId,
+        end ? 'Server closed session' : 'Peer closed session',
+      );
     }
     for (const listener of session.listeners.values()) listener.close();
     session.listeners.clear();

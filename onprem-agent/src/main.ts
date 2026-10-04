@@ -26,6 +26,7 @@ const executor = new JobExecutor(
 );
 const jobs = new JobRunner(config, backend, executor);
 const tunnel = new SshTunnel(config, backend, state);
+backend.setSshTelemetry(()=>tunnel.report());
 
 const logs = new RuntimeLogCollector(config, commands, state, backend);
 

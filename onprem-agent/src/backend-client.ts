@@ -42,6 +42,8 @@ export class BackendClient implements BackendAgentClient {
     await response.body?.cancel();
   }
 
+  private telemetry?: ()=>unknown;
+  setSshTelemetry(provider:()=>unknown) {this.telemetry=provider;}
   async heartbeat(serving: ServingContainer | null): Promise<void> {
     const response = await this.request("agent/v1/heartbeat", {
       method: "POST",
@@ -50,6 +52,7 @@ export class BackendClient implements BackendAgentClient {
         agent_id: this.config.agentId,
         updated_at: new Date().toISOString(),
         serving,
+        ssh: this.telemetry?.(),
       }),
     });
     await response.body?.cancel();

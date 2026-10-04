@@ -1,5 +1,6 @@
 import type {
   AgentStatusResponse,
+  AgentTunnelStatus,
   AgentRegistration,
   AgentSshEnrollment,
   AgentSummary,
@@ -76,6 +77,7 @@ export interface DataSource {
   assignApplicationAgent(applicationId: string, agentId: string): Promise<unknown>;
   changeRouting(applicationId: string, targetId: string, revision: number): Promise<RouteSnapshot>;
   getTargets(applicationId: string): Promise<RoutingTargetView[]>;
+  getAgentTunnel(agentId:string):Promise<AgentTunnelStatus>;
   getAgentStatus(agentId: string): Promise<AgentStatusResponse>;
   listAgents(): Promise<AgentSummary[]>;
   createAgent(name: string): Promise<AgentRegistration>;

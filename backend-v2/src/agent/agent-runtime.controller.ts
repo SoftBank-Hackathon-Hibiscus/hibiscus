@@ -1,3 +1,4 @@
+import { SshConnectionStateService } from '../ssh-tunnel/ssh-connection-state.service.js';
 import { RuntimeLogsService } from '../observability/runtime-logs.service.js';
 import { SubmitRuntimeLogsDto } from '../observability/dto/console.dto.js';
 import {
@@ -27,6 +28,7 @@ import type { AgentRequest } from './types/agent.type.js';
 @UseGuards(AgentTokenGuard)
 export class AgentRuntimeController {
   constructor(
+    private readonly connections: SshConnectionStateService,
     private readonly logs: RuntimeLogsService,
     private readonly agents: AgentService,
     private readonly jobs: AgentJobService,
@@ -68,7 +70,9 @@ export class AgentRuntimeController {
   @Header('Cache-Control', 'no-store')
   @HttpCode(200)
   heartbeat(@Req() request: AgentRequest, @Body() input: AgentHeartbeatDto) {
-    return this.agents.heartbeat(request.agent.id, input);
+    const result = this.agents.heartbeat(request.agent.id, input);
+    if (input.ssh) this.connections.report(request.agent.id, input.ssh);
+    return result;
   }
 
   @Get('status')

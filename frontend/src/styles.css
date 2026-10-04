@@ -2670,3 +2670,6 @@ select.input {
 .deployment-columns > .stack { min-width: 0; }
 
 .overview-service-cards { align-items: stretch; }
+
+.agent-connection-events { max-height: 320px; overflow: auto; }
+.agent-connection-event { display: grid; grid-template-columns: 160px 1fr; gap: 6px 12px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 12px; overflow-wrap: anywhere; }

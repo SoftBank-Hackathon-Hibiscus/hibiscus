@@ -726,3 +726,10 @@ export const applicationRuntimeLogs = sqliteTable(
     ),
   ],
 );
+
+export const agentSshEvents = sqliteTable('agent_ssh_events', {
+ id: text('id').primaryKey(),
+ agentId: text('agent_id').notNull().references(()=>agents.id,{onDelete:'cascade'}),
+ kind: text('kind').notNull(), code: text('code'), message: text('message').notNull(),
+ port: integer('port'), createdAt: text('created_at').notNull(),
+}, table=>[index('agent_ssh_events_agent_time_idx').on(table.agentId,table.createdAt)]);
