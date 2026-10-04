@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { asc, eq } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import { DatabaseService } from '../database/database.service.js';
 import {
   agents,
@@ -101,7 +101,12 @@ export class ApplicationRepository {
       })
       .from(applicationAgents)
       .innerJoin(agents, eq(applicationAgents.agentId, agents.id))
-      .where(eq(applicationAgents.applicationId, id))
+      .where(
+        and(
+          eq(applicationAgents.applicationId, id),
+          eq(applicationAgents.enabled, true),
+        ),
+      )
       .orderBy(asc(agents.createdAt))
       .all();
     return {
@@ -200,6 +205,34 @@ export class ApplicationRepository {
           .run();
     });
     return environment.map(({ name }) => name).sort();
+  }
+
+  updateSettings(
+    applicationId: string,
+    health: Partial<typeof healthCheckConfigs.$inferInsert>,
+    runtime: Record<string, string>,
+    test: Record<string, string>,
+  ): ApplicationView {
+    const timestamp = new Date().toISOString();
+    const rows = (values: Record<string, string>) =>
+      Object.entries(values).map(([name, value]) => ({
+        applicationId,
+        name,
+        value,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      }));
+    this.database.db.transaction(() => {
+      this.updateHealthCheck(applicationId, health);
+      this.replaceEnvironment(applicationId, rows(runtime));
+      this.replaceTestEnvironment(applicationId, rows(test));
+      this.database.db
+        .update(applications)
+        .set({ updatedAt: timestamp })
+        .where(eq(applications.id, applicationId))
+        .run();
+    });
+    return this.getView(applicationId)!;
   }
 
   private environmentNames(applicationId: string): string[] {

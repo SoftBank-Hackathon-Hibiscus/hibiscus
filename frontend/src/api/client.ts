@@ -1,10 +1,16 @@
 import type {
   AgentStatusResponse,
+  AgentTunnelStatus,
   AgentRegistration,
   AgentSshEnrollment,
   AgentSummary,
   AgentTokenRotation,
   ApplicationView,
+  UpdateApplicationSettingsInput,
+  TrafficSnapshot,
+  RuntimeLogsResponse,
+  RuntimeLogsQuery,
+  RoutingChange,
   CreateDeploymentInput,
   CurrentUser,
   Deployment,
@@ -13,6 +19,7 @@ import type {
   GithubApplicationInput,
   GithubBranchesPage,
   GithubConnection,
+  GithubCommitsPage,
   GithubInstallationsPage,
   GithubRepositoriesPage,
   HealthCheckConfig,
@@ -55,12 +62,22 @@ export interface DataSource {
   updateApplicationEnvironment(applicationId: string, input: UpdateApplicationEnvironmentInput): Promise<UpdateApplicationEnvironmentResponse>;
   /** 검증 전용 환경변수를 교체하고 새 배포를 시작한다. */
   updateApplicationTestEnvironment(applicationId: string, input: UpdateApplicationEnvironmentInput): Promise<UpdateApplicationEnvironmentResponse>;
+  updateApplicationSettings(applicationId: string, input: UpdateApplicationSettingsInput): Promise<ApplicationView>;
+  getTraffic(applicationId: string, seconds: number): Promise<TrafficSnapshot>;
+  getApplicationLogs(applicationId: string, query: RuntimeLogsQuery): Promise<RuntimeLogsResponse>;
+  getRoutingHistory(applicationId: string): Promise<RoutingChange[]>;
   listDeployments(applicationId: string): Promise<Deployment[]>;
   getDeployment(deploymentId: string): Promise<DeploymentView>;
   approveDeployment(deploymentId: string): Promise<Deployment>;
+  cancelDeployment(deploymentId: string): Promise<Deployment>;
+  rollbackDeployment(deploymentId: string): Promise<Deployment>;
   /** 첫 전환 전이면 ApiError(404) */
   getRouting(applicationId: string): Promise<RouteSnapshot>;
+  unassignApplicationAgent(applicationId: string, agentId: string): Promise<unknown>;
+  assignApplicationAgent(applicationId: string, agentId: string): Promise<unknown>;
+  changeRouting(applicationId: string, targetId: string, revision: number): Promise<RouteSnapshot>;
   getTargets(applicationId: string): Promise<RoutingTargetView[]>;
+  getAgentTunnel(agentId:string):Promise<AgentTunnelStatus>;
   getAgentStatus(agentId: string): Promise<AgentStatusResponse>;
   listAgents(): Promise<AgentSummary[]>;
   createAgent(name: string): Promise<AgentRegistration>;
@@ -70,6 +87,7 @@ export interface DataSource {
 
   // ---- GitHub 연동 (backend-v2 github.controller, origin/main 기준)
   /** GET /github/connection */
+  listApplicationCommits(applicationId: string, page?: number, revision?: string): Promise<GithubCommitsPage>;
   getGithubConnection(): Promise<GithubConnection>;
   /** GET /github/installations */
   listGithubInstallations(page?: number): Promise<GithubInstallationsPage>;

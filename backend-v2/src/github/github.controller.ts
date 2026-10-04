@@ -16,6 +16,7 @@ import type { Request } from 'express';
 import { GithubService } from './github.service.js';
 import {
   GithubApplicationDto,
+  GithubCommitsQueryDto,
   GithubBranchDto,
   GithubPageDto,
   GithubRepositoriesQueryDto,
@@ -57,6 +58,15 @@ export class GithubController {
     @Query() query: GithubRepositoriesQueryDto,
   ) {
     return this.github.branches(request.user.id, params.repositoryId, query);
+  }
+
+  @Get('applications/:id/commits')
+  commits(
+    @Req() request: AuthenticatedRequest,
+    @Param() params: IdParamDto,
+    @Query() query: GithubCommitsQueryDto,
+  ) {
+    return this.github.commits(request.user.id, params.id, query);
   }
 
   @Post('applications')

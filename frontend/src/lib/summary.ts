@@ -81,7 +81,7 @@ export function summarizeDeployment(view: DeploymentView, lang: Lang): Deploymen
   const failoverAllowed = pr?.failoverAllowed ?? plan?.failover_allowed ?? null;
   const rawRequires: PlanRequire[] = plan?.requires ?? ((pr?.requires ?? []) as PlanRequire[]);
   const deploy = deriveDeployDisplay(latest.deploy, deployResult);
-  const finished = d.status === 'blocked' || d.status === 'failed' || d.status === 'succeeded';
+  const finished = d.status === 'cancelled' || d.status === 'blocked' || d.status === 'failed' || d.status === 'succeeded';
   const blocked = d.status === 'blocked' || decision === 'block';
 
   // ---- 진행 범위
@@ -130,7 +130,7 @@ export function summarizeDeployment(view: DeploymentView, lang: Lang): Deploymen
   }
 
   // ---- 단계 띠
-  const notRunReason = blocked ? t('notRunBlocked') : d.status === 'failed' ? t('notRunEarlier') : null;
+  const notRunReason = d.status === 'cancelled' ? t('statusCancelled') : blocked ? t('notRunBlocked') : d.status === 'failed' ? t('notRunEarlier') : null;
   const stepFor = (name: StageName, label: string, stage: StageExecution | undefined, word: [string, Tone] | null): StepSummary => {
     const base = { name, label, stage, duration: stage ? formatDuration(lang, stage.startedAt, stage.finishedAt) : null };
     const status = stage?.status;
@@ -199,6 +199,7 @@ function conclude(view: DeploymentView, decision: Plan['decision'] | null, resul
   const name = (kind: string | undefined) => targetLabel(kind);
   if (d.status === 'queued') return [ja ? 'まもなく検証を始めます。' : '잠시 뒤 검증을 시작합니다.', 'info', 'test'];
   if (d.status === 'running') return [ja ? '検証を進めています。' : '검증을 진행하고 있습니다.', 'info', d.currentStage ?? 'test'];
+  if (d.status === 'cancelled') return [ja ? 'デプロイをキャンセルしました。次のステップは開始しません。' : '배포를 취소했습니다. 다음 단계는 시작하지 않습니다.', 'muted', d.currentStage ?? 'test'];
   if (d.status === 'awaiting_approval') return [ja ? '人が承認するとデプロイできます。' : '사람이 승인해야 배포할 수 있습니다.', 'warning', 'policy'];
   if (d.status === 'blocked' || decision === 'block') {
     const ids = requires.map((r) => r.id);
@@ -216,8 +217,8 @@ function conclude(view: DeploymentView, decision: Plan['decision'] | null, resul
           const standbyKind = r.standby_target_id ? (r.kind === 'onprem' ? 'cloud_run' : 'onprem') : null;
           return [
             ja
-              ? `検証を通過したイメージを ${name(r.kind)} にデプロイしました。${standbyKind ? `${name(standbyKind)} は待機中です。` : ''}`
-              : `검증을 통과한 이미지를 ${name(r.kind)}에 배포했습니다.${standbyKind ? ` ${name(standbyKind)}은 대기 중입니다.` : ''}`,
+              ? `イメージを ${name(r.kind)} にデプロイしました。${standbyKind ? `${name(standbyKind)} は待機中です。` : ''}`
+              : `이미지를 ${name(r.kind)}에 배포했습니다.${standbyKind ? ` ${name(standbyKind)}은 대기 중입니다.` : ''}`,
             'success',
             'policy',
           ];

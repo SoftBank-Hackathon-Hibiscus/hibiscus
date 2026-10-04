@@ -21,6 +21,7 @@ service-account*.json
 *-sa.json
 
 # 실행하면 생기는 결과 파일
+/onprem-agent/data/
 plan.json
 pii.json
 rollback_plan.json

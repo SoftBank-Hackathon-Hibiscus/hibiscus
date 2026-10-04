@@ -31,10 +31,12 @@ import { AuthRedirectService } from '../src/auth/auth-redirect.service.js';
 import { UserService } from '../src/user/user.service.js';
 import { DatabaseService } from '../src/database/database.service.js';
 import { AgentRepository } from '../src/agent/agent.repository.js';
-import { agentJobs, agents } from '../src/database/schema.js';
+import { agentJobs, agents, stageExecutions } from '../src/database/schema.js';
 import { eq } from 'drizzle-orm';
 import { createServer } from 'node:http';
 import { connect } from 'node:net';
+import { ApplicationRepository } from '../src/application/application.repository.js';
+import { TrafficService } from '../src/observability/traffic.service.js';
 import { RoutingService } from '../src/routing/routing.service.js';
 import { FailoverService } from '../src/health/failover.service.js';
 import ssh2 from 'ssh2';
@@ -53,6 +55,11 @@ describe('deployment API (e2e)', () => {
     testDirectory = mkdtempSync(join(tmpdir(), 'backend-v2-'));
     process.env.DATABASE_FILE = join(testDirectory, 'test.db');
     process.env.WORKER_POLL_MS = '50';
+    process.env.SIGNER_MODE = 'dry';
+    process.env.STAGE_MODE = 'skeleton';
+    process.env.PARITY_TEST_MODE = 'fixture';
+    process.env.DEPLOY_MODE = 'off';
+    process.env.AUTH_FRONTEND_URL = '';
     process.env.CLI_TEMP_DIR = join(testDirectory, 'cli');
     process.env.JWT_ACCESS_SECRET = randomBytes(32).toString('hex');
     process.env.JWT_REFRESH_SECRET = randomBytes(32).toString('hex');
@@ -88,6 +95,203 @@ describe('deployment API (e2e)', () => {
     auth = app.get(AuthService);
     users = app.get(UserService);
     defaultToken = (await identity('tester')).access_token;
+  });
+
+  it('cancels an approval-waiting deployment through the authenticated API', async () => {
+    const application = await createApplication('cancel-approval', true);
+    const deployment = await createDeployment(
+      application.application.id,
+      'cancel-requester',
+    );
+    await waitForStatus(deployment.id, 'awaiting_approval');
+    await request(app.getHttpServer())
+      .post(`/deployments/${deployment.id}/cancel`)
+      .send({})
+      .expect(401);
+    await api()
+      .post(`/deployments/${deployment.id}/cancel`)
+      .send({ unexpected: true })
+      .expect(400);
+    const cancelled = await api()
+      .post(`/deployments/${deployment.id}/cancel`)
+      .send({})
+      .expect(201);
+    expect(cancelled.body.status).toBe('cancelled');
+    await api()
+      .post(`/deployments/${deployment.id}/approve`)
+      .send({})
+      .expect(409);
+    const view = await api().get(`/deployments/${deployment.id}`).expect(200);
+    expect(view.body.deployment.status).toBe('cancelled');
+    await api()
+      .post(`/deployments/${deployment.id}/rollback`)
+      .send({})
+      .expect(409);
+  });
+
+  it('saves settings atomically, keeps omitted values and does not deploy on save', async () => {
+    const application = await createApplication(
+      'console-settings',
+      false,
+      {},
+      'allow',
+      [
+        { name: 'MYSQL_PASSWORD', value: 'private-example-value' },
+        { name: 'LOG_LEVEL', value: 'info' },
+      ],
+    );
+    const id = application.application.id;
+    const endpoint = `/applications/${id}/settings`;
+    await request(app.getHttpServer()).patch(endpoint).send({}).expect(401);
+    await api()
+      .patch(endpoint)
+      .send({ environment: [], test_environment: [] })
+      .expect(400);
+    const settings = {
+      health_check: {
+        enabled: true,
+        path: '/ready',
+        interval_seconds: 10,
+        timeout_seconds: 3,
+      },
+      environment: [
+        { name: 'MYSQL_PASSWORD' },
+        { name: 'LOG_LEVEL', value: 'warn' },
+      ],
+      test_environment: [{ name: 'TEST_DB', value: 'validation' }],
+    };
+    const saved = await api().patch(endpoint).send(settings).expect(200);
+    expect(saved.body.environment).toEqual(['LOG_LEVEL', 'MYSQL_PASSWORD']);
+    expect(JSON.stringify(saved.body)).not.toContain('private-example-value');
+    expect(app.get(ApplicationRepository).runtimeEnvironment(id)).toEqual({
+      MYSQL_PASSWORD: 'private-example-value',
+      LOG_LEVEL: 'warn',
+    });
+    expect(
+      (await api().get(`/applications/${id}/deployments`).expect(200)).body,
+    ).toEqual([]);
+    await api()
+      .patch(endpoint)
+      .send({
+        ...settings,
+        environment: [{ name: 'NEW_KEY' }],
+        health_check: { path: '/wrong' },
+      })
+      .expect(400);
+    expect(app.get(ApplicationRepository).getView(id)?.healthCheck.path).toBe(
+      '/ready',
+    );
+    await api()
+      .patch(endpoint)
+      .send({
+        ...settings,
+        environment: [{ name: 'MYSQL_PASSWORD', value: null }],
+      })
+      .expect(400);
+    await api()
+      .patch(endpoint)
+      .send({
+        ...settings,
+        environment: [{ name: 'MYSQL_PASSWORD' }, { name: 'MYSQL_PASSWORD' }],
+      })
+      .expect(400);
+    await api()
+      .patch(endpoint)
+      .send({ ...settings, environment: [{ name: 'MYSQL_PASSWORD' }] })
+      .expect(200);
+    expect(app.get(ApplicationRepository).runtimeEnvironment(id)).toEqual({
+      MYSQL_PASSWORD: 'private-example-value',
+    });
+  });
+
+  it('accepts assigned-agent logs, masks secrets, filters and deduplicates retries', async () => {
+    const context = await createAgentContext('console-logs', {}, [
+      { name: 'MYSQL_PASSWORD', value: 'log-private-example' },
+    ]);
+    const entry = {
+      id: 'entry-1',
+      timestamp: new Date().toISOString(),
+      stream: 'stderr',
+      level: 'ERROR',
+      message: 'ERROR connection log-private-example password=another-secret',
+    };
+    const input = { run_id: context.runId, entries: [entry] };
+    await request(app.getHttpServer())
+      .post('/agent/v1/logs')
+      .send(input)
+      .expect(401);
+    const other = await api()
+      .post('/agents')
+      .send({ name: 'console-other-agent' })
+      .expect(201);
+    await agentApi(other.body.token)
+      .post('/agent/v1/logs')
+      .send(input)
+      .expect(403);
+    await agentApi(context.token)
+      .post('/agent/v1/logs')
+      .send(input)
+      .expect(200);
+    await agentApi(context.token)
+      .post('/agent/v1/logs')
+      .send(input)
+      .expect(200);
+    const response = await api()
+      .get(
+        `/applications/${context.applicationId}/logs?deployment_id=${context.runId}&target=onprem&level=ERROR&search=connection`,
+      )
+      .expect(200);
+    expect(response.body.entries).toHaveLength(1);
+    expect(JSON.stringify(response.body)).not.toContain('log-private-example');
+    expect(JSON.stringify(response.body)).not.toContain('another-secret');
+    expect(
+      (
+        await api()
+          .get(
+            `/applications/${context.applicationId}/logs?deployment_id=${context.runId}&level=INFO`,
+          )
+          .expect(200)
+      ).body.entries,
+    ).toEqual([]);
+    const otherApplication = await createApplication(
+      'console-unrelated',
+      false,
+    );
+    await api()
+      .get(
+        `/applications/${otherApplication.application.id}/logs?deployment_id=${context.runId}`,
+      )
+      .expect(404);
+    await api()
+      .get(`/applications/${context.applicationId}/logs?seconds=10`)
+      .expect(400);
+  });
+
+  it('serves measured traffic and validates the measurement window', async () => {
+    const application = await createApplication('console-traffic', false);
+    const id = application.application.id;
+    app.get(TrafficService).record(id, 'cloud-target', 503, 21);
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    await request(app.getHttpServer())
+      .get(`/applications/${id}/traffic`)
+      .expect(401);
+    const response = await api()
+      .get(`/applications/${id}/traffic?seconds=60`)
+      .expect(200);
+    expect(response.body.requests).toBe(1);
+    expect(response.body.errors).toBe(1);
+    expect(response.body.errorRate).toBe(1);
+    expect(
+      response.body.buckets.reduce(
+        (total: number, bucket: { requests: number }) =>
+          total + bucket.requests,
+        0,
+      ),
+    ).toBe(1);
+    await api().get(`/applications/${id}/traffic?seconds=999`).expect(400);
+    expect(
+      (await api().get(`/applications/${id}/routing/history`).expect(200)).body,
+    ).toEqual([]);
   });
 
   it('returns health state', async () => {
@@ -915,6 +1119,76 @@ describe('deployment API (e2e)', () => {
     }
   });
 
+  it('redacts deployment snapshot secrets from stored and historical diagnostics', async () => {
+    const secret = 'hunter2xyz';
+    const testSecret = 'test-snapshot-secret';
+    const application = await api()
+      .post('/applications')
+      .send({
+        name: 'redaction-review',
+        slug: 'redaction-review',
+        source_path: './fixtures/redaction-review',
+        image_repo: 'registry.example/redaction-review',
+        environment: [{ name: 'DB_PASS', value: secret }],
+        test_environment: [{ name: 'TEST_PASS', value: testSecret }],
+      })
+      .expect(201);
+    const deployment = await createDeployment(
+      application.body.application.id,
+      'review-requester',
+    );
+    const view = await waitForStatus(deployment.id, 'succeeded');
+    const stage = view.stages[0];
+    const repository = app.get(DeploymentRepository);
+    repository.updateStage(stage.id, {
+      summary: {
+        stdout_tail: `DB_PASS ${secret}`,
+        stderr_tail: `postgres://app:${testSecret}@db`,
+        normal: 'build failed',
+      },
+    });
+    const stored = app
+      .get(DatabaseService)
+      .db.select()
+      .from(stageExecutions)
+      .where(eq(stageExecutions.id, stage.id))
+      .get()!;
+    expect(JSON.stringify(stored.summary)).not.toContain(secret);
+    expect(JSON.stringify(stored.summary)).not.toContain(testSecret);
+    // Simulate an old unredacted DB row, then change current app settings.
+    app
+      .get(DatabaseService)
+      .db.update(stageExecutions)
+      .set({
+        summary: {
+          stdout_tail: `mysql+pymysql://app:${secret}@db`,
+          stderr_tail: `DB_PASS ${testSecret}`,
+          normal: 'build failed',
+        },
+        error: secret,
+      })
+      .where(eq(stageExecutions.id, stage.id))
+      .run();
+    await api()
+      .patch(`/applications/${application.body.application.id}/settings`)
+      .send({
+        health_check: {
+          enabled: true,
+          path: '/ready',
+          interval_seconds: 10,
+          timeout_seconds: 3,
+        },
+        environment: [{ name: 'DB_PASS', value: 'changed-secret' }],
+        test_environment: [],
+      })
+      .expect(200);
+    const result = await api().get(`/deployments/${deployment.id}`).expect(200);
+    expect(JSON.stringify(result.body)).not.toContain(secret);
+    expect(JSON.stringify(result.body)).not.toContain(testSecret);
+    expect(result.body.deployment.id).toBe(deployment.id);
+    expect(result.body.stages[0].summary.normal).toBe('build failed');
+  });
+
   it('persists redacted parity build diagnostics without entering policy or verifying the source', async () => {
     const config = app.get(ConfigService);
     const keys = ['backend.stageMode', 'backend.parityTestMode'];
@@ -1120,10 +1394,7 @@ describe('deployment API (e2e)', () => {
         writeFileSync(
           join(protectedSource, '.hibiscus/policy.yaml'),
           readFileSync(
-            join(
-              process.cwd(),
-              'fixtures/policies/requires-approval.yaml',
-            ),
+            join(process.cwd(), 'fixtures/policies/requires-approval.yaml'),
             'utf8',
           ),
         );
@@ -1238,9 +1509,7 @@ describe('deployment API (e2e)', () => {
               (artifact: { name: string }) => artifact.name === 'plan',
             ).content,
           ).rules,
-        ).toEqual([
-          expect.objectContaining({ id: 'policy_skipped' }),
-        ]);
+        ).toEqual([expect.objectContaining({ id: 'policy_skipped' })]);
       } finally {
         config.set('backend.stageMode', previousMode);
       }
@@ -1367,8 +1636,129 @@ describe('deployment API (e2e)', () => {
 
     const agents = await api().get('/agents').expect(200);
     expect(agents.body[0]).not.toHaveProperty('tokenHash');
-    expect(agents.body[0].sshEnrolledAt).toBeTruthy();
+    expect(
+      agents.body.find(
+        (row: { id: string; sshEnrolledAt: string | null }) =>
+          row.id === registration.body.agent.id,
+      ).sshEnrolledAt,
+    ).toBeTruthy();
     expect(agents.body[0]).not.toHaveProperty('sshPublicKey');
+  });
+
+  it('disconnects an agent from future deployment settings while preserving the serving route and logs', async () => {
+    const ctx = await createAgentContext('agent-detach');
+    const target = await api()
+      .post(`/applications/${ctx.applicationId}/targets`)
+      .send({
+        deployment_id: ctx.runId,
+        kind: 'onprem',
+        agent_id: ctx.agentId,
+        local_port: 18881,
+      })
+      .expect(201);
+    await api()
+      .patch(`/applications/${ctx.applicationId}/routing`)
+      .send({ target_id: target.body.id, expected_revision: 0 })
+      .expect(200);
+    const detached = await api()
+      .delete(`/applications/${ctx.applicationId}/agents/${ctx.agentId}`)
+      .expect(200);
+    expect(detached.body.agents).toEqual([]);
+    const current = await api()
+      .get(`/applications/${ctx.applicationId}/routing`)
+      .expect(200);
+    expect(current.body.target).toMatchObject({
+      id: target.body.id,
+      enabled: true,
+    });
+    await agentApi(ctx.token)
+      .post('/agent/v1/logs')
+      .send({
+        run_id: ctx.runId,
+        entries: [
+          {
+            id: 'after-detach',
+            timestamp: new Date().toISOString(),
+            stream: 'stdout',
+            level: 'INFO',
+            message: 'Still serving',
+          },
+        ],
+      })
+      .expect(200);
+    const reattached = await api()
+      .post(`/applications/${ctx.applicationId}/agents/${ctx.agentId}`)
+      .expect(201);
+    expect(reattached.body.agents).toHaveLength(1);
+  });
+
+  it('retires older routing targets only after a successful route change and keeps current standby', async () => {
+    const ctx = await createAgentContext('routing-retirement');
+    const old = await api()
+      .post(`/applications/${ctx.applicationId}/targets`)
+      .send({
+        deployment_id: ctx.runId,
+        kind: 'cloud_run',
+        url: 'https://old.example.test',
+      })
+      .expect(201);
+    await api()
+      .patch(`/applications/${ctx.applicationId}/routing`)
+      .send({ target_id: old.body.id, expected_revision: 0 })
+      .expect(200);
+    const next = await createDeployment(ctx.applicationId, 'tester');
+    await waitForStatus(next.id, 'succeeded');
+    const primary = await api()
+      .post(`/applications/${ctx.applicationId}/targets`)
+      .send({
+        deployment_id: next.id,
+        kind: 'onprem',
+        agent_id: ctx.agentId,
+        local_port: 18888,
+      })
+      .expect(201);
+    const standby = await api()
+      .post(`/applications/${ctx.applicationId}/targets`)
+      .send({
+        deployment_id: next.id,
+        kind: 'cloud_run',
+        url: 'https://new.example.test',
+      })
+      .expect(201);
+    await api()
+      .patch(`/applications/${ctx.applicationId}/routing`)
+      .send({ target_id: primary.body.id, expected_revision: 0 })
+      .expect(409);
+    expect(
+      (await api().get(`/applications/${ctx.applicationId}/targets`)).body.find(
+        (t: { target: { id: string } }) => t.target.id === old.body.id,
+      ).target.enabled,
+    ).toBe(true);
+    await api()
+      .patch(`/applications/${ctx.applicationId}/routing`)
+      .send({ target_id: primary.body.id, expected_revision: 1 })
+      .expect(200);
+    const targets = (
+      await api().get(`/applications/${ctx.applicationId}/targets`)
+    ).body;
+    expect(
+      targets.find(
+        (t: { target: { id: string } }) => t.target.id === old.body.id,
+      ).target.enabled,
+    ).toBe(false);
+    expect(
+      targets.find(
+        (t: { target: { id: string } }) => t.target.id === standby.body.id,
+      ).target.enabled,
+    ).toBe(true);
+    await api()
+      .patch(`/applications/${ctx.applicationId}/routing`)
+      .send({ target_id: old.body.id, expected_revision: 2 })
+      .expect(409);
+    await api()
+      .patch(`/applications/${ctx.applicationId}/routing`)
+      .send({ target_id: standby.body.id, expected_revision: 2 })
+      .expect(200);
   });
 
   it('stores routing targets and changes one application route with revision checks', async () => {
@@ -1508,7 +1898,62 @@ describe('deployment API (e2e)', () => {
       });
   });
 
+  it('uses server sessions rather than Agent claims for SSH connectivity', async () => {
+    const ctx = await createAgentContext('ssh-report-status');
+    await agentApi(ctx.token)
+      .post('/agent/v1/heartbeat')
+      .send({
+        schema_version: 1,
+        agent_id: ctx.agentId,
+        updated_at: new Date().toISOString(),
+        serving: null,
+        ssh: {
+          state: 'connected',
+          retry_count: 0,
+          platform: 'linux',
+          arch: 'arm64',
+          version: '0.1.0',
+          last_error: 'password=hidden-value',
+          last_error_code: 'TEST_ERROR',
+        },
+      })
+      .expect(200);
+    const status = await api().get(`/agents/${ctx.agentId}/tunnel`).expect(200);
+    expect(status.body.connected).toBe(false);
+    expect(status.body.state).toBe('idle');
+    expect(status.body.report).toMatchObject({
+      platform: 'linux',
+      arch: 'arm64',
+    });
+    expect(status.body.events.length).toBeGreaterThan(0);
+    expect(JSON.stringify(status.body)).not.toContain('hidden-value');
+    await agentApi(ctx.token)
+      .post('/agent/v1/heartbeat')
+      .send({
+        schema_version: 1,
+        agent_id: ctx.agentId,
+        updated_at: new Date().toISOString(),
+        serving: null,
+        ssh: {
+          state: 'connected',
+          retry_count: -1,
+          platform: 'linux',
+          arch: 'arm64',
+          version: '0.1.0',
+        },
+      })
+      .expect(400);
+    await request(app.getHttpServer())
+      .get(`/agents/${ctx.agentId}/tunnel`)
+      .expect(401);
+  });
+
   it('uses an SSH reverse forward to carry Gateway requests to an on-prem port', async () => {
+    let releaseSlow: (() => void) | undefined;
+    let signalSlow: (() => void) | undefined;
+    const slowStarted = new Promise<void>((resolve) => {
+      signalSlow = resolve;
+    });
     const localServer = createServer((incoming, outgoing) => {
       let body = '';
       incoming.setEncoding('utf8');
@@ -1516,6 +1961,11 @@ describe('deployment API (e2e)', () => {
         body += chunk;
       });
       incoming.on('end', () => {
+        if (incoming.url === '/slow') {
+          releaseSlow = () => outgoing.end('completed-after-unforward');
+          signalSlow?.();
+          return;
+        }
         outgoing.setHeader('x-hibiscus-tunnel', 'ok');
         outgoing.end(`${incoming.method} ${incoming.url} ${body}`);
       });
@@ -1665,15 +2115,27 @@ describe('deployment API (e2e)', () => {
           expect(result.body.connected).toBe(true);
           expect(result.body.active_forwards).toBe(1);
         });
+      const inFlight = request(app.getHttpServer())
+        .get('/slow')
+        .set('Host', 'tunnel-http.apps.test')
+        .then((response) => response);
+      await slowStarted;
       await new Promise<void>((resolve, reject) => {
         sshClient.unforwardIn('127.0.0.1', target.body.gatewayPort, (error) =>
           error ? reject(error) : resolve(),
         );
       });
+      releaseSlow?.();
+      const drained = await inFlight;
+      expect(drained.status).toBe(200);
+      expect(drained.text).toBe('completed-after-unforward');
       await api()
         .get(`/agents/${context.agentId}/tunnel`)
         .expect(200)
-        .expect((result) => expect(result.body.connected).toBe(false));
+        .expect((result) => {
+          expect(result.body.connected).toBe(true);
+          expect(result.body.active_forwards).toBe(0);
+        });
       await new Promise<void>((resolve, reject) => {
         sshClient.forwardIn('127.0.0.1', target.body.gatewayPort, (error) =>
           error ? reject(error) : resolve(),
@@ -2275,6 +2737,10 @@ describe('deployment API (e2e)', () => {
       patch: (url: string) =>
         request(server)
           .patch(url)
+          .set('Authorization', `Bearer ${defaultToken}`),
+      delete: (url: string) =>
+        request(server)
+          .delete(url)
           .set('Authorization', `Bearer ${defaultToken}`),
       put: (url: string) =>
         request(server).put(url).set('Authorization', `Bearer ${defaultToken}`),

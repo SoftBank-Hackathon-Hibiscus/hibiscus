@@ -72,7 +72,7 @@ node dist/main.js
 | `SSH_FORWARD_POLL_INTERVAL_MS`      |                     `2000` | 전달 목록 확인 간격                     |
 | `SSH_SERVER_ALIVE_INTERVAL_SECONDS` |                       `15` | SSH keepalive 간격                      |
 | `SSH_SERVER_ALIVE_COUNT_MAX`        |                        `3` | 연결 종료 전 keepalive 실패 횟수        |
-| `SSH_SESSION_MAX_MS`                |                   `900000` | 공개키 재검사를 위한 최대 연결 시간     |
+| `SSH_SESSION_MAX_MS`                |                   `900000` | 호환용 설정. 연결 시간 제한에는 사용하지 않음 |
 
 SSH Tunnel의 Agent와 Backend는 모두 `ssh2` Node 모듈을 사용합니다. 시스템 `ssh`, 시스템 `sshd`, `child_process`를 사용하지 않습니다. SSH 연결 하나가 여러 앱의 TCP 연결을 함께 처리합니다. 전달 목록이 바뀌거나 최대 연결 시간이 지나면 연결을 다시 구성합니다.
 

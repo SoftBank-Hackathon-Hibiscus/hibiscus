@@ -1,0 +1,1 @@
+ALTER TABLE `application_agents` ADD `enabled` integer DEFAULT true NOT NULL;

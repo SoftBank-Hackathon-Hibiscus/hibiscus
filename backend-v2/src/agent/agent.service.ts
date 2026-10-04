@@ -148,8 +148,17 @@ export class AgentService {
     this.repository.assign({
       applicationId,
       agentId,
+      enabled: true,
       createdAt: new Date().toISOString(),
     });
+    return this.applications.getView(applicationId)!;
+  }
+
+  unassign(applicationId: string, agentId: string) {
+    if (!this.applications.find(applicationId))
+      throw new NotFoundException('Application not found');
+    this.get(agentId);
+    this.repository.unassign(applicationId, agentId);
     return this.applications.getView(applicationId)!;
   }
 

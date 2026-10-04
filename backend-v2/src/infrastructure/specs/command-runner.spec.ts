@@ -1,5 +1,9 @@
 import { CommandRunner, MAX_COMMAND_OUTPUT_CHARS } from '../command-runner.js';
-import { diagnosticTail } from '../command-diagnostics.js';
+import {
+  diagnosticTail,
+  redactDeploymentOutput,
+  redactDeploymentView,
+} from '../command-diagnostics.js';
 
 describe('command execution diagnostics', () => {
   it('redacts credentials before taking the final lines', () => {
@@ -67,5 +71,68 @@ describe('command execution diagnostics', () => {
         timeoutMs: 500,
       }),
     ).rejects.toThrow();
+  });
+});
+
+describe('deployment secret redaction', () => {
+  it('redacts database URLs and known values before truncation', () => {
+    expect(
+      diagnosticTail('mysql+pymysql://app:unknown-password@db'),
+    ).not.toContain('unknown-password');
+    expect(diagnosticTail('postgres://app:unknown-password@db')).not.toContain(
+      'unknown-password',
+    );
+    expect(diagnosticTail('DB_PASS hunter2xyz', ['hunter2xyz'])).toBe(
+      'DB_PASS [REDACTED]',
+    );
+    expect(diagnosticTail('build failed')).toBe('build failed');
+    expect(
+      diagnosticTail('plain-\u001b[31mcredential', ['plain-credential']),
+    ).toBe('[REDACTED]');
+    const longSecret = 'x'.repeat(4096);
+    expect(diagnosticTail(longSecret, [longSecret])).toBe('[REDACTED]');
+    expect(
+      redactDeploymentOutput(
+        { 'plain-credential': 'plain-\u001b[31mcredential' },
+        ['plain-credential'],
+      ),
+    ).toEqual({ '[REDACTED]': '[REDACTED]' });
+  });
+  it('redacts nested and encoded output while preserving response metadata', () => {
+    const secret = 'test" secret';
+    const view = {
+      deployment: { id: '8080', error: secret },
+      stages: [
+        {
+          summary: {
+            stdout_tail: encodeURIComponent(secret),
+            nested: [secret],
+          },
+        },
+      ],
+      artifacts: [{ sha256: '8080', content: JSON.stringify({ secret }) }],
+      auditLogs: [{ payload: { output: secret } }],
+    };
+    const cleaned = redactDeploymentView(view, [secret, '8080']);
+    expect(JSON.stringify(cleaned)).not.toContain(encodeURIComponent(secret));
+    expect(cleaned.deployment.id).toBe('8080');
+    expect(cleaned.artifacts[0]!.sha256).toBe('8080');
+    expect(cleaned.artifacts[0]!.content).toContain('[REDACTED]');
+    expect(cleaned.auditLogs[0]!.payload.output).toBe('[REDACTED]');
+    expect(view.deployment.error).toBe(secret);
+    const numericArtifact = {
+      artifacts: [
+        { content: '{"port":3000,"message":"3000"}', sha256: 'original-hash' },
+      ],
+    };
+    const numericResult = redactDeploymentView(numericArtifact, ['3000']);
+    expect(JSON.parse(numericResult.artifacts[0]!.content)).toEqual({
+      port: 3000,
+      message: '[REDACTED]',
+    });
+    expect(numericResult.artifacts[0]!.sha256).toBe('original-hash');
+    expect(redactDeploymentOutput({ output: 'abc' }, ['abc'])).toEqual({
+      output: '[REDACTED]',
+    });
   });
 });

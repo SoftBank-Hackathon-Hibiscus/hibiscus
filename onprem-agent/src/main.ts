@@ -10,6 +10,8 @@ import { StateStore } from "./state-store.js";
 import { SshTunnel } from "./ssh-tunnel.js";
 import { SshIdentity } from "./ssh-identity.js";
 
+import { RuntimeLogCollector } from "./runtime-log-collector.js";
+
 const config = loadConfig();
 const commands = new CommandRunner(config.commandTimeoutMs);
 const backend = new BackendClient(config);
@@ -24,16 +26,20 @@ const executor = new JobExecutor(
 );
 const jobs = new JobRunner(config, backend, executor);
 const tunnel = new SshTunnel(config, backend, state);
+backend.setSshTelemetry(()=>tunnel.report());
+
+const logs = new RuntimeLogCollector(config, commands, state, backend);
 
 const stop = () => {
   jobs.stop();
+  logs.stop();
   tunnel.stop();
 };
 process.once("SIGINT", stop);
 process.once("SIGTERM", stop);
 
 try {
-  await Promise.all([jobs.start(), tunnel.start()]);
+  await Promise.all([jobs.start(), tunnel.start(), logs.start()]);
 } catch (error) {
   stop();
   console.error(

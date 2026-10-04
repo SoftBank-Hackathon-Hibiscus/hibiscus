@@ -25,6 +25,7 @@ describe('GitHub management and Webhook (e2e)', () => {
   let database: DatabaseService;
   let connection: GithubConnectionService;
   let userId: string;
+  let otherUserId: string;
   let accessToken: string;
   let otherAccessToken: string;
   let repoSequence = 200;
@@ -72,6 +73,7 @@ describe('GitHub management and Webhook (e2e)', () => {
     const user = users.upsertGithub({ id: 400000, login: 'github-owner' });
     const other = users.upsertGithub({ id: 400001, login: 'other' });
     userId = user.id;
+    otherUserId = other.id;
     accessToken = (await app.get(AuthService).issueTokens(user)).access_token;
     otherAccessToken = (await app.get(AuthService).issueTokens(other))
       .access_token;
@@ -291,6 +293,52 @@ describe('GitHub management and Webhook (e2e)', () => {
         .where(eq(applications.id, created.application.id))
         .get()?.defaultBranch,
     ).toBe('feature/test');
+  });
+
+  it('lists commits for another user only with that users repository access', async () => {
+    const created = await createApplication();
+    const teammateToken = 'ghu_teammate_token';
+    connection.save(otherUserId, {
+      access_token: teammateToken,
+      token_type: 'bearer',
+      expires_in: 28800,
+    });
+    const mock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({
+          total_count: 1,
+          repositories: [repository(created.github.repositoryId)],
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json([
+          {
+            sha: initialRevision,
+            commit: {
+              message: 'teammate commit',
+              author: { name: 'tester', date: '2026-10-04T00:00:00Z' },
+            },
+            html_url: 'https://github.com/octo/repo/commit/test',
+          },
+        ]),
+      );
+    vi.stubGlobal('fetch', mock);
+    const response = await request(app.getHttpServer())
+      .get(`/github/applications/${created.application.id}/commits`)
+      .set('Authorization', `Bearer ${otherAccessToken}`)
+      .expect(200);
+    expect(response.body.commits[0].message).toBe('teammate commit');
+    for (const call of mock.mock.calls)
+      expect(call[1].headers.Authorization).toBe(`Bearer ${teammateToken}`);
+    mock
+      .mockReset()
+      .mockResolvedValue(Response.json({ total_count: 0, repositories: [] }));
+    await request(app.getHttpServer())
+      .get(`/github/applications/${created.application.id}/commits`)
+      .set('Authorization', `Bearer ${otherAccessToken}`)
+      .expect(404);
+    expect(mock).toHaveBeenCalledTimes(1);
   });
 
   it('validates webhook HMAC without claiming the source image has been tested', async () => {

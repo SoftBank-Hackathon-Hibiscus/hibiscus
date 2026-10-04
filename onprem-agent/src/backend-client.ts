@@ -31,6 +31,19 @@ export class BackendClient implements BackendAgentClient {
     await response.body?.cancel();
   }
 
+  async submitLogs(
+    runId: string,
+    entries: import("./runtime-log-collector.js").RuntimeLogEntry[],
+  ): Promise<void> {
+    const response = await this.request("agent/v1/logs", {
+      method: "POST",
+      body: JSON.stringify({ run_id: runId, entries }),
+    });
+    await response.body?.cancel();
+  }
+
+  private telemetry?: ()=>unknown;
+  setSshTelemetry(provider:()=>unknown) {this.telemetry=provider;}
   async heartbeat(serving: ServingContainer | null): Promise<void> {
     const response = await this.request("agent/v1/heartbeat", {
       method: "POST",
@@ -39,6 +52,7 @@ export class BackendClient implements BackendAgentClient {
         agent_id: this.config.agentId,
         updated_at: new Date().toISOString(),
         serving,
+        ssh: this.telemetry?.(),
       }),
     });
     await response.body?.cancel();

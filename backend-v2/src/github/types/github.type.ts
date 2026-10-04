@@ -19,3 +19,9 @@ export interface GithubProviderToken {
   expires_in?: number;
   refresh_token_expires_in?: number;
 }
+
+export interface GithubCommitResponse {
+  sha: string;
+  html_url: string;
+  commit: { message: string; author: { name: string; date: string } | null };
+}

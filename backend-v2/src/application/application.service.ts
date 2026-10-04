@@ -14,6 +14,8 @@ import type {
   CreateApplicationDto,
   UpdateApplicationEnvironmentDto,
   UpdateHealthCheckDto,
+  UpdateApplicationSettingsDto,
+  SettingsEnvironmentVariableDto,
 } from './dto/application.dto.js';
 
 @Injectable()
@@ -157,6 +159,55 @@ export class ApplicationService {
         })),
       ),
     };
+  }
+
+  updateSettings(id: string, input: UpdateApplicationSettingsDto) {
+    this.get(id);
+    const merge = (
+      rows: SettingsEnvironmentVariableDto[],
+      current: Record<string, string>,
+    ) => {
+      const result = rows.map((row) => {
+        if (row.value === undefined && !(row.name in current))
+          throw new BadRequestException(
+            `New environment variable ${row.name} requires a value`,
+          );
+        return { name: row.name, value: row.value ?? current[row.name]! };
+      });
+      this.validateEnvironment(result);
+      return Object.fromEntries(result.map((row) => [row.name, row.value]));
+    };
+    const runtime = merge(
+      input.environment,
+      this.repository.runtimeEnvironment(id),
+    );
+    const test = merge(
+      input.test_environment,
+      this.repository.testEnvironment(id),
+    );
+    const h = input.health_check;
+    if (
+      h.timeout_seconds > h.interval_seconds ||
+      h.success_status_min > h.success_status_max
+    )
+      throw new BadRequestException('Invalid health check range');
+    return this.repository.updateSettings(
+      id,
+      {
+        enabled: h.enabled,
+        path: h.path,
+        versionPath: h.version_path ?? null,
+        method: h.method,
+        intervalSeconds: h.interval_seconds,
+        timeoutSeconds: h.timeout_seconds,
+        successStatusMin: h.success_status_min,
+        successStatusMax: h.success_status_max,
+        successThreshold: h.success_threshold,
+        failureThreshold: h.failure_threshold,
+      },
+      runtime,
+      test,
+    );
   }
 
   private validateEnvironment(

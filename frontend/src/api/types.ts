@@ -8,7 +8,8 @@ export type DeploymentStatus =
   | 'awaiting_approval'
   | 'blocked'
   | 'failed'
-  | 'succeeded';
+  | 'succeeded'
+  | 'cancelled';
 export type Decision = 'allow' | 'needs_approval' | 'block';
 export type StageName = 'test' | 'policy' | 'sign' | 'deploy';
 export type StageStatus =
@@ -20,7 +21,7 @@ export type StageStatus =
 export type ExecutionMode = 'skeleton' | 'cli';
 export type DigestSource = 'registry' | 'placeholder';
 /** schema.ts deployments.trigger. registration = POST /github/applications 가 만드는 최초 배포 */
-export type Trigger = 'manual' | 'webhook' | 'registration';
+export type Trigger = 'manual' | 'webhook' | 'registration' | 'rollback';
 export type TargetKind = 'onprem' | 'cloud_run';
 export type HealthStatus = 'healthy' | 'unhealthy' | 'unknown';
 export type FailureKind = 'application' | 'network';
@@ -396,4 +397,41 @@ export interface CreateDeploymentInput {
   source_revision: string;
   /** /^sha256:[0-9a-f]{64}$/ . 없으면 backend 가 placeholder digest 를 만든다 */
   image_digest?: string;
+}
+
+export interface SettingsEnvironmentInput { name: string; value?: string; }
+export interface UpdateApplicationSettingsInput {
+  health_check: UpdateHealthCheckInput;
+  environment: SettingsEnvironmentInput[];
+  test_environment: SettingsEnvironmentInput[];
+}
+export interface TrafficSnapshot {
+  startedAt: string;
+  windowSeconds: number;
+  observedSeconds: number;
+  requests: number;
+  requestsPerSecond: number;
+  errors: number;
+  errorRate: number;
+  p95Ms: number | null;
+  targets: Array<{targetId:string;requests:number;requestsPerSecond:number}>;
+  buckets: Array<{timestamp:string;requests:number;errors:number;requestsPerSecond:number}>;
+}
+export interface RuntimeLogEntry {id:string;timestamp:string;stream:'stdout'|'stderr';level:'INFO'|'WARN'|'ERROR';message:string;}
+export interface RuntimeLogsResponse {entries:RuntimeLogEntry[];truncated:boolean;fetchedAt:string;source:TargetKind;unavailable?:string;}
+export interface RuntimeLogsQuery {deployment_id?:string;target:TargetKind;seconds:number;level:string;search:string;}
+export interface RoutingChange {id:string;previousTargetId:string|null;targetId:string;revision:number;reason:string|null;createdAt:string;}
+
+export interface GithubCommitsPage {
+  branch: string; page: number; hasMore: boolean;
+  commits: Array<{sha:string; message:string; author:string; date:string|null; url:string}>;
+}
+
+export interface AgentTunnelStatus {
+ connected:boolean; state:'idle'|'connecting'|'connected'|'reconnecting'|'disconnected';
+ connected_at:string|null; uptime_seconds:number; requested_forwards:number;active_forwards:number;
+ endpoint:AgentSshConnection; report_received_at:string|null;report_stale:boolean;
+ report:{state:string;retry_count:number;next_retry_at?:string;last_error?:string;last_error_code?:string;last_error_at?:string;platform:string;arch:string;version:string}|null;
+ forwards:Array<{target_id:string;application_id:string;deployment_id:string;gateway_port:number;local_port:number;connected:boolean;health:RoutingTargetHealth|null}>;
+ events:Array<{id:string;kind:string;code:string|null;message:string;port:number|null;createdAt:string}>;
 }

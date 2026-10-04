@@ -3,9 +3,15 @@ import type {
   AgentRegistration,
   AgentSshEnrollment,
   AgentStatusResponse,
+  AgentTunnelStatus,
   AgentSummary,
   AgentTokenRotation,
   ApplicationView,
+  UpdateApplicationSettingsInput,
+  TrafficSnapshot,
+  RuntimeLogsResponse,
+  RuntimeLogsQuery,
+  RoutingChange,
   CreateDeploymentInput,
   CurrentUser,
   Deployment,
@@ -15,6 +21,7 @@ import type {
   GithubApplicationLink,
   GithubBranchesPage,
   GithubConnection,
+  GithubCommitsPage,
   GithubInstallationsPage,
   GithubRepositoriesPage,
   HealthCheckConfig,
@@ -78,6 +85,7 @@ function randomId(): string {
 export class MockDataSource implements DataSource {
   readonly kind = 'mock' as const;
   private readonly startedAt: number;
+  private scenarioCancelled = false;
   private readonly created: CreatedApplication[] = [];
   private readonly agents: AgentSummary[];
 
@@ -108,7 +116,7 @@ export class MockDataSource implements DataSource {
 
   private tick(): number {
     const now = this.now();
-    this.scenario.controls?.advance?.(now);
+    if (!this.scenarioCancelled) this.scenario.controls?.advance?.(now);
     return now;
   }
 
@@ -192,6 +200,25 @@ export class MockDataSource implements DataSource {
     return this.replaceEnvironmentAndDeploy(applicationId, input, 'test');
   }
 
+  async updateApplicationSettings(id:string,input:UpdateApplicationSettingsInput):Promise<ApplicationView> {
+    const view=this.isScenarioApp(id)?this.scenario.application:this.createdApp(id)?.view;
+    if(!view)throw new ApiError(404,'Application not found');
+    for(const [rows,names] of [[input.environment,view.environment??[]],[input.test_environment,view.testEnvironment??[]]] as const){
+      if(new Set(rows.map(r=>r.name)).size!==rows.length)throw new ApiError(400,'Duplicate environment names');
+      if(rows.some(r=>r.value===undefined&&!names.includes(r.name)))throw new ApiError(400,'New variable requires a value');
+    }
+    const h=input.health_check;
+    view.healthCheck={...view.healthCheck,enabled:h.enabled,path:h.path,versionPath:h.version_path,method:h.method,intervalSeconds:h.interval_seconds,timeoutSeconds:h.timeout_seconds,successStatusMin:h.success_status_min,successStatusMax:h.success_status_max,successThreshold:h.success_threshold,failureThreshold:h.failure_threshold,updatedAt:new Date(this.now()).toISOString()};
+    view.environment=input.environment.map(r=>r.name).sort();view.testEnvironment=input.test_environment.map(r=>r.name).sort();
+    return this.delay(view);
+  }
+  async getTraffic(id:string,seconds:number):Promise<TrafficSnapshot> {
+    await this.getApplication(id);
+    return this.delay({startedAt:new Date(this.startedAt).toISOString(),windowSeconds:seconds,observedSeconds:seconds,requests:0,requestsPerSecond:0,errors:0,errorRate:0,p95Ms:null,targets:[],buckets:Array.from({length:30},(_,i)=>({timestamp:new Date(this.now()-(30-i)*seconds/30*1000).toISOString(),requests:0,errors:0,requestsPerSecond:0}))});
+  }
+  async getApplicationLogs(id:string,query:RuntimeLogsQuery):Promise<RuntimeLogsResponse>{await this.getApplication(id);return this.delay({entries:[],truncated:false,fetchedAt:new Date(this.now()).toISOString(),source:query.target,unavailable:'데모 시나리오에는 앱 실행 로그가 없습니다.'});}
+  async getRoutingHistory(id:string):Promise<RoutingChange[]>{await this.getApplication(id);return this.delay([]);}
+
   async listDeployments(applicationId: string): Promise<Deployment[]> {
     this.tick();
     const views = this.isScenarioApp(applicationId) ? this.scenario.deployments : this.createdApp(applicationId)?.deployments;
@@ -208,6 +235,7 @@ export class MockDataSource implements DataSource {
 
   async approveDeployment(deploymentId: string): Promise<Deployment> {
     const now = this.tick();
+    if (this.scenario.deployments.find((v) => v.deployment.id === deploymentId)?.deployment.status === 'cancelled') return this.fail(409, 'Deployment is not awaiting approval');
     if (this.scenario.controls?.approve) return this.delay(this.scenario.controls.approve(deploymentId, now));
     const found = this.scenario.deployments.find((v) => v.deployment.id === deploymentId);
     if (!found) return this.fail(404, 'Deployment not found');
@@ -217,6 +245,31 @@ export class MockDataSource implements DataSource {
     found.deployment.status = 'running';
     found.deployment.updatedAt = new Date(now).toISOString();
     return this.delay(found.deployment);
+  }
+
+  async cancelDeployment(deploymentId: string): Promise<Deployment> {
+    this.tick();
+    const deployment = this.scenario.deployments.find((v) => v.deployment.id === deploymentId)?.deployment ?? this.created.flatMap((c) => c.deployments).find((v) => v.deployment.id === deploymentId)?.deployment;
+    if (!deployment) return this.fail(404, 'Deployment not found');
+    if (deployment.status === 'cancelled') return this.delay(deployment);
+    if (!['queued', 'awaiting_approval', 'running'].includes(deployment.status) || deployment.currentStage === 'deploy') {
+      return this.fail(409, 'Deployment cannot be cancelled after deploy starts or after completion');
+    }
+    if (this.isScenarioApp(deployment.applicationId)) this.scenarioCancelled = true;
+    deployment.status = 'cancelled';
+    deployment.updatedAt = new Date(this.now()).toISOString();
+    return this.delay(deployment);
+  }
+
+  async rollbackDeployment(deploymentId: string): Promise<Deployment> {
+    const { deployment } = await this.getDeployment(deploymentId);
+    if (deployment.status !== 'succeeded' || !deployment.deploymentPerformed) return this.fail(409, 'Rollback requires a successfully deployed version');
+    const route = await this.getRouting(deployment.applicationId);
+    const views = this.isScenarioApp(deployment.applicationId) ? this.scenario.deployments : this.createdApp(deployment.applicationId)?.deployments;
+    const active = views?.find((view) => view.deployment.id === route.target.deploymentId)?.deployment;
+    if (!active || active.version <= deployment.version) return this.fail(409, 'Rollback target must be older than the active deployment');
+    if (views!.some((view) => ['queued', 'running', 'awaiting_approval'].includes(view.deployment.status))) return this.fail(409, 'Cancel or finish pending deployments before rollback');
+    return this.delay(this.pushDeployment(views!, deployment.applicationId, { source_revision: deployment.sourceRevision }, 'rollback', this.now()));
   }
 
   async getRouting(applicationId: string): Promise<RouteSnapshot> {
@@ -230,6 +283,17 @@ export class MockDataSource implements DataSource {
     return this.delay(route);
   }
 
+  async unassignApplicationAgent(id:string,agentId:string) {const app=await this.getApplication(id);app.agents=app.agents.filter(a=>a.id!==agentId);return app;}
+  async assignApplicationAgent(id: string, agentId: string) {
+    const app = await this.getApplication(id);
+    const agent = this.agents.find(a => a.id === agentId);
+    if (!agent || agent.status === 'revoked') throw new ApiError(404, 'Agent not found');
+    if (!app.agents.some(a => a.id === agentId)) app.agents.push(agent);
+    return app;
+  }
+  async changeRouting(_id: string, _targetId: string, _revision: number): Promise<RouteSnapshot> {
+    throw new ApiError(409, '실제 대상 전환은 실제 콘솔에서 실행하세요.');
+  }
   async getTargets(applicationId: string): Promise<RoutingTargetView[]> {
     this.tick();
     if (this.isScenarioApp(applicationId)) return this.delay(this.frame().targets);
@@ -237,6 +301,7 @@ export class MockDataSource implements DataSource {
     return this.fail(404, 'Application not found');
   }
 
+  async getAgentTunnel(_id:string):Promise<AgentTunnelStatus> {throw new ApiError(503,'실제 SSH 상태는 실제 콘솔에서 확인하세요.');}
   async getAgentStatus(agentId: string): Promise<AgentStatusResponse> {
     this.tick();
     const status = this.frame().agents[agentId];
@@ -313,6 +378,10 @@ export class MockDataSource implements DataSource {
 
   // ---------------------------------------------------------------- GitHub 연동 (in-memory)
 
+  async listApplicationCommits(id: string, page=1, _revision?: string): Promise<GithubCommitsPage> {
+    const app = await this.getApplication(id);
+    return {branch:app.application.defaultBranch??'main',page,hasMore:false,commits:[]};
+  }
   async getGithubConnection(): Promise<GithubConnection> {
     return this.delay(MOCK_GITHUB_CONNECTION);
   }

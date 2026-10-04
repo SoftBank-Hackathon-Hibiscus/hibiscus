@@ -1,3 +1,4 @@
+import { redactDeploymentOutput } from '../../infrastructure/command-diagnostics.js';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -151,8 +152,18 @@ export class SignStage implements StageRunner {
           artifacts: {},
           error: `Approval CLI failed with exit code ${approved.code ?? 'unknown'}`,
           summary: {
-            stdout: tail(approved.stdout),
-            stderr: tail(approved.stderr),
+            stdout: tail(
+              redactDeploymentOutput(
+                approved.stdout,
+                context.diagnosticSecrets ?? [],
+              ),
+            ),
+            stderr: tail(
+              redactDeploymentOutput(
+                approved.stderr,
+                context.diagnosticSecrets ?? [],
+              ),
+            ),
           },
         };
       }
@@ -187,7 +198,20 @@ export class SignStage implements StageRunner {
         error: result.timedOut
           ? 'Signer CLI timed out'
           : `Signer CLI failed or produced no result (exit code ${result.code ?? 'unknown'})`,
-        summary: { stdout: tail(result.stdout), stderr: tail(result.stderr) },
+        summary: {
+          stdout: tail(
+            redactDeploymentOutput(
+              result.stdout,
+              context.diagnosticSecrets ?? [],
+            ),
+          ),
+          stderr: tail(
+            redactDeploymentOutput(
+              result.stderr,
+              context.diagnosticSecrets ?? [],
+            ),
+          ),
+        },
       };
     }
     const signResult = JSON.parse(

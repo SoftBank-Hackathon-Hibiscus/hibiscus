@@ -43,6 +43,7 @@ export class DeploymentPaths {
 }
 
 export interface StageContext {
+  diagnosticSecrets?: string[];
   application: Application;
   deployment: Deployment;
   paths: DeploymentPaths;

@@ -3,6 +3,7 @@ import {
   CreateApplicationDto,
   IdParamDto,
   UpdateHealthCheckDto,
+  UpdateApplicationSettingsDto,
 } from './dto/application.dto.js';
 import { ApplicationService } from './application.service.js';
 
@@ -23,6 +24,14 @@ export class ApplicationController {
   @Get(':id')
   get(@Param() params: IdParamDto) {
     return this.service.get(params.id);
+  }
+
+  @Patch(':id/settings')
+  updateSettings(
+    @Param() params: IdParamDto,
+    @Body() input: UpdateApplicationSettingsDto,
+  ) {
+    return this.service.updateSettings(params.id, input);
   }
 
   @Patch(':id/health-check')

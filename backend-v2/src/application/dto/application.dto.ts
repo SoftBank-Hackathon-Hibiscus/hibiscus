@@ -3,6 +3,8 @@ import {
   ArrayMaxSize,
   IsArray,
   IsBoolean,
+  IsDefined,
+  ValidateIf,
   IsIn,
   IsInt,
   IsNotEmpty,
@@ -256,4 +258,33 @@ export class UpdateApplicationEnvironmentDto {
   @ValidateNested({ each: true })
   @Type(() => ApplicationEnvironmentVariableDto)
   environment: ApplicationEnvironmentVariableDto[];
+}
+
+export class SettingsEnvironmentVariableDto {
+  @Matches(/^[A-Z_][A-Z0-9_]{0,63}$/)
+  name: string;
+
+  /** Omitted value preserves an existing secret. Empty string explicitly replaces it. */
+  @ValidateIf((_object, value: unknown) => value !== undefined)
+  @IsString()
+  @MaxLength(4096)
+  value?: string;
+}
+export class UpdateApplicationSettingsDto {
+  @IsDefined()
+  @ValidateNested()
+  @Type(() => HealthCheckDto)
+  health_check: HealthCheckDto;
+
+  @IsArray()
+  @ArrayMaxSize(50)
+  @ValidateNested({ each: true })
+  @Type(() => SettingsEnvironmentVariableDto)
+  environment: SettingsEnvironmentVariableDto[];
+
+  @IsArray()
+  @ArrayMaxSize(50)
+  @ValidateNested({ each: true })
+  @Type(() => SettingsEnvironmentVariableDto)
+  test_environment: SettingsEnvironmentVariableDto[];
 }

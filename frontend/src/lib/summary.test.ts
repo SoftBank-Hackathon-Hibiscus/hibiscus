@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { StageExecution } from '../api/types';
 import { summarizeDeployment } from './summary';
-import { makeAllowView, makeDeployResult, makeStage, makeView } from '../test/fixtures';
+import { makeAllowView, makeDeployResult, makeDeployment, makeStage, makeView } from '../test/fixtures';
 
 const proofOf = (view: ReturnType<typeof makeView>, id: 'run_id' | 'source' | 'digest' | 'plan_hash') => summarizeDeployment(view, 'ko').proof.find((p) => p.id === id)!;
 
@@ -131,5 +131,15 @@ describe('summarizeDeployment: 배포 판정', () => {
     expect(s.tone).toBe('danger');
     expect(s.steps[2]?.result).toContain('진행하지 않았어요');
     expect(s.steps[3]?.result).toContain('진행하지 않았어요');
+  });
+});
+
+describe('취소 상태 표시', () => {
+  it('남은 단계를 취소로 표시하고 승인 대기 결론을 제거한다', () => {
+    const view = makeView({ deployment: makeDeployment({ status: 'cancelled', currentStage: 'sign', decision: 'needs_approval', deploymentPerformed: false }) });
+    const summary = summarizeDeployment(view, 'ko');
+    expect(summary.conclusion).toContain('배포를 취소했습니다');
+    expect(summary.tone).toBe('muted');
+    expect(summary.steps.find((step) => step.name === 'deploy')?.result).toBe('취소됨');
   });
 });

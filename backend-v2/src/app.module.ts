@@ -1,3 +1,4 @@
+import { ConsoleModule } from './observability/console.module.js';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { AppController } from './app.controller.js';
@@ -35,6 +36,7 @@ import { HealthModule } from './health/health.module.js';
     SshTunnelModule,
     GatewayModule,
     HealthModule,
+    ConsoleModule,
   ],
   controllers: [AppController],
   providers: [
